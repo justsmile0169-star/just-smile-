@@ -18,6 +18,8 @@ export interface UserProfile {
   discountPercent?: number; // per-doctor custom discount (applied to invoice level)
   commercialName?: string; // assigned sales representative
   allowCreditPayment?: boolean; // if true, doctor can pay by credit (20 days debt). if false, only cash payment allowed
+  password?: string; // for staff accounts login
+  lastLoginAt?: string; // track last login time
 }
 
 export interface Product {
@@ -70,6 +72,8 @@ export interface Order {
   deadlineDate: string; // createdAt + 20 days
   paymentMethod?: 'credit' | 'cash'; // 'credit' = 20-day debt, 'cash' = cash on delivery immediate
   notes?: string;
+  processedBy?: string; // uid of staff member who processed this order
+  processedByName?: string; // name of staff member who processed this order
 }
 
 export interface Payment {

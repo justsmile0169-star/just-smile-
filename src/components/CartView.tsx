@@ -10,6 +10,7 @@ import { useAppDialog } from '../context/AppDialogContext';
 interface CartViewProps {
   cart: CartItem[];
   user: UserProfile | null;
+  currentUser: UserProfile | null;
   userOrders: Order[]; // To check blocking debt rules
   lang: Language;
   promotions?: Promotion[];
@@ -23,6 +24,7 @@ interface CartViewProps {
 export default function CartView({
   cart,
   user,
+  currentUser,
   userOrders,
   lang,
   promotions = [],
@@ -138,7 +140,9 @@ export default function CartView({
         deadlineDate: deadlineDate.toISOString(),
         paymentMethod: paymentMethod,
         commercialName: user.commercialName || 'Directe',
-        notes: notes.trim() || ""
+        notes: notes.trim() || "",
+        processedBy: currentUser?.uid,
+        processedByName: currentUser?.name
       };
 
       // 1. Write the order

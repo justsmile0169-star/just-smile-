@@ -6,7 +6,7 @@ import { Language } from '../../translations';
 import { useAppDialog } from '../../context/AppDialogContext';
 import { logActivity } from '../../utils/activityLogger';
 import { getRoleLabel } from '../../utils/permissions';
-import { Shield, UserCog, Plus, X } from 'lucide-react';
+import { Shield, UserCog, Plus, X, Key } from 'lucide-react';
 
 interface StaffManagerProps {
   lang: Language;
@@ -23,7 +23,11 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
   const [newStaffRole, setNewStaffRole] = useState<UserRole>('cashier');
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [selectedUserForPassword, setSelectedUserForPassword] = useState<UserProfile | null>(null);
+  const [newPassword, setNewPassword] = useState('');
 
   const staffUsers = usersList.filter((u) => u.role !== 'doctor');
 
@@ -48,7 +52,7 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
 
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStaffName || !newStaffEmail || !newStaffPhone) {
+    if (!newStaffName || !newStaffEmail || !newStaffPhone || !newStaffPassword) {
       alert(lang === 'fr' ? 'Veuillez remplir tous les champs.' : 'يرجى ملء جميع الحقول.', 'error');
       return;
     }
@@ -61,22 +65,24 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
         name: newStaffName.trim(),
         email: newStaffEmail.trim(),
         phone: newStaffPhone.trim(),
+        password: newStaffPassword.trim(),
         clinicName: 'Staff',
         location: 'Main Office',
         role: newStaffRole,
         status: 'approved',
         createdAt: new Date().toISOString()
       });
-      
+
       await logActivity(currentUser, 'create_staff', 'user', `${newStaffName} as ${newStaffRole}`, newRef.id);
       alert(lang === 'fr' ? 'Compte créé avec succès !' : 'تم إنشاء الحساب بنجاح!', 'success');
-      
+
       setNewStaffName('');
       setNewStaffEmail('');
       setNewStaffPhone('');
+      setNewStaffPassword('');
       setNewStaffRole('cashier');
       setShowAddForm(false);
-      
+
       // Trigger refresh by calling parent's onRefreshData if available
       window.location.reload();
     } catch (err) {
@@ -89,20 +95,45 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
 
   const handleDeleteStaff = async (user: UserProfile) => {
     if (!(await confirm(
-      lang === 'fr' 
-        ? `Supprimer le compte de ${user.name} ?` 
+      lang === 'fr'
+        ? `Supprimer le compte de ${user.name} ?`
         : `حذف حساب ${user.name}؟`
     ))) return;
 
     setLoading(user.uid);
     try {
-      await updateDoc(doc(db, 'users', user.uid), { 
+      await updateDoc(doc(db, 'users', user.uid), {
         status: 'rejected',
         role: 'doctor' // Change role to disable staff access
       });
       await logActivity(currentUser, 'delete_staff', 'user', user.name, user.uid);
       alert(lang === 'fr' ? 'Compte supprimé.' : 'تم حذف الحساب.', 'success');
       window.location.reload();
+    } catch (err) {
+      console.error(err);
+      alert(lang === 'fr' ? 'Erreur.' : 'خطأ.', 'error');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUserForPassword || !newPassword) {
+      alert(lang === 'fr' ? 'Veuillez entrer un mot de passe.' : 'يرجى إدخال كلمة السر.', 'error');
+      return;
+    }
+
+    setLoading(selectedUserForPassword.uid);
+    try {
+      await updateDoc(doc(db, 'users', selectedUserForPassword.uid), {
+        password: newPassword.trim()
+      });
+      await logActivity(currentUser, 'change_password', 'user', selectedUserForPassword.name, selectedUserForPassword.uid);
+      alert(lang === 'fr' ? 'Mot de passe mis à jour.' : 'تم تحديث كلمة السر.', 'success');
+      setNewPassword('');
+      setShowPasswordModal(false);
+      setSelectedUserForPassword(null);
     } catch (err) {
       console.error(err);
       alert(lang === 'fr' ? 'Erreur.' : 'خطأ.', 'error');
@@ -176,6 +207,16 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
               />
             </div>
             <div>
+              <label className="text-xs font-bold text-slate-500 block mb-1">{lang === 'fr' ? 'Mot de passe' : 'كلمة السر'}</label>
+              <input
+                type="password"
+                value={newStaffPassword}
+                onChange={(e) => setNewStaffPassword(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold"
+                required
+              />
+            </div>
+            <div>
               <label className="text-xs font-bold text-slate-500 block mb-1">{lang === 'fr' ? 'Rôle' : 'الدور'}</label>
               <select
                 value={newStaffRole}
@@ -236,6 +277,17 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
                     <option key={r} value={r}>{getRoleLabel(r, lang)}</option>
                   ))}
                 </select>
+                <button
+                  onClick={() => {
+                    setSelectedUserForPassword(user);
+                    setShowPasswordModal(true);
+                  }}
+                  disabled={loading === user.uid}
+                  className="p-1.5 text-slate-400 hover:text-brand-cyan hover:bg-brand-cyan/10 rounded-lg transition-colors disabled:opacity-50"
+                  title={lang === 'fr' ? 'Changer mot de passe' : 'تغيير كلمة السر'}
+                >
+                  <Key size={14} />
+                </button>
                 {user.uid !== currentUser.uid && (
                   <button
                     onClick={() => handleDeleteStaff(user)}
@@ -249,6 +301,53 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {showPasswordModal && selectedUserForPassword && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <Key size={16} className="text-brand-cyan" />
+                {lang === 'fr' ? 'Changer mot de passe' : 'تغيير كلمة السر'}
+              </h4>
+              <button onClick={() => setShowPasswordModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">
+              {lang === 'fr' ? `Pour ${selectedUserForPassword.name}` : `لـ ${selectedUserForPassword.name}`}
+            </p>
+            <form onSubmit={handleChangePassword} className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">{lang === 'fr' ? 'Nouveau mot de passe' : 'كلمة السر الجديدة'}</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold"
+                  required
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="flex-1 bg-slate-100 text-slate-700 font-bold text-xs py-2 rounded-xl hover:bg-slate-200 transition-all"
+                >
+                  {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading === selectedUserForPassword.uid}
+                  className="flex-1 bg-brand-cyan text-white font-bold text-xs py-2 rounded-xl hover:bg-brand-cyan/90 transition-all disabled:opacity-50"
+                >
+                  {loading === selectedUserForPassword.uid ? (lang === 'fr' ? 'Mise à jour...' : 'جاري التحديث...') : (lang === 'fr' ? 'Mettre à jour' : 'تحديث')}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

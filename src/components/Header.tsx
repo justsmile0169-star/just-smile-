@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Language, getTranslation } from '../translations';
 import LanguageSelector from './LanguageSelector';
-import { ShoppingCart, Heart, Bell, User, LogOut, Shield, Stethoscope, LogIn, Sun, Moon, Menu, X } from 'lucide-react';
+import { ShoppingCart, Heart, Bell, User, LogOut, Shield, Stethoscope, LogIn, Sun, Moon, Menu, X, UserCircle } from 'lucide-react';
 import { UserProfile } from '../types';
 import { getLogoUrl } from '../constants/brand';
 
@@ -41,6 +41,17 @@ export default function Header({
 
   return (
     <header className="sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 shadow-xs transition-colors duration-300" dir={isRtl ? 'rtl' : 'ltr'}>
+      {/* Active User Banner */}
+      {user && (
+        <div className="bg-brand-cyan/5 border-b border-brand-cyan/10 px-4 py-1.5">
+          <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-xs font-semibold text-brand-cyan">
+            <UserCircle size={14} />
+            <span>
+              {lang === 'fr' ? 'Connecté en tant que' : 'مسجل الدخول كـ'}: {user.name} ({user.role})
+            </span>
+          </div>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-4 md:px-6">
         <div className="flex items-center justify-between h-16 md:h-20 gap-4">
 

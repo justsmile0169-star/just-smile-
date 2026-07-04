@@ -694,6 +694,7 @@ export default function App() {
               <CartView
                 cart={cart}
                 user={currentUser}
+                currentUser={currentUser}
                 userOrders={userOrders}
                 lang={lang}
                 promotions={promotionsList}
