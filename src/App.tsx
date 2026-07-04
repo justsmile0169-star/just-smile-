@@ -575,7 +575,10 @@ export default function App() {
   // Logout routine
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      // Try to sign out from Firebase Auth (for doctors)
+      await signOut(auth).catch(() => {
+        // Ignore error if not signed in (staff users don't have Firebase Auth)
+      });
       setCurrentUser(null);
       setActiveTab('browse');
     } catch (err) {

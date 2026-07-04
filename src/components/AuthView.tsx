@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
 import { UserProfile } from '../types';
-import { User, Phone, Mail, Lock, Building, MapPin, AlertCircle, CheckCircle } from 'lucide-react';
+import { signInStaff } from '../utils/staffAuth';
+import { User, Phone, Mail, Lock, Building, MapPin, AlertCircle, CheckCircle, Shield } from 'lucide-react';
 
 interface AuthViewProps {
   lang: Language;
@@ -38,6 +39,20 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
     try {
       if (isLogin) {
         // --- LOGIN FLOW ---
+        
+        // First try staff login (Firestore-based)
+        const staffProfile = await signInStaff(email.trim(), password);
+        if (staffProfile) {
+          // Update last login time
+          await updateDoc(doc(db, 'users', staffProfile.uid), {
+            lastLoginAt: new Date().toISOString()
+          });
+          onAuthSuccess(staffProfile);
+          setLoading(false);
+          return;
+        }
+
+        // If staff login fails, try Firebase Auth for doctors
         const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
         const userDocRef = doc(db, 'users', userCredential.user.uid);
         const userDoc = await getDoc(userDocRef);
