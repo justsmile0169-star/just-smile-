@@ -36,13 +36,25 @@ service cloud.firestore {
     
     // User Profiles
     match /users/{userId} {
-      // Allow read for login purposes (staff authentication)
-      allow read, write: if true;
+      // Allow read for staff authentication and profile viewing
+      allow read: if true;
+      // Allow create for doctors (self-registration) and admins (staff creation)
+      allow create: if isAuthenticated() && isOwner(userId) && 
+                      request.resource.data.role == 'doctor' && 
+                      request.resource.data.status == 'pending';
+      // Allow admin to create staff accounts
+      allow create: if isAdmin() && 
+                      request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];
+      // Allow update for password changes and profile updates
+      allow update: if isAdmin() || (isOwner(userId) && 
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['password', 'lastLoginAt']));
+      // Allow delete for admins only
+      allow delete: if isAdmin();
     }
     
-    // Allow list queries for staff authentication
+    // Allow list queries for staff authentication (email lookup only)
     match /users {
-      allow list, get: if true;
+      allow list: if true;
     }
     
     // Products
@@ -59,17 +71,24 @@ service cloud.firestore {
     
     // Orders
     match /orders/{orderId} {
-      allow read, write: if true;
+      allow read: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.status == resource.data.status);
+      allow delete: if isAdmin();
     }
     
     // Payments
     match /payments/{paymentId} {
-      allow read, write: if true;
+      allow read: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow write: if isStaff();
     }
     
     // Notifications
     match /notifications/{notificationId} {
-      allow read, write: if true;
+      allow read: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isStaff() || (isAuthenticated() && (request.resource.data.userId == request.auth.uid || request.resource.data.userId == 'admin'));
+      allow update: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']));
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
     }
     
     // Favorites
