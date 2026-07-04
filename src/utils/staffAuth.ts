@@ -9,41 +9,54 @@ import { comparePassword } from './crypto';
  */
 export async function signInStaff(email: string, password: string): Promise<UserProfile | null> {
   try {
+    console.log('[staffAuth] Attempting staff sign in with email:', email);
+    
     const usersRef = collection(db, 'users');
     const q = query(
       usersRef,
       where('email', '==', email)
     );
     
+    console.log('[staffAuth] Executing query...');
     const querySnapshot = await getDocs(q);
+    console.log('[staffAuth] Query completed, found', querySnapshot.size, 'documents');
     
     if (querySnapshot.empty) {
+      console.log('[staffAuth] No user found with matching email');
       return null;
     }
     
     // Check all users with matching email (should be only one)
     for (const userDoc of querySnapshot.docs) {
       const userData = userDoc.data() as UserProfile;
+      console.log('[staffAuth] Checking user:', userData.name, 'role:', userData.role, 'status:', userData.status);
       
       // Check if user is staff (not doctor)
       if (userData.role === 'doctor') {
+        console.log('[staffAuth] User is a doctor, skipping');
         continue;
       }
       
       // Check if user is approved
       if (userData.status !== 'approved') {
+        console.log('[staffAuth] User status is not approved:', userData.status);
         continue;
       }
       
       // Compare password with hashed password
+      console.log('[staffAuth] Comparing password...');
       if (userData.password && await comparePassword(password, userData.password)) {
+        console.log('[staffAuth] Password match! User authenticated:', userData.name);
         return userData;
+      } else {
+        console.log('[staffAuth] Password does not match');
       }
     }
     
+    console.log('[staffAuth] No matching staff user found');
     return null;
   } catch (error) {
-    console.error('Error signing in staff:', error);
+    console.error('[staffAuth] Error signing in staff:', error);
     return null;
   }
 }
