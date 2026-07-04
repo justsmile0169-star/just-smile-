@@ -36,8 +36,8 @@ service cloud.firestore {
     
     // User Profiles
     match /users/{userId} {
-      // Allow read for staff authentication and profile viewing
-      allow read: if true;
+      // Allow read for authenticated users (own profile only) or staff
+      allow read: if isOwner(userId) || isStaff();
       // Allow create for doctors (self-registration) and admins (staff creation)
       allow create: if isAuthenticated() && isOwner(userId) && 
                       request.resource.data.role == 'doctor' && 
@@ -52,9 +52,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
-    // Allow list queries for staff authentication (email lookup only)
+    // Allow list queries for staff authentication (email lookup only) - RESTRICTED
     match /users {
-      allow list: if true;
+      allow list: if false; // DISABLED FOR SECURITY
     }
     
     // Products
