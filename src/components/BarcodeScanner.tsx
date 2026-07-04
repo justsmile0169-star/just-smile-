@@ -71,6 +71,36 @@ export default function BarcodeScanner({
     [products]
   );
 
+  // Store products in ref to avoid re-running useEffect
+  const productsRef = useRef(products);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
+  const processCodeStable = useCallback((code: string) => {
+    const normalized = code.trim();
+    if (!normalized) return;
+
+    setScannedCode(normalized);
+    setError('');
+
+    const product = findProductByCode(productsRef.current, normalized);
+    if (product) {
+      setFoundProduct(product);
+      setQuantity(1);
+      setPhase('found');
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      setScanning(false);
+    } else {
+      setFoundProduct(null);
+      setPhase('not_found');
+    }
+  }, []);
+
   useEffect(() => {
     if (phase !== 'scan') return;
 
@@ -110,7 +140,7 @@ export default function BarcodeScanner({
           try {
             const barcodes = await detector.detect(videoRef.current);
             if (barcodes.length > 0) {
-              processCode(barcodes[0].rawValue);
+              processCodeStable(barcodes[0].rawValue);
             }
           } catch {
             /* frame skip */
@@ -128,7 +158,7 @@ export default function BarcodeScanner({
       if (intervalRef.current) clearInterval(intervalRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
-  }, [phase, processCode, canUseScanner, lang]);
+  }, [phase, canUseScanner, processCodeStable]);
 
   const resetScan = () => {
     setPhase('scan');
