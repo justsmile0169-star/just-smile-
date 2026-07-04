@@ -60,7 +60,7 @@ export function findProductByCode(products: Product[], code: string): Product | 
   );
 }
 
-/** Soft delete product by setting isDeleted flag instead of removing from database */
+/** Fully delete product from database by removing all matching documents */
 export async function deleteProductFully(product: Product): Promise<number> {
   const refIds = new Set<string>([product.id]);
 
@@ -85,11 +85,11 @@ export async function deleteProductFully(product: Product): Promise<number> {
   );
   byName.forEach((d) => refIds.add(d.id));
 
-  // Soft delete by setting isDeleted flag instead of deleting documents
+  // Hard delete by actually removing documents from database
   for (let i = 0; i < Array.from(refIds).length; i += FIRESTORE_BATCH_LIMIT) {
     const batch = writeBatch(db);
     Array.from(refIds).slice(i, i + FIRESTORE_BATCH_LIMIT).forEach((id) => {
-      batch.update(doc(db, 'products', id), { isDeleted: true });
+      batch.delete(doc(db, 'products', id));
     });
     await batch.commit();
   }

@@ -18,11 +18,11 @@ import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { hasPermission } from '../utils/permissions';
 import { logActivity } from '../utils/activityLogger';
 import { deleteProductFully } from '../utils/productFirestore';
-import { 
-  Users, DollarSign, Package, Tag, AlertTriangle, Calendar, 
+import {
+  Users, DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
-  History, Shield, Cloud, ImageIcon
+  History, Shield, Cloud, ImageIcon, Search
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -270,6 +270,19 @@ export default function AdminDashboard({
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+
+  // Filter products based on search query
+  const filteredProducts = productsList.filter((product) => {
+    const query = productSearchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      product.name.toLowerCase().includes(query) ||
+      product.category.toLowerCase().includes(query) ||
+      (product.barcode && product.barcode.toLowerCase().includes(query)) ||
+      (product.description && product.description.toLowerCase().includes(query))
+    );
+  });
   
   // Product Form states
   const [pName, setPName] = useState('');
@@ -496,10 +509,10 @@ export default function AdminDashboard({
   };
 
   const toggleAllProducts = () => {
-    if (selectedProducts.size === productsList.length) {
+    if (selectedProducts.size === filteredProducts.length) {
       setSelectedProducts(new Set());
     } else {
-      setSelectedProducts(new Set(productsList.map(p => p.id)));
+      setSelectedProducts(new Set(filteredProducts.map(p => p.id)));
     }
   };
 
@@ -1202,7 +1215,17 @@ export default function AdminDashboard({
                   {getTranslation(lang, 'inventory')}
                 </h3>
               </div>
-              <div className="flex flex-wrap gap-2.5">
+              <div className="flex flex-wrap gap-2.5 items-center">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder={lang === 'fr' ? 'Rechercher...' : 'بحث...'}
+                    value={productSearchQuery}
+                    onChange={(e) => setProductSearchQuery(e.target.value)}
+                    className="pl-9 pr-3 py-2 text-xs font-bold border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-cyan/20 focus:border-brand-cyan w-48 md:w-64"
+                  />
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                </div>
                 <button
                   onClick={() => setShowImportModal(true)}
                   className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 px-3.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs border border-slate-200"
@@ -1237,7 +1260,7 @@ export default function AdminDashboard({
                     <th className="pb-3 w-10">
                       <input
                         type="checkbox"
-                        checked={selectedProducts.size === productsList.length && productsList.length > 0}
+                        checked={selectedProducts.size === filteredProducts.length && filteredProducts.length > 0}
                         onChange={toggleAllProducts}
                         className="w-4 h-4 rounded border-slate-300 text-brand-cyan focus:ring-brand-cyan"
                       />
@@ -1252,7 +1275,7 @@ export default function AdminDashboard({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {productsList.map((p) => {
+                  {filteredProducts.map((p) => {
                     const isLow = p.stock <= (p.lowStockAlert || 5);
                     return (
                       <tr key={p.id} className={`hover:bg-slate-50/50 transition-colors ${selectedProducts.has(p.id) ? 'bg-brand-cyan/5' : ''}`}>
