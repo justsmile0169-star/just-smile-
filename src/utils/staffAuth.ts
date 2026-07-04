@@ -1,6 +1,7 @@
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { UserProfile } from '../types';
+import { comparePassword } from './crypto';
 
 /**
  * Sign in staff member using email and password from Firestore
@@ -11,8 +12,7 @@ export async function signInStaff(email: string, password: string): Promise<User
     const usersRef = collection(db, 'users');
     const q = query(
       usersRef,
-      where('email', '==', email),
-      where('password', '==', password)
+      where('email', '==', email)
     );
     
     const querySnapshot = await getDocs(q);
@@ -21,20 +21,27 @@ export async function signInStaff(email: string, password: string): Promise<User
       return null;
     }
     
-    const userDoc = querySnapshot.docs[0];
-    const userData = userDoc.data() as UserProfile;
-    
-    // Check if user is staff (not doctor)
-    if (userData.role === 'doctor') {
-      return null;
+    // Check all users with matching email (should be only one)
+    for (const userDoc of querySnapshot.docs) {
+      const userData = userDoc.data() as UserProfile;
+      
+      // Check if user is staff (not doctor)
+      if (userData.role === 'doctor') {
+        continue;
+      }
+      
+      // Check if user is approved
+      if (userData.status !== 'approved') {
+        continue;
+      }
+      
+      // Compare password with hashed password
+      if (userData.password && await comparePassword(password, userData.password)) {
+        return userData;
+      }
     }
     
-    // Check if user is approved
-    if (userData.status !== 'approved') {
-      return null;
-    }
-    
-    return userData;
+    return null;
   } catch (error) {
     console.error('Error signing in staff:', error);
     return null;

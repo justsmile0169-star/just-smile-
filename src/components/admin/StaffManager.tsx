@@ -6,6 +6,7 @@ import { Language } from '../../translations';
 import { useAppDialog } from '../../context/AppDialogContext';
 import { logActivity } from '../../utils/activityLogger';
 import { getRoleLabel } from '../../utils/permissions';
+import { hashPassword } from '../../utils/crypto';
 import { Shield, UserCog, Plus, X, Key } from 'lucide-react';
 
 interface StaffManagerProps {
@@ -59,13 +60,16 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
 
     setLoading('add');
     try {
+      // Hash the password before saving
+      const hashedPassword = await hashPassword(newStaffPassword.trim());
+      
       const newRef = doc(collection(db, 'users'));
       await setDoc(newRef, {
         uid: newRef.id,
         name: newStaffName.trim(),
         email: newStaffEmail.trim(),
         phone: newStaffPhone.trim(),
-        password: newStaffPassword.trim(),
+        password: hashedPassword,
         clinicName: 'Staff',
         location: 'Main Office',
         role: newStaffRole,
@@ -126,8 +130,11 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
 
     setLoading(selectedUserForPassword.uid);
     try {
+      // Hash the new password before saving
+      const hashedPassword = await hashPassword(newPassword.trim());
+      
       await updateDoc(doc(db, 'users', selectedUserForPassword.uid), {
-        password: newPassword.trim()
+        password: hashedPassword
       });
       await logActivity(currentUser, 'change_password', 'user', selectedUserForPassword.name, selectedUserForPassword.uid);
       alert(lang === 'fr' ? 'Mot de passe mis à jour.' : 'تم تحديث كلمة السر.', 'success');
