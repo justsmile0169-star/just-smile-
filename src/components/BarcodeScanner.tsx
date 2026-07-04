@@ -107,46 +107,70 @@ export default function BarcodeScanner({
     let cancelled = false;
 
     const startCamera = async () => {
+      // Check if BarcodeDetector is supported
       if (!('BarcodeDetector' in window)) {
-        setScanning(false);
-        return;
+        console.log('BarcodeDetector not supported, using camera without scanning');
+        // Still allow camera to work even without BarcodeDetector
       }
+
       if (!canUseScanner) {
         setError(lang === 'fr' ? 'Permission refusée pour le scanner.' : 'تم رفض صلاحية استخدام الماسح.');
         setScanning(false);
         return;
       }
+
       try {
+        console.log('Requesting camera access...');
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' }
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
         });
+        console.log('Camera stream obtained');
+
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
+
         streamRef.current = stream;
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
+          console.log('Video playing');
         }
+
         setScanning(true);
 
-        const detector = new (window as any).BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code']
-        });
-
-        intervalRef.current = window.setInterval(async () => {
-          if (!videoRef.current) return;
+        // Only start barcode detection if BarcodeDetector is supported
+        if ('BarcodeDetector' in window) {
           try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0) {
-              processCodeStable(barcodes[0].rawValue);
-            }
-          } catch {
-            /* frame skip */
+            const detector = new (window as any).BarcodeDetector({
+              formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code']
+            });
+
+            intervalRef.current = window.setInterval(async () => {
+              if (!videoRef.current) return;
+              try {
+                const barcodes = await detector.detect(videoRef.current);
+                if (barcodes.length > 0) {
+                  processCodeStable(barcodes[0].rawValue);
+                }
+              } catch {
+                /* frame skip */
+              }
+            }, 500);
+          } catch (detectorError) {
+            console.error('BarcodeDetector error:', detectorError);
+            setError(lang === 'fr' ? 'Erreur du détecteur de codes-barres.' : 'خطأ في ماسح الباركود.');
           }
-        }, 500);
-      } catch {
+        }
+      } catch (err) {
+        console.error('Camera error:', err);
+        setError(lang === 'fr' ? 'Erreur d\'accès à la caméra. Vérifiez les permissions.' : 'خطأ في الوصول للكاميرا. تحقق من الصلاحيات.');
         setScanning(false);
       }
     };
@@ -158,7 +182,7 @@ export default function BarcodeScanner({
       if (intervalRef.current) clearInterval(intervalRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
-  }, [phase, canUseScanner, processCodeStable]);
+  }, [phase, canUseScanner, processCodeStable, lang]);
 
   const resetScan = () => {
     setPhase('scan');
