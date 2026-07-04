@@ -36,7 +36,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
 export function hasPermission(user: UserProfile | null, permission: Permission): boolean {
   if (!user) return false;
-  if (user.role === 'doctor') return permission === 'sell' && user.status === 'approved';
+  if (user.role === 'doctor') {
+    if (permission === 'sell') return user.status === 'approved';
+    if (permission === 'use_scanner') return user.status === 'approved';
+    return false;
+  }
   return ROLE_PERMISSIONS[user.role]?.includes(permission) ?? false;
 }
 
