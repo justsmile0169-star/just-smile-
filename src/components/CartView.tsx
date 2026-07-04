@@ -36,7 +36,7 @@ export default function CartView({
   const [loading, setLoading] = useState(false);
   const [notes, setNotes] = useState('');
   const [success, setSuccess] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'credit' | 'cash'>('credit');
+  const [paymentMethod, setPaymentMethod] = useState<'credit' | 'cash'>(user?.allowCreditPayment ? 'credit' : 'cash');
 
   const isRtl = lang === 'ar';
 
@@ -385,31 +385,33 @@ export default function CartView({
                   {lang === 'fr' ? 'Mode de paiement' : 'طريقة الدفع والسداد'}
                 </label>
                 <div className="grid grid-cols-1 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('credit')}
-                    className={`p-3.5 rounded-2xl border text-left rtl:text-right flex items-start gap-3 cursor-pointer transition-all ${
-                      paymentMethod === 'credit'
-                        ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark dark:bg-brand-cyan/10'
-                        : 'border-slate-100 bg-slate-50/50 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900/50'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center mt-1 shrink-0 ${
-                      paymentMethod === 'credit' ? 'border-brand-cyan' : 'border-slate-300 dark:border-slate-600'
-                    }`}>
-                      {paymentMethod === 'credit' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
-                    </div>
-                    <div className="text-xs space-y-0.5">
-                      <p className="font-extrabold text-slate-800 dark:text-slate-200">
-                        {lang === 'fr' ? 'Paiement Différé (Crédit 20 jours)' : 'الدفع الآجل (بالدين خلال 20 يومًا)'}
-                      </p>
-                      <p className="text-slate-400">
-                        {lang === 'fr'
-                          ? 'Idéal pour votre trésorerie. Crée une dette payable sous 20 jours.'
-                          : 'مثالي لإدارة التدفق النقدي للعيادة. يتم سداده خلال 20 يومًا.'}
-                      </p>
-                    </div>
-                  </button>
+                  {user?.allowCreditPayment !== false && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('credit')}
+                      className={`p-3.5 rounded-2xl border text-left rtl:text-right flex items-start gap-3 cursor-pointer transition-all ${
+                        paymentMethod === 'credit'
+                          ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark dark:bg-brand-cyan/10'
+                          : 'border-slate-100 bg-slate-50/50 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900/50'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center mt-1 shrink-0 ${
+                        paymentMethod === 'credit' ? 'border-brand-cyan' : 'border-slate-300 dark:border-slate-600'
+                      }`}>
+                        {paymentMethod === 'credit' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
+                      </div>
+                      <div className="text-xs space-y-0.5">
+                        <p className="font-extrabold text-slate-800 dark:text-slate-200">
+                          {lang === 'fr' ? 'Paiement Différé (Crédit 20 jours)' : 'الدفع الآجل (بالدين خلال 20 يومًا)'}
+                        </p>
+                        <p className="text-slate-400">
+                          {lang === 'fr'
+                            ? 'Idéal pour votre trésorerie. Crée une dette payable sous 20 jours.'
+                            : 'مثالي لإدارة التدفق النقدي للعيادة. يتم سداده خلال 20 يومًا.'}
+                        </p>
+                      </div>
+                    </button>
+                  )}
 
                   <button
                     type="button"

@@ -38,6 +38,7 @@ export default function BarcodeScanner({
   const intervalRef = useRef<number | null>(null);
   const canManageInventory = hasPermission(user, 'manage_inventory');
   const canSell = hasPermission(user, 'sell');
+  const canUseScanner = hasPermission(user, 'use_scanner');
 
   const formatPrice = (n: number) =>
     new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(n) +
@@ -77,6 +78,11 @@ export default function BarcodeScanner({
 
     const startCamera = async () => {
       if (!('BarcodeDetector' in window)) {
+        setScanning(false);
+        return;
+      }
+      if (!canUseScanner) {
+        setError(lang === 'fr' ? 'Permission refusée pour le scanner.' : 'تم رفض صلاحية استخدام الماسح.');
         setScanning(false);
         return;
       }
@@ -122,7 +128,7 @@ export default function BarcodeScanner({
       if (intervalRef.current) clearInterval(intervalRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
-  }, [phase, processCode]);
+  }, [phase, processCode, canUseScanner, lang]);
 
   const resetScan = () => {
     setPhase('scan');

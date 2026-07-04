@@ -13,24 +13,25 @@ export type Permission =
   | 'view_activity_logs'
   | 'manage_backup'
   | 'sell'
-  | 'view_client_situation';
+  | 'view_client_situation'
+  | 'use_scanner';
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   admin: [
     'view_analytics', 'manage_inventory', 'manage_promotions', 'manage_expenses',
     'view_expenses', 'manage_payments', 'edit_invoices', 'view_reports', 'manage_staff',
-    'view_activity_logs', 'manage_backup', 'sell', 'view_client_situation'
+    'view_activity_logs', 'manage_backup', 'sell', 'view_client_situation', 'use_scanner'
   ],
   manager: [
     'view_analytics', 'manage_inventory', 'manage_promotions', 'manage_expenses',
-    'view_expenses', 'manage_payments', 'view_reports', 'view_activity_logs', 'sell', 'view_client_situation'
+    'view_expenses', 'manage_payments', 'view_reports', 'view_activity_logs', 'sell', 'view_client_situation', 'use_scanner'
   ],
   accountant: [
     'view_expenses', 'manage_expenses', 'manage_payments', 'edit_invoices',
     'view_reports', 'view_activity_logs', 'view_client_situation'
   ],
-  cashier: ['sell', 'manage_payments'],
-  doctor: ['sell']
+  cashier: ['sell', 'manage_payments', 'use_scanner'],
+  doctor: ['sell', 'use_scanner']
 };
 
 export function hasPermission(user: UserProfile | null, permission: Permission): boolean {

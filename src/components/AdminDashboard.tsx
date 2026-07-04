@@ -269,6 +269,7 @@ export default function AdminDashboard({
   // --- 3. Product Inventory State ---
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   
   // Product Form states
   const [pName, setPName] = useState('');
@@ -448,10 +449,65 @@ export default function AdminDashboard({
     }
   };
 
+  const handleDeleteMultipleProducts = async () => {
+    if (selectedProducts.size === 0) return;
+    
+    if (!(await confirm(
+      lang === 'fr'
+        ? `Supprimer ${selectedProducts.size} produit(s) ? Cette action est irréversible.`
+        : `حذف ${selectedProducts.size} منتج(ات)؟ لا يمكن التراجع عن هذا الإجراء.`
+    ))) return;
+
+    setLoading(true);
+    try {
+      let deletedCount = 0;
+      for (const productId of selectedProducts) {
+        const product = productsList.find(p => p.id === productId);
+        if (product) {
+          const count = await deleteProductFully(product);
+          deletedCount += count;
+        }
+      }
+      await logActivity(currentUser, 'delete_products', 'product', `${selectedProducts.size} produits (${deletedCount} docs)`, Array.from(selectedProducts).join(','));
+      alert(
+        lang === 'fr'
+          ? `${selectedProducts.size} produit(s) supprimé(s) de la base de données.`
+          : `تم حذف ${selectedProducts.size} منتج(ات) من قاعدة البيانات.`,
+        'success'
+      );
+      setSelectedProducts(new Set());
+      onRefreshData();
+    } catch (err) {
+      console.error(err);
+      alert(lang === 'fr' ? 'Erreur lors de la suppression.' : 'حدث خطأ أثناء الحذف.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleProductSelection = (productId: string) => {
+    const newSelected = new Set(selectedProducts);
+    if (newSelected.has(productId)) {
+      newSelected.delete(productId);
+    } else {
+      newSelected.add(productId);
+    }
+    setSelectedProducts(newSelected);
+  };
+
+  const toggleAllProducts = () => {
+    if (selectedProducts.size === productsList.length) {
+      setSelectedProducts(new Set());
+    } else {
+      setSelectedProducts(new Set(productsList.map(p => p.id)));
+    }
+  };
+
   // --- 4. Special Custom Doctor Discounts ---
   const [selectedDoctorForDiscount, setSelectedDoctorForDiscount] = useState<UserProfile | null>(null);
   const [doctorDiscountPercent, setDoctorDiscountPercent] = useState<number>(0);
   const [doctorCommercial, setDoctorCommercial] = useState('');
+  const [doctorAllowCredit, setDoctorAllowCredit] = useState<boolean>(true);
 
   const handleUpdateDoctorDiscount = async () => {
     if (!selectedDoctorForDiscount) return;
@@ -459,12 +515,35 @@ export default function AdminDashboard({
     try {
       await updateDoc(doc(db, 'users', selectedDoctorForDiscount.uid), {
         discountPercent: doctorDiscountPercent,
-        commercialName: doctorCommercial.trim() || undefined
+        commercialName: doctorCommercial.trim() || undefined,
+        allowCreditPayment: doctorAllowCredit
       });
-      alert(lang === 'fr' ? 'Remise et commercial mis à jour !' : 'تم تطبيق التخفيض وتعيين المندوب!', 'success');
+      alert(lang === 'fr' ? 'Remise, commercial et mode de paiement mis à jour !' : 'تم تطبيق التخفيض والمندوب وطريقة الدفع!', 'success');
       setSelectedDoctorForDiscount(null);
       setDoctorDiscountPercent(0);
       setDoctorCommercial('');
+      setDoctorAllowCredit(true);
+      onRefreshData();
+    } catch (err) {
+      console.error(err);
+      alert('Erreur.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleDoctorCredit = async (doctor: UserProfile) => {
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, 'users', doctor.uid), {
+        allowCreditPayment: !doctor.allowCreditPayment
+      });
+      alert(
+        lang === 'fr' 
+          ? `Mode de paiement mis à jour pour ${doctor.name}.` 
+          : `تم تحديث طريقة الدفع لـ ${doctor.name}.`,
+        'success'
+      );
       onRefreshData();
     } catch (err) {
       console.error(err);
@@ -780,6 +859,7 @@ export default function AdminDashboard({
                     <th className="pb-3">{getTranslation(lang, 'email')}</th>
                     <th className="pb-3">{getTranslation(lang, 'location')}</th>
                     <th className="pb-3">{getTranslation(lang, 'status')}</th>
+                    <th className="pb-3">{lang === 'fr' ? 'Paiement Crédit' : 'البيع بالدين'}</th>
                     <th className="pb-3">ID</th>
                   </tr>
                 </thead>
@@ -814,6 +894,21 @@ export default function AdminDashboard({
                           >
                             {getTranslation(lang, `status_${docProfile.status}` as any)}
                           </span>
+                        </td>
+                        <td className="py-3">
+                          <button
+                            onClick={() => handleToggleDoctorCredit(docProfile)}
+                            disabled={loading}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                              docProfile.allowCreditPayment !== false
+                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+                            }`}
+                          >
+                            {docProfile.allowCreditPayment !== false
+                              ? (lang === 'fr' ? 'Activé' : 'مفعّل')
+                              : (lang === 'fr' ? 'Désactivé' : 'معطّل')}
+                          </button>
                         </td>
                         <td className="py-3 font-mono text-[10px] text-slate-400 max-w-[120px] truncate">
                           {docProfile.uid}
@@ -1115,6 +1210,16 @@ export default function AdminDashboard({
                   <FileSpreadsheet size={14} className="text-teal-600" />
                   {lang === 'fr' ? 'Importer Produits (Excel)' : 'استيراد منتجات (إكسل)'}
                 </button>
+                {selectedProducts.size > 0 && (
+                  <button
+                    onClick={handleDeleteMultipleProducts}
+                    disabled={loading}
+                    className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-2 px-3.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                  >
+                    <Trash2 size={14} />
+                    {lang === 'fr' ? `Supprimer (${selectedProducts.size})` : `حذف (${selectedProducts.size})`}
+                  </button>
+                )}
                 <button
                   onClick={() => handleOpenProductForm()}
                   className="bg-brand-cyan text-white font-bold text-xs py-2 px-3.5 rounded-xl hover:bg-brand-cyan/90 transition-all flex items-center gap-1.5 shadow-xs"
@@ -1129,6 +1234,14 @@ export default function AdminDashboard({
               <table className="w-full text-left md:rtl:text-right border-collapse text-sm min-w-[650px]">
                 <thead>
                   <tr className="text-xs font-extrabold text-slate-400 uppercase border-b border-slate-100 pb-3">
+                    <th className="pb-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedProducts.size === productsList.length && productsList.length > 0}
+                        onChange={toggleAllProducts}
+                        className="w-4 h-4 rounded border-slate-300 text-brand-cyan focus:ring-brand-cyan"
+                      />
+                    </th>
                     <th className="pb-3">{lang === 'fr' ? 'Produit' : 'المنتج'}</th>
                     <th className="pb-3">{getTranslation(lang, 'categories')}</th>
                     <th className="pb-3">{lang === 'fr' ? 'Prix Brut' : 'السعر الإجمالي'}</th>
@@ -1142,7 +1255,15 @@ export default function AdminDashboard({
                   {productsList.map((p) => {
                     const isLow = p.stock <= (p.lowStockAlert || 5);
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                      <tr key={p.id} className={`hover:bg-slate-50/50 transition-colors ${selectedProducts.has(p.id) ? 'bg-brand-cyan/5' : ''}`}>
+                        <td className="py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedProducts.has(p.id)}
+                            onChange={() => toggleProductSelection(p.id)}
+                            className="w-4 h-4 rounded border-slate-300 text-brand-cyan focus:ring-brand-cyan"
+                          />
+                        </td>
                         <td className="py-3 font-bold text-slate-800">{p.name}</td>
                         <td className="py-3 text-slate-500 text-xs font-bold">{p.category}</td>
                         <td className="py-3 font-extrabold">{formatPrice(p.price)}</td>

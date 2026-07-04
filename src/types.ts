@@ -17,6 +17,7 @@ export interface UserProfile {
   createdAt: string;
   discountPercent?: number; // per-doctor custom discount (applied to invoice level)
   commercialName?: string; // assigned sales representative
+  allowCreditPayment?: boolean; // if true, doctor can pay by credit (20 days debt). if false, only cash payment allowed
 }
 
 export interface Product {
