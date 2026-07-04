@@ -401,33 +401,6 @@ export default function DoctorDashboard({
             )}
           </div>
 
-          {/* Support Dédié - Professional Polish theme addition */}
-          <div className="bg-[#E0F2F1] rounded-3xl p-6 border border-teal-200 flex flex-col justify-between space-y-4">
-            <div>
-              <h3 className="font-extrabold text-teal-900 text-sm">
-                {lang === 'fr' ? 'Support Dédié' : 'الدعم المخصص المباشر'}
-              </h3>
-              <p className="text-xs text-teal-700 mt-1 leading-relaxed">
-                {lang === 'fr' 
-                  ? 'Besoin d\'aide pour une commande ou un paiement ? Contactez votre agent dédié.' 
-                  : 'هل تحتاج إلى مساعدة بشأن طلبية أو سداد؟ اتصل بوكيلكم المخصص.'}
-              </p>
-            </div>
-            <div className="flex items-center gap-3 bg-white/50 p-3 rounded-2xl border border-teal-100/50">
-              <div className="w-10 h-10 rounded-full bg-white shadow-xs flex items-center justify-center text-base shrink-0">
-                📞
-              </div>
-              <div>
-                <p className="text-xs font-black text-teal-900 leading-none">
-                  {lang === 'fr' ? 'Agent Karim' : 'الوكيل كريم'}
-                </p>
-                <p className="text-[11px] font-bold text-teal-600 mt-1">
-                  0550 12 34 56
-                </p>
-              </div>
-            </div>
-          </div>
-
         </div>
 
       </div>
