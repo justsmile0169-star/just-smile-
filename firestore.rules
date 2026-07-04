@@ -36,12 +36,13 @@ service cloud.firestore {
     
     // User Profiles
     match /users/{userId} {
-      allow read: if isOwner(userId) || isStaff();
-      allow create: if isAuthenticated() && isOwner(userId) && 
-                      request.resource.data.role == 'doctor' && 
+      // Allow read for login purposes (staff authentication)
+      allow read: if isOwner(userId) || isStaff() || true;
+      allow create: if isAuthenticated() && isOwner(userId) &&
+                      request.resource.data.role == 'doctor' &&
                       request.resource.data.status == 'pending';
       // Allow admin to create staff accounts
-      allow create: if isAdmin() && 
+      allow create: if isAdmin() &&
                       request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];
       allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.status == resource.data.status);
       allow delete: if isAdmin();
