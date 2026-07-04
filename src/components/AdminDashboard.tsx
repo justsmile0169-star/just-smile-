@@ -652,17 +652,19 @@ export default function AdminDashboard({
           {getTranslation(lang, 'registeredDoctors')} ({allDoctors.length})
         </button>
 
-        <button
-          onClick={() => setActiveSubTab('clientSituation')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'clientSituation'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-          }`}
-        >
-          <ClipboardList size={16} />
-          {getTranslation(lang, 'clientSituation')}
-        </button>
+        {hasPermission(currentUser, 'view_client_situation') && (
+          <button
+            onClick={() => setActiveSubTab('clientSituation')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
+              activeSubTab === 'clientSituation'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <ClipboardList size={16} />
+            {getTranslation(lang, 'clientSituation')}
+          </button>
+        )}
 
         <button
           onClick={() => setActiveSubTab('debts')}
@@ -698,17 +700,19 @@ export default function AdminDashboard({
             <Wallet size={16} />{lang === 'fr' ? 'Dépenses' : 'المصروفات'}
           </button>
         )}
-        <button
-          onClick={() => setActiveSubTab('discounts')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'discounts'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-          }`}
-        >
-          <Percent size={16} />
-          {getTranslation(lang, 'doctorDiscounts')}
-        </button>
+        {hasPermission(currentUser, 'view_doctors') && (
+          <button
+            onClick={() => setActiveSubTab('discounts')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
+              activeSubTab === 'discounts'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Percent size={16} />
+            {getTranslation(lang, 'doctorDiscounts')}
+          </button>
+        )}
 
         {hasPermission(currentUser, 'manage_staff') && (
           <button onClick={() => setActiveSubTab('staff')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'staff' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
@@ -725,17 +729,19 @@ export default function AdminDashboard({
             <Cloud size={16} />{lang === 'fr' ? 'Backup' : 'نسخ احتياطي'}
           </button>
         )}
-        <button
-          onClick={() => setActiveSubTab('settings')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'settings'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-          }`}
-        >
-          <Settings size={16} />
-          {lang === 'fr' ? 'Paramètres' : 'إعدادات المتجر'}
-        </button>
+        {hasPermission(currentUser, 'manage_settings') && (
+          <button
+            onClick={() => setActiveSubTab('settings')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
+              activeSubTab === 'settings'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Settings size={16} />
+            {lang === 'fr' ? 'Paramètres' : 'إعدادات المتجر'}
+          </button>
+        )}
       </div>
 
       {/* --- CONTENT RENDER PANELS --- */}
@@ -777,7 +783,7 @@ export default function AdminDashboard({
       )}
 
       {/* 1. Pending Users approvals */}
-      {activeSubTab === 'users' && (
+      {activeSubTab === 'users' && hasPermission(currentUser, 'view_doctors') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
           <div className="border-b border-slate-50 pb-4">
             <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
@@ -835,7 +841,7 @@ export default function AdminDashboard({
       )}
 
       {/* 1b. All registered doctors */}
-      {activeSubTab === 'doctors' && (
+      {activeSubTab === 'doctors' && hasPermission(currentUser, 'view_doctors') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
           <div className="border-b border-slate-50 pb-4">
             <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">

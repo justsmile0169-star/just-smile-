@@ -14,13 +14,16 @@ export type Permission =
   | 'manage_backup'
   | 'sell'
   | 'view_client_situation'
-  | 'use_scanner';
+  | 'use_scanner'
+  | 'view_doctors'
+  | 'manage_settings';
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   admin: [
     'view_analytics', 'manage_inventory', 'manage_promotions', 'manage_expenses',
     'view_expenses', 'manage_payments', 'edit_invoices', 'view_reports', 'manage_staff',
-    'view_activity_logs', 'manage_backup', 'sell', 'view_client_situation', 'use_scanner'
+    'view_activity_logs', 'manage_backup', 'sell', 'view_client_situation', 'use_scanner',
+    'view_doctors', 'manage_settings'
   ],
   manager: [
     'view_analytics', 'manage_inventory', 'manage_promotions', 'manage_expenses',
@@ -28,9 +31,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   accountant: [
     'view_expenses', 'manage_expenses', 'manage_payments', 'edit_invoices',
-    'view_reports', 'view_activity_logs', 'view_client_situation'
+    'view_reports'
   ],
-  cashier: ['sell', 'manage_payments', 'use_scanner'],
+  cashier: ['manage_payments', 'use_scanner'],
   doctor: ['sell', 'use_scanner']
 };
 
