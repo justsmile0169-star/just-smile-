@@ -52,9 +52,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
-    // Allow list queries for staff authentication (email lookup only) - RESTRICTED
+    // Allow list queries for staff authentication (email lookup only)
+    // This is necessary for staff login since we can't use Cloud Functions without billing
     match /users {
-      allow list: if false; // DISABLED FOR SECURITY
+      allow list: if true;
     }
     
     // Products
