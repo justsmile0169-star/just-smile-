@@ -37,7 +37,7 @@ service cloud.firestore {
     // User Profiles
     match /users/{userId} {
       // Allow read for login purposes (staff authentication)
-      allow read: if isOwner(userId) || isStaff() || true;
+      allow read: if true;
       allow create: if isAuthenticated() && isOwner(userId) &&
                       request.resource.data.role == 'doctor' &&
                       request.resource.data.status == 'pending';
@@ -46,6 +46,11 @@ service cloud.firestore {
                       request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];
       allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.status == resource.data.status);
       allow delete: if isAdmin();
+    }
+    
+    // Allow list queries for staff authentication
+    match /users {
+      allow list: if true;
     }
     
     // Products
