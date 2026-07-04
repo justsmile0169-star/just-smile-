@@ -51,6 +51,7 @@ service cloud.firestore {
     // Allow list queries for staff authentication
     match /users {
       allow list: if true;
+      allow get: if true;
     }
     
     // Products
