@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // Configuration reading from environment variables with fallback to the user's new Firebase project
 const firebaseConfig = {
@@ -27,5 +28,8 @@ const db = initializeFirestore(app, {
 // Initialize Firebase Authentication
 const auth = getAuth(app);
 
-export { app, db, auth };
+// Initialize Firebase Functions
+const functions = getFunctions(app);
+
+export { app, db, auth, functions };
 export default app;
