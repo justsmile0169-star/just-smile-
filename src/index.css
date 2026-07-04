@@ -1,0 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Cairo", system-ui, -apple-system, sans-serif;
+  --color-brand-dark: #0D2F3F; /* Deep professional navy teal from theme */
+  --color-brand-cyan: #14B8A6; /* Vibrant hygienic teal from theme */
+  --color-brand-accent: #E0F2F1; /* Soft background tint from theme */
+}
+
+@variant dark (&:where(.dark, .dark *));
+
+/* Base resets & styles */
+body {
+  font-family: var(--font-sans);
+  background-color: #F1F5F9;
+  color: #1e293b;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+body.dark {
+  background-color: #090F11; /* Crisp dark medical slate background */
+  color: #F8FAFC;
+}
+
+/* Custom scrollbars for pristine desktop UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Hide scrollbar utility for mobile horizontal scrolling */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Arabic RTL override helpers */
+[dir="rtl"] {
+  text-align: right;
+}
+
+/* High-quality print styles for invoices (A4, 300 DPI ready) */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html, body {
+    background-color: white !important;
+    color: black;
+    margin: 0;
+    padding: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  #invoice-a4 {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always;
+  }
+}
