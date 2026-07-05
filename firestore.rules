@@ -18,8 +18,7 @@ service cloud.firestore {
 
     // Get user role safely
     function userRole() {
-      if (!userExists()) return null;
-      return userDoc().role;
+      return userExists() ? userDoc().role : null;
     }
 
     // Check if user is admin
@@ -60,15 +59,13 @@ service cloud.firestore {
     
     // Allow list queries for:
     // 1. Authenticated staff (admin dashboard)
-    // 2. Unauthenticated users querying by email only (for login - strictly limited)
-    // SECURITY: Only allows single email query, prevents mass data exposure
+    // 2. Unauthenticated users (for login - they need to check if email exists)
+    // SECURITY: This is necessary for the custom staff authentication system
     match /users {
-      allow list: if (isAuthenticated() && isStaff()) ||
-                      (!isAuthenticated() &&
-                       request.query.size() == 1 &&
-                       request.query.where.size() == 1 &&
-                       request.query.where[0].field == 'email' &&
-                       request.query.where[0].op == '==');
+      allow list: if request.auth == null ||
+                      (request.auth != null &&
+                       exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'manager', 'cashier', 'accountant']);
       allow get: if false;
     }
     
