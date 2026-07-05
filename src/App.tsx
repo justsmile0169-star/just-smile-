@@ -5,9 +5,9 @@ import {
   writeBatch, addDoc, updateDoc, deleteDoc 
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { 
+import {
   UserProfile, Product, CartItem, Order, AppNotification, ShopInfo, Payment, ProductReturn,
-  Promotion, Expense, ActivityLog
+  Promotion, Expense, ActivityLog, AdminMessage
 } from './types';
 import { canAccessAdmin } from './utils/permissions';
 import { Language, getTranslation } from './translations';
@@ -64,6 +64,7 @@ export default function App() {
   const [promotionsList, setPromotionsList] = useState<Promotion[]>([]);
   const [expensesList, setExpensesList] = useState<Expense[]>([]);
   const [activityLogsList, setActivityLogsList] = useState<ActivityLog[]>([]);
+  const [adminMessagesList, setAdminMessagesList] = useState<AdminMessage[]>([]);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [showBarcodePrint, setShowBarcodePrint] = useState(false);
   const [productToPrint, setProductToPrint] = useState<Product | null>(null);
@@ -416,6 +417,20 @@ export default function App() {
         setActivityLogsList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200));
       });
 
+      // Sync admin messages
+      const messagesQuery = collection(db, 'admin_messages');
+      const unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+        const items: AdminMessage[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdminMessage, 'id'>) });
+        });
+        setAdminMessagesList(items.sort((a, b) => {
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateB - dateA;
+        }));
+      });
+
       // Sync admin notifications
       const notifsQuery = query(collection(db, 'notifications'), where('userId', '==', 'admin'));
       unsubscribeNotifications = onSnapshot(notifsQuery, (snapshot) => {
@@ -436,6 +451,7 @@ export default function App() {
         unsubscribePromotions();
         unsubscribeExpenses();
         unsubscribeLogs();
+        unsubscribeMessages();
         unsubscribeNotifications();
       };
     }
@@ -755,6 +771,7 @@ export default function App() {
                 expensesList={expensesList}
                 activityLogsList={activityLogsList}
                 productsList={products}
+                adminMessagesList={adminMessagesList}
                 shopInfo={shopInfo}
                 onShopInfoChange={setShopInfo}
                 onRefreshData={() => {}}

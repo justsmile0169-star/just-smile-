@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Order, Product, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog } from '../types';
+import { Order, Product, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage } from '../types';
 import { Language, getTranslation } from '../translations';
 import { getLogoUrl } from '../constants/brand';
 import ExpiryScanner from './ExpiryScanner';
@@ -22,7 +22,7 @@ import {
   Users, DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
-  History, Shield, Cloud, ImageIcon, Search
+  History, Shield, Cloud, ImageIcon, Search, MessageSquare
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -36,6 +36,7 @@ interface AdminDashboardProps {
   expensesList: Expense[];
   activityLogsList: ActivityLog[];
   productsList: Product[];
+  adminMessagesList: AdminMessage[];
   shopInfo: ShopInfo;
   onShopInfoChange: (info: ShopInfo) => void;
   onRefreshData: () => void;
@@ -46,7 +47,7 @@ interface AdminDashboardProps {
 
 type AdminSubTab =
   | 'analytics' | 'users' | 'doctors' | 'clientSituation' | 'debts' | 'inventory'
-  | 'promotions' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings';
+  | 'promotions' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages';
 
 export default function AdminDashboard({
   lang,
@@ -59,6 +60,7 @@ export default function AdminDashboard({
   expensesList,
   activityLogsList,
   productsList,
+  adminMessagesList,
   shopInfo,
   onShopInfoChange,
   onRefreshData,
@@ -742,6 +744,23 @@ export default function AdminDashboard({
             {lang === 'fr' ? 'Paramètres' : 'إعدادات المتجر'}
           </button>
         )}
+
+        <button
+          onClick={() => setActiveSubTab('messages')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
+            activeSubTab === 'messages'
+              ? 'bg-brand-cyan text-white shadow-xs'
+              : 'text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <MessageSquare size={16} />
+          {lang === 'fr' ? 'Messages' : 'الرسائل'}
+          {adminMessagesList.filter(m => !m.isRead).length > 0 && (
+            <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+              {adminMessagesList.filter(m => !m.isRead).length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* --- CONTENT RENDER PANELS --- */}
@@ -1749,6 +1768,115 @@ export default function AdminDashboard({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Messages Section */}
+      {activeSubTab === 'messages' && (
+        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
+          <div className="border-b border-slate-50 pb-4">
+            <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <MessageSquare size={20} className="text-brand-cyan" />
+              {lang === 'fr' ? 'Messages des médecins' : 'رسائل الأطباء'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              {lang === 'fr'
+                ? `Total: ${adminMessagesList.length} messages`
+                : `المجموع: ${adminMessagesList.length} رسالة`}
+            </p>
+          </div>
+
+          {adminMessagesList.length === 0 ? (
+            <div className="text-center py-12">
+              <MessageSquare size={48} className="text-slate-200 mx-auto mb-4" />
+              <p className="text-slate-400 font-medium">
+                {lang === 'fr' ? 'Aucun message' : 'لا توجد رسائل'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4 max-h-[600px] overflow-y-auto">
+              {adminMessagesList
+                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                .map((message) => (
+                  <div
+                    key={message.id}
+                    className={`p-4 rounded-2xl border transition-all ${
+                      !message.isRead
+                        ? 'bg-brand-cyan/5 border-brand-cyan/20'
+                        : 'bg-slate-50 border-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="font-bold text-slate-900">{message.doctorName}</h4>
+                          {!message.isRead && (
+                            <span className="bg-brand-cyan text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              {lang === 'fr' ? 'Nouveau' : 'جديد'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          {message.doctorClinic} • {message.doctorPhone}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {message.doctorEmail}
+                        </p>
+                      </div>
+                      <p className="text-xs text-slate-400 whitespace-nowrap">
+                        {new Date(message.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}
+                      </p>
+                    </div>
+
+                    <div className="bg-white p-3 rounded-xl mb-3">
+                      <p className="text-sm text-slate-700 leading-relaxed">{message.message}</p>
+                    </div>
+
+                    {message.reply ? (
+                      <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                        <p className="text-xs font-bold text-emerald-700 mb-1">
+                          {lang === 'fr' ? 'Réponse:' : 'الرد:'}
+                        </p>
+                        <p className="text-sm text-emerald-800">{message.reply}</p>
+                        <p className="text-xs text-emerald-600 mt-1">
+                          {new Date(message.repliedAt!).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            const replyText = prompt(lang === 'fr' ? 'Votre réponse:' : 'ردك:');
+                            if (replyText) {
+                              await updateDoc(doc(db, 'admin_messages', message.id), {
+                                reply: replyText,
+                                repliedAt: new Date().toISOString(),
+                                isRead: true
+                              });
+                              onRefreshData();
+                            }
+                          }}
+                          className="flex-1 bg-brand-cyan text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-brand-cyan/90 transition-colors"
+                        >
+                          {lang === 'fr' ? 'Répondre' : 'الرد'}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await updateDoc(doc(db, 'admin_messages', message.id), {
+                              isRead: true
+                            });
+                            onRefreshData();
+                          }}
+                          className="px-4 py-2 rounded-xl font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                        >
+                          {lang === 'fr' ? 'Marquer comme lu' : 'تعيين كمقروء'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -113,6 +113,20 @@ export interface AppNotification {
   createdAt: string;
 }
 
+export interface AdminMessage {
+  id: string;
+  doctorId: string;
+  doctorName: string;
+  doctorClinic: string;
+  doctorPhone: string;
+  doctorEmail: string;
+  message: string;
+  createdAt: string;
+  isRead: boolean;
+  repliedAt?: string;
+  reply?: string;
+}
+
 // Shop / Company Information (stored in Firestore settings/shop_info)
 export interface ShopInfo {
   companyName: string;

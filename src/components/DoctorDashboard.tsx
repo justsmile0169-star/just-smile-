@@ -1,6 +1,9 @@
+import React, { useState } from 'react';
 import { Order, Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers } from 'lucide-react';
+import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X } from 'lucide-react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface DoctorDashboardProps {
   user: UserProfile;
@@ -32,6 +35,35 @@ export default function DoctorDashboard({
   onSelectCategory
 }: DoctorDashboardProps) {
   const isRtl = lang === 'ar';
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+
+  const handleSendMessage = async () => {
+    if (!messageText.trim()) return;
+
+    setSendingMessage(true);
+    try {
+      await addDoc(collection(db, 'admin_messages'), {
+        doctorId: user.uid,
+        doctorName: user.name,
+        doctorClinic: user.clinicName,
+        doctorPhone: user.phone,
+        doctorEmail: user.email,
+        message: messageText.trim(),
+        createdAt: serverTimestamp(),
+        isRead: false
+      });
+      setMessageText('');
+      setShowMessageModal(false);
+      alert(lang === 'fr' ? 'Message envoyé avec succès!' : 'تم إرسال الرسالة بنجاح!');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert(lang === 'fr' ? 'Erreur lors de l\'envoi du message.' : 'حدث خطأ أثناء إرسال الرسالة.');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
 
   const formatPrice = (num: number) => {
     if (num === 0 || num === undefined || num === null) return '-';
@@ -81,7 +113,7 @@ export default function DoctorDashboard({
             <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">
               {lang === 'fr' ? `Cabinet de ${user.name}` : `عيادة ${user.name}`}
             </h2>
-            
+
             {/* Account Status Badge - Professional Polish design style */}
             {isBlocked ? (
               <div className="flex items-center gap-2 bg-rose-50 text-rose-700 px-3 py-1 rounded-full text-xs font-bold border border-rose-150 shrink-0">
@@ -100,12 +132,14 @@ export default function DoctorDashboard({
           </p>
         </div>
 
-        {isBlocked && (
-          <div className="bg-rose-50 border border-rose-100 text-rose-700 px-4 py-2.5 rounded-2xl flex items-center gap-2 text-xs md:text-sm font-bold shrink-0">
-            <AlertTriangle size={18} className="text-rose-500 shrink-0" />
-            <span>{getTranslation(lang, 'overdueAlert')}</span>
-          </div>
-        )}
+        {/* Contact Admin Button */}
+        <button
+          onClick={() => setShowMessageModal(true)}
+          className="flex items-center gap-2 bg-brand-cyan text-white px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-brand-cyan/90 transition-colors shadow-xs"
+        >
+          <MessageSquare size={16} />
+          <span>{lang === 'fr' ? 'Contacter l\'administration' : 'اتصل بالإدارة'}</span>
+        </button>
       </div>
 
       {/* Credit Status Summary Cards */}
@@ -405,6 +439,64 @@ export default function DoctorDashboard({
         </div>
 
       </div>
+
+      {/* Message Modal */}
+      {showMessageModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-extrabold text-slate-800 text-base md:text-lg flex items-center gap-2">
+                <MessageSquare size={20} className="text-brand-cyan" />
+                {lang === 'fr' ? 'Contacter l\'administration' : 'اتصل بالإدارة'}
+              </h3>
+              <button
+                onClick={() => setShowMessageModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  {lang === 'fr' ? 'Votre message' : 'رسالتك'}
+                </label>
+                <textarea
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Écrivez votre message ici...' : 'اكتب رسالتك هنا...'}
+                  rows={4}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm focus:outline-hidden focus:border-brand-cyan resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowMessageModal(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                >
+                  {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+                </button>
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!messageText.trim() || sendingMessage}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white bg-brand-cyan hover:bg-brand-cyan/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {sendingMessage ? (
+                    <span>{lang === 'fr' ? 'Envoi...' : 'جاري الإرسال...'}</span>
+                  ) : (
+                    <>
+                      <Send size={16} />
+                      <span>{lang === 'fr' ? 'Envoyer' : 'إرسال'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
