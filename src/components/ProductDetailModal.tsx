@@ -53,7 +53,7 @@ export default function ProductDetailModal({
             {/* Left/Right Image depending on RTL */}
             <div className="w-full md:w-1/2 h-52 bg-slate-100 rounded-2xl overflow-hidden relative border border-slate-100 shrink-0">
               <img
-                src={product.image || 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
+                src={product.image && String(product.image) !== '0' ? product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
                 alt={product.name}
                 className="object-cover w-full h-full"
                 referrerPolicy="no-referrer"

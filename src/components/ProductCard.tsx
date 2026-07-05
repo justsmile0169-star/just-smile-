@@ -85,7 +85,7 @@ export default function ProductCard({
         className="w-full h-36 sm:h-40 md:h-48 bg-slate-50 dark:bg-slate-800/50 relative flex items-center justify-center overflow-hidden cursor-pointer shrink-0"
       >
         <img
-          src={product.image || 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
+          src={product.image && String(product.image) !== '0' ? product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
           alt={product.name}
           className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
           referrerPolicy="no-referrer"

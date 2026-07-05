@@ -250,7 +250,7 @@ export default function BarcodeScanner({
           {phase === 'found' && foundProduct && (
             <div className="space-y-4">
               <div className="flex gap-3 p-3 bg-emerald-50 border border-emerald-100 rounded-2xl">
-                {foundProduct.image && (
+                {foundProduct.image && String(foundProduct.image) !== '0' && (
                   <img
                     src={foundProduct.image}
                     alt=""

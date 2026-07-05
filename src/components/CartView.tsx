@@ -271,7 +271,7 @@ export default function CartView({
                 return (
                   <div key={item.product.id} className="flex items-start gap-4 py-5 first:pt-0 last:pb-0">
                     <img
-                      src={item.product.image}
+                      src={item.product.image && String(item.product.image) !== '0' ? item.product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
                       alt={item.product.name}
                       className="w-16 h-16 md:w-20 md:h-20 object-cover rounded-2xl bg-slate-150 border border-slate-50 shrink-0"
                     />
