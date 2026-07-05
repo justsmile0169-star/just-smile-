@@ -1,7 +1,6 @@
 import { Product } from '../types';
 import { Language, getTranslation } from '../translations';
-import { X, Award, AlertCircle, ShoppingCart, TrendingUp } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { X, Award, AlertCircle, ShoppingCart } from 'lucide-react';
 
 interface ProductDetailModalProps {
   product: Product;
@@ -9,48 +8,6 @@ interface ProductDetailModalProps {
   onClose: () => void;
   onAddToCart: (product: Product) => void;
 }
-
-const generateStockHistory = (productId: string, currentStock: number) => {
-  // Simple hash of the productId to get a seed
-  let hash = 0;
-  for (let i = 0; i < productId.length; i++) {
-    hash = productId.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const seed = Math.abs(hash);
-
-  const history = [];
-  let tempStock = currentStock;
-  
-  // We go backwards from day 29 to day 0
-  for (let i = 29; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - (29 - i));
-    const dateStr = date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-
-    history.unshift({
-      date: dateStr,
-      stock: tempStock
-    });
-
-    // Determine past stock deterministically
-    const daySeed = Math.sin(seed + i) * 10000;
-    const rand = daySeed - Math.floor(daySeed); // pseudo-random between 0 and 1
-
-    if (i > 0) {
-      if (rand < 0.15) {
-        // replenishment occurred going forward, so going backward, we drop the stock level
-        const dropAmount = Math.floor(10 + rand * 30);
-        tempStock = Math.max(0, tempStock - dropAmount);
-      } else if (rand < 0.6) {
-        // sales occurred going forward, so going backward, the stock was higher
-        const salesAmount = Math.floor(1 + rand * 4);
-        tempStock = tempStock + salesAmount;
-      }
-    }
-  }
-
-  return history;
-};
 
 export default function ProductDetailModal({
   product,
@@ -70,20 +27,6 @@ export default function ProductDetailModal({
     : product.price;
 
   const isOutOfStock = product.stock <= 0;
-
-  const stockHistory = generateStockHistory(product.id, product.stock);
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-slate-900 text-white px-2.5 py-1.5 rounded-xl text-xs font-bold shadow-lg border border-slate-800" style={{ direction: isRtl ? 'rtl' : 'ltr' }}>
-          <p className="text-slate-300 font-medium mb-0.5">{payload[0].payload.date}</p>
-          <p className="text-brand-cyan text-sm">{payload[0].value} {lang === 'fr' ? 'unités' : 'وحدة'}</p>
-        </div>
-      );
-    }
-    return null;
-  };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -171,58 +114,6 @@ export default function ProductDetailModal({
             <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">
               {product.description || (lang === 'fr' ? 'Aucune description disponible.' : 'لا يوجد وصف متاح لهذا المنتج.')}
             </p>
-          </div>
-
-          {/* Stock History Chart */}
-          <div className="space-y-3 pt-4 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-800 text-sm md:text-base flex items-center gap-2">
-                <TrendingUp size={18} className="text-brand-cyan" />
-                <span>
-                  {lang === 'fr' 
-                    ? 'Niveau des stocks (30 derniers jours)' 
-                    : 'مستوى المخزون (آخر 30 يومًا)'}
-                </span>
-              </h3>
-              <span className="text-[10px] md:text-xs text-slate-400 font-semibold bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md">
-                {lang === 'fr' ? 'Anticipation réapprovisionnement' : 'توقع تجديد المخزون'}
-              </span>
-            </div>
-            
-            <div className="bg-slate-50/50 rounded-2xl p-4 border border-slate-100/80 h-44">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={stockHistory} margin={{ top: 10, right: 5, left: -25, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorStock" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ba3ab" stopOpacity={0.25}/>
-                      <stop offset="95%" stopColor="#0ba3ab" stopOpacity={0.01}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis 
-                    dataKey="date" 
-                    tickLine={false} 
-                    axisLine={false}
-                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
-                    interval={6}
-                  />
-                  <YAxis 
-                    tickLine={false} 
-                    axisLine={false}
-                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
-                    allowDecimals={false}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="stock" 
-                    stroke="#0ba3ab" 
-                    strokeWidth={2.5} 
-                    fillOpacity={1} 
-                    fill="url(#colorStock)" 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
           </div>
 
           {/* Technical sheet */}

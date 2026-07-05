@@ -1697,7 +1697,13 @@ export default function AdminDashboard({
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-brand-cyan/10 file:text-brand-cyan file:font-bold" />
                 </div>
-                <input type="url" value={pImage.startsWith('data:') ? '' : pImage} onChange={(e) => setPImage(e.target.value)} placeholder={lang === 'fr' ? 'Ou URL de l\'image' : 'أو رابط الصورة'} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-hidden focus:border-brand-cyan mt-1" />
+                <input 
+                  type="url" 
+                  value={pImage && !pImage.startsWith('data:') ? pImage : ''} 
+                  onChange={(e) => setPImage(e.target.value)} 
+                  placeholder={lang === 'fr' ? 'Ou URL de l\'image' : 'أو رابط الصورة'} 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-hidden focus:border-brand-cyan mt-1" 
+                />
               </div>
 
               <div className="space-y-1">
