@@ -353,6 +353,10 @@ export default function App() {
         snapshot.forEach((doc) => {
           items.push(doc.data() as UserProfile);
         });
+        console.log('[App] Loaded usersList:', items.length);
+        console.log('[App] Users with role=doctor:', items.filter(u => u.role === 'doctor').length);
+        console.log('[App] Users with role=doctor and status=pending:', items.filter(u => u.role === 'doctor' && u.status === 'pending').length);
+        console.log('[App] All users:', items.map(u => ({ name: u.name, role: u.role, status: u.status })));
         setUsersList(items);
       }, (err) => {
         console.error("Error syncing users list for admin:", err);

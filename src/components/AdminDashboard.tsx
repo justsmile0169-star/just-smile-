@@ -81,9 +81,17 @@ export default function AdminDashboard({
   };
 
   // --- 1. Filter Doctor Profiles ---
+  console.log('[AdminDashboard] Total usersList:', usersList.length);
+  console.log('[AdminDashboard] All users:', usersList.map(u => ({ name: u.name, role: u.role, status: u.status })));
+
   const pendingDoctors = usersList.filter((u) => u.role === 'doctor' && u.status === 'pending');
   const approvedDoctors = usersList.filter((u) => u.role === 'doctor' && u.status === 'approved');
   const allDoctors = usersList.filter((u) => u.role === 'doctor');
+
+  console.log('[AdminDashboard] pendingDoctors:', pendingDoctors.length);
+  console.log('[AdminDashboard] approvedDoctors:', approvedDoctors.length);
+  console.log('[AdminDashboard] allDoctors:', allDoctors.length);
+
   const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
 
   // Approve Doctor Account

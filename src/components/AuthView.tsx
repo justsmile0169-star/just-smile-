@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
 import { UserProfile } from '../types';
@@ -39,7 +39,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
     try {
       if (isLogin) {
         // --- LOGIN FLOW ---
-        
+
         // First try staff login (Firestore-based)
         const staffProfile = await signInStaff(email.trim(), password);
         if (staffProfile) {
@@ -50,6 +50,23 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
           onAuthSuccess(staffProfile);
           setLoading(false);
           return;
+        }
+
+        // If staff login fails, check if it's because of wrong credentials
+        // Try to find the user in Firestore to determine the error
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('email', '==', email.trim()));
+        const userSnapshot = await getDocs(q);
+
+        if (!userSnapshot.empty) {
+          // User exists but login failed - likely wrong password
+          const userData = userSnapshot.docs[0].data() as UserProfile;
+          if (userData.role !== 'doctor' && userData.status === 'approved') {
+            // Staff user with wrong password
+            setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+            setLoading(false);
+            return;
+          }
         }
 
         // If staff login fails, try Firebase Auth for doctors
