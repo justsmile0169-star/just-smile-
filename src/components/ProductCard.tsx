@@ -72,7 +72,7 @@ export default function ProductCard({
       )}
 
       {/* Discount Badge */}
-      {hasProductDiscount && (
+      {hasProductDiscount && product.discountPercent > 0 && (
         <span className={`absolute top-3 ${isRtl ? 'right-3' : 'left-3'} z-10 bg-red-600 text-white font-extrabold text-[11px] md:text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-sm border border-red-500`}>
           <Award size={12} className="shrink-0" />
           <span>-{product.discountPercent}%</span>
@@ -116,7 +116,7 @@ export default function ProductCard({
 
         {/* Dynamic Alerts */}
         <div className="space-y-1 mb-3 shrink-0">
-          {isLowStock && (
+          {isLowStock && product.stock > 0 && (
             <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 px-2 py-1 rounded-lg text-xs font-semibold">
               <AlertTriangle size={12} className="shrink-0" />
               <span>{getTranslation(lang, 'onlyStockLeft', { count: product.stock })}</span>
@@ -139,9 +139,9 @@ export default function ProductCard({
         <div className="flex items-center justify-between gap-2 mt-auto shrink-0 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex flex-wrap items-baseline gap-1.5">
             <span className="text-base md:text-lg font-black text-brand-dark dark:text-slate-100 animate-pulse-subtle">
-              {formatPrice(finalPrice)}
+              {finalPrice > 0 ? formatPrice(finalPrice) : '-'}
             </span>
-            {hasProductDiscount && (
+            {hasProductDiscount && product.price > 0 && (
               <span className="text-xs md:text-sm text-slate-400 dark:text-slate-500 font-medium line-through">
                 {formatPrice(product.price)}
               </span>
