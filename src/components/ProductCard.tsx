@@ -1,7 +1,7 @@
 import React from 'react';
 import { Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { Heart, ShoppingCart, Award, AlertTriangle, Calendar } from 'lucide-react';
+import { Heart, ShoppingCart, Award, Calendar } from 'lucide-react';
 
 interface ProductCardProps {
   key?: any;
@@ -119,13 +119,6 @@ export default function ProductCard({
 
         {/* Dynamic Alerts */}
         <div className="space-y-1 mb-3 shrink-0">
-          {isLowStock && product.stock > 0 && (
-            <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 px-2 py-1 rounded-lg text-xs font-semibold">
-              <AlertTriangle size={12} className="shrink-0" />
-              <span>{getTranslation(lang, 'onlyStockLeft', { count: product.stock })}</span>
-            </div>
-          )}
-
           {isExpiringSoon && product.expiryDate && product.expiryDate !== '0' && (
             <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-2 py-1 rounded-lg text-xs font-semibold">
               <Calendar size={12} className="shrink-0" />

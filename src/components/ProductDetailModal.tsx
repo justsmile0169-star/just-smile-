@@ -98,9 +98,9 @@ export default function ProductDetailModal({
                 <div className="mt-3 flex items-center gap-2">
                   <span className={`w-2.5 h-2.5 rounded-full ${isOutOfStock ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
                   <span className="text-xs font-semibold text-slate-600">
-                    {isOutOfStock 
-                      ? getTranslation(lang, 'outOfStock') 
-                      : (lang === 'fr' ? `En stock (${product.stock} unités)` : `متوفر في المخزون (${product.stock} وحدة)`)}
+                    {isOutOfStock
+                      ? getTranslation(lang, 'outOfStock')
+                      : (lang === 'fr' ? 'En stock' : 'متوفر في المخزون')}
                   </span>
                 </div>
               </div>
