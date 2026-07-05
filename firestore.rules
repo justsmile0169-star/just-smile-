@@ -52,9 +52,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
-    // Allow list queries for authenticated users (needed for admin dashboard and login)
+    // Allow list queries for login (unauthenticated users need to check if email exists)
+    // This is necessary for the custom staff authentication system
     match /users {
-      allow list: if isAuthenticated();
+      allow list: if true;
       allow get: if false;
     }
     
