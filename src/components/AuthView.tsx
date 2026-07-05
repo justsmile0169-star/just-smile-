@@ -40,24 +40,32 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
       if (isLogin) {
         // --- LOGIN FLOW ---
 
+        console.log('[AuthView] Attempting login with email:', email.trim());
+
         // First, check if user exists in Firestore to determine auth method
         const usersRef = collection(db, 'users');
         const q = query(usersRef, where('email', '==', email.trim()));
         const userSnapshot = await getDocs(q);
 
+        console.log('[AuthView] User snapshot size:', userSnapshot.size);
+
         if (userSnapshot.empty) {
           // User not found
+          console.log('[AuthView] User not found in Firestore');
           setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
           setLoading(false);
           return;
         }
 
         const userData = userSnapshot.docs[0].data() as UserProfile;
+        console.log('[AuthView] User found:', userData.name, 'role:', userData.role, 'status:', userData.status);
 
         // Check if user is staff (admin, manager, cashier, accountant)
         if (userData.role !== 'doctor') {
+          console.log('[AuthView] User is staff, attempting staff login');
           // Use staff login (Firestore-based)
           const staffProfile = await signInStaff(email.trim(), password);
+          console.log('[AuthView] Staff login result:', staffProfile ? 'SUCCESS' : 'FAILED');
           if (staffProfile) {
             // Update last login time
             await updateDoc(doc(db, 'users', staffProfile.uid), {
@@ -68,6 +76,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
             return;
           } else {
             // Staff login failed - wrong password
+            console.log('[AuthView] Staff login failed - setting error message');
             setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
             setLoading(false);
             return;
@@ -75,6 +84,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
         }
 
         // User is doctor - use Firebase Auth
+        console.log('[AuthView] User is doctor, attempting Firebase Auth');
         try {
           const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
           const userDocRef = doc(db, 'users', userCredential.user.uid);
