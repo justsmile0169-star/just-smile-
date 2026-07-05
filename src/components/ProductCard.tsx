@@ -102,16 +102,18 @@ export default function ProductCard({
       {/* Product Information */}
       <div className="p-4 md:p-5 flex-1 flex flex-col">
         {/* Category Badge */}
-        <span className="text-[10px] font-extrabold text-brand-cyan bg-brand-cyan/5 dark:bg-brand-cyan/10 px-2 py-0.5 rounded-md self-start uppercase tracking-wider mb-2">
-          {product.category}
-        </span>
+        {product.category && (
+          <span className="text-[10px] font-extrabold text-brand-cyan bg-brand-cyan/5 dark:bg-brand-cyan/10 px-2 py-0.5 rounded-md self-start uppercase tracking-wider mb-2">
+            {product.category}
+          </span>
+        )}
 
         {/* Product Name */}
-        <h3 
+        <h3
           onClick={() => onViewDetails(product)}
           className="font-bold text-slate-800 dark:text-slate-200 text-sm md:text-base line-clamp-2 hover:text-brand-cyan transition-colors cursor-pointer mb-2 flex-1"
         >
-          {product.name}
+          {product.name && product.name !== '0' ? product.name : '-'}
         </h3>
 
         {/* Dynamic Alerts */}
@@ -123,12 +125,12 @@ export default function ProductCard({
             </div>
           )}
 
-          {isExpiringSoon && (
+          {isExpiringSoon && product.expiryDate && product.expiryDate !== '0' && (
             <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-2 py-1 rounded-lg text-xs font-semibold">
               <Calendar size={12} className="shrink-0" />
               <span>
-                {lang === 'fr' 
-                  ? `Exp. proche: ${product.expiryDate}` 
+                {lang === 'fr'
+                  ? `Exp. proche: ${product.expiryDate}`
                   : `انتهاء قريب: ${product.expiryDate}`}
               </span>
             </div>

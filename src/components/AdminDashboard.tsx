@@ -1295,12 +1295,12 @@ export default function AdminDashboard({
                         </td>
                         <td className="py-3 font-bold text-slate-800">{p.name}</td>
                         <td className="py-3 text-slate-500 text-xs font-bold">{p.category}</td>
-                        <td className="py-3 font-extrabold">{formatPrice(p.price)}</td>
+                        <td className="py-3 font-extrabold">{p.price > 0 ? formatPrice(p.price) : '-'}</td>
                         <td className="py-3 text-rose-500 font-bold">
                           {p.discountPercent && p.discountPercent > 0 ? `-${p.discountPercent}%` : '-'}
                         </td>
                         <td className={`py-3 font-black ${isLow ? 'text-amber-600' : 'text-slate-800'}`}>
-                          {p.stock}
+                          {p.stock > 0 ? p.stock : '-'}
                         </td>
                         <td className="py-3 text-xs text-slate-500">{p.expiryDate || '-'}</td>
                         <td className="py-3 text-right">
