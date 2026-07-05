@@ -134,10 +134,12 @@ export default function ProductCard({
         {/* Price & Cart Actions */}
         <div className="flex items-center justify-between gap-2 mt-auto shrink-0 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex flex-wrap items-baseline gap-1.5">
-            <span className="text-base md:text-lg font-black text-brand-dark dark:text-slate-100 animate-pulse-subtle">
-              {finalPrice > 0 ? formatPrice(finalPrice) : '-'}
-            </span>
-            {hasProductDiscount && product.price > 0 && (
+            {product.price > 0 && (
+              <span className="text-base md:text-lg font-black text-brand-dark dark:text-slate-100 animate-pulse-subtle">
+                {finalPrice > 0 ? formatPrice(finalPrice) : '-'}
+              </span>
+            )}
+            {hasProductDiscount && product.discountPercent > 0 && product.price > 0 && (
               <span className="text-xs md:text-sm text-slate-400 dark:text-slate-500 font-medium line-through">
                 {formatPrice(product.price)}
               </span>
