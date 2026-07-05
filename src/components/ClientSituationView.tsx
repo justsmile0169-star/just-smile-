@@ -94,10 +94,10 @@ export default function ClientSituationView({
     return { totalPurchases, totalReturns, totalPaid, totalDebt };
   }, [activeOrders, clientReturns, cancelledOrders, clientPayments]);
 
-  const formatPrice = (num: number) =>
-    new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) +
-    ' ' +
-    getTranslation(lang, 'currency');
+  const formatPrice = (num: number) => {
+    if (num === 0 || num === undefined || num === null) return '-';
+    return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
+  };
 
   const formatDate = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ');

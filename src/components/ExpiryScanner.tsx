@@ -100,6 +100,7 @@ export default function ExpiryScanner({
   };
 
   const formatPrice = (num: number) => {
+    if (num === 0 || num === undefined || num === null) return '-';
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
   };
 
