@@ -40,71 +40,81 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
       if (isLogin) {
         // --- LOGIN FLOW ---
 
-        // First try staff login (Firestore-based)
-        const staffProfile = await signInStaff(email.trim(), password);
-        if (staffProfile) {
-          // Update last login time
-          await updateDoc(doc(db, 'users', staffProfile.uid), {
-            lastLoginAt: new Date().toISOString()
-          });
-          onAuthSuccess(staffProfile);
-          setLoading(false);
-          return;
-        }
-
-        // If staff login fails, check if it's because of wrong credentials
-        // Try to find the user in Firestore to determine the error
+        // First, check if user exists in Firestore to determine auth method
         const usersRef = collection(db, 'users');
         const q = query(usersRef, where('email', '==', email.trim()));
         const userSnapshot = await getDocs(q);
 
-        if (!userSnapshot.empty) {
-          // User exists but login failed - likely wrong password
-          const userData = userSnapshot.docs[0].data() as UserProfile;
-          if (userData.role !== 'doctor' && userData.status === 'approved') {
-            // Staff user with wrong password
+        if (userSnapshot.empty) {
+          // User not found
+          setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+          setLoading(false);
+          return;
+        }
+
+        const userData = userSnapshot.docs[0].data() as UserProfile;
+
+        // Check if user is staff (admin, manager, cashier, accountant)
+        if (userData.role !== 'doctor') {
+          // Use staff login (Firestore-based)
+          const staffProfile = await signInStaff(email.trim(), password);
+          if (staffProfile) {
+            // Update last login time
+            await updateDoc(doc(db, 'users', staffProfile.uid), {
+              lastLoginAt: new Date().toISOString()
+            });
+            onAuthSuccess(staffProfile);
+            setLoading(false);
+            return;
+          } else {
+            // Staff login failed - wrong password
             setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
             setLoading(false);
             return;
           }
         }
 
-        // If staff login fails, try Firebase Auth for doctors
-        const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-        const userDocRef = doc(db, 'users', userCredential.user.uid);
-        const userDoc = await getDoc(userDocRef);
+        // User is doctor - use Firebase Auth
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+          const userDocRef = doc(db, 'users', userCredential.user.uid);
+          const userDoc = await getDoc(userDocRef);
 
-        if (!userDoc.exists()) {
-          setErrorMsg(lang === 'fr' ? 'Profil utilisateur introuvable.' : 'موقع الطبيب غير موجود.');
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
+          if (!userDoc.exists()) {
+            setErrorMsg(lang === 'fr' ? 'Profil utilisateur introuvable.' : 'موقع الطبيب غير موجود.');
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
 
-        const profile = userDoc.data() as UserProfile;
+          const profile = userDoc.data() as UserProfile;
 
-        // Admin bypass validation check
-        if (profile.role !== 'doctor') {
+          // Doctor validation status check
+          if (profile.status === 'pending') {
+            setErrorMsg(lang === 'fr' ? 'Votre compte est en attente de validation' : 'حسابك في انتظار تفعيل المدير. يرجى الانتظار.');
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
+
+          if (profile.status === 'rejected') {
+            setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé. Veuillez contacter le support.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
+
           onAuthSuccess(profile);
-          return;
-        }
-
-        // Doctor validation status check
-        if (profile.status === 'pending') {
-          setErrorMsg(lang === 'fr' ? 'Votre compte est en attente de validation' : 'حسابك في انتظار تفعيل المدير. يرجى الانتظار.');
-          await signOut(auth);
+        } catch (err: any) {
+          console.error('Firebase Auth error:', err);
+          if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+            setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+          } else {
+            setErrorMsg(lang === 'fr' ? 'Erreur de connexion.' : 'خطأ في تسجيل الدخول.');
+          }
           setLoading(false);
           return;
         }
-
-        if (profile.status === 'rejected') {
-          setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé. Veuillez contacter le support.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        onAuthSuccess(profile);
       } else {
         // --- REGISTER FLOW ---
         if (!name || !phone || !email || !password || !clinicName || !location) {
