@@ -1,35 +1,41 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
+    // Check if user document exists
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Get user document data safely
     function userDoc() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
-    
+
+    // Get user role safely
     function userRole() {
+      if (!userExists()) return null;
       return userDoc().role;
     }
-    
+
+    // Check if user is admin
     function isAdmin() {
-      return isAuthenticated() && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        userRole() == 'admin';
+      return isAuthenticated() && userExists() && userRole() == 'admin';
     }
-    
+
+    // Check if user is staff
     function isStaff() {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        userRole() in ['admin', 'manager', 'cashier', 'accountant'];
+      return isAuthenticated() && userExists() && userRole() in ['admin', 'manager', 'cashier', 'accountant'];
     }
-    
+
     function isManagerOrAdmin() {
-      return isAdmin() || (isAuthenticated() && userRole() == 'manager');
+      return isAdmin() || (isAuthenticated() && userExists() && userRole() == 'manager');
     }
-    
+
     function isOwner(uid) {
       return isAuthenticated() && request.auth.uid == uid;
     }
@@ -52,10 +58,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
-    // Allow list queries for login (unauthenticated users need to check if email exists)
-    // This is necessary for the custom staff authentication system
+    // Allow list queries for:
+    // 1. Authenticated staff (admin dashboard)
+    // 2. Unauthenticated users querying by email only (for login - strictly limited)
+    // SECURITY: Only allows single email query, prevents mass data exposure
     match /users {
-      allow list: if true;
+      allow list: if (isAuthenticated() && isStaff()) ||
+                      (!isAuthenticated() &&
+                       request.query.size() == 1 &&
+                       request.query.where.size() == 1 &&
+                       request.query.where[0].field == 'email' &&
+                       request.query.where[0].op == '==');
       allow get: if false;
     }
     
@@ -135,7 +148,7 @@ service cloud.firestore {
     // Admin Messages (doctor to admin communication)
     match /admin_messages/{messageId} {
       allow read: if isStaff();
-      allow create: if isAuthenticated() && request.resource.data.role == 'doctor';
+      allow create: if isAuthenticated() && userExists() && userRole() == 'doctor';
       allow update: if isStaff();
       allow delete: if isAdmin();
     }
