@@ -35,24 +35,19 @@ service cloud.firestore {
       return isAdmin() || (isAuthenticated() && userExists() && userRole() == 'manager');
     }
 
-    function isOwner(uid) {
-      return isAuthenticated() && request.auth.uid == uid;
-    }
-    
     // User Profiles
     match /users/{userId} {
       // Allow read for authenticated users (own profile only)
-      allow read: if isOwner(userId);
+      allow read: if isAuthenticated() && request.auth.uid == userId;
       // Allow create for doctors (self-registration) and admins (staff creation)
-      allow create: if isAuthenticated() && isOwner(userId) && 
-                      request.resource.data.role == 'doctor' && 
+      allow create: if isAuthenticated() && request.auth.uid == userId &&
+                      request.resource.data.role == 'doctor' &&
                       request.resource.data.status == 'pending';
       // Allow admin to create staff accounts
-      allow create: if isAdmin() && 
+      allow create: if isAdmin() &&
                       request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];
       // Allow update for password changes and profile updates
-      allow update: if isAdmin() || (isOwner(userId) && 
-                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['password', 'lastLoginAt']));
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
       // Allow delete for admins only
       allow delete: if isAdmin();
     }
