@@ -37,8 +37,8 @@ export async function signInStaff(email: string, password: string): Promise<User
         continue;
       }
       
-      // Check if user is approved
-      if (userData.status !== 'approved') {
+      // Check if user is approved (or has no status field)
+      if (userData.status && userData.status !== 'approved') {
         console.log('[staffAuth] User status is not approved:', userData.status);
         continue;
       }

@@ -25,7 +25,7 @@ export const translations = {
     browse: 'Produits',
     favorites: 'Favoris',
     notifications: 'Notifications',
-    pendingApproval: 'Votre compte est en attente de validation par l\'administrateur. Veuillez patienter.',
+    pendingApproval: 'Votre compte est toujours en cours d\'étude par l\'administration.',
     rejectedApproval: 'Votre compte a été refusé. Veuillez contacter le support.',
     
     // Auth fields
@@ -143,7 +143,7 @@ export const translations = {
     browse: 'المنتجات',
     favorites: 'المفضلة',
     notifications: 'الإشعارات',
-    pendingApproval: 'حسابك في انتظار تفعيل المدير. يرجى الانتظار.',
+    pendingApproval: 'حسابك قيد المراجعة ، ستتمكن من تسجيل الدخول فور تفعيله من طرف الإدارة ، شكرا لتفهمك .',
     rejectedApproval: 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.',
     
     // Auth fields

@@ -63,6 +63,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
         // Check if user is staff (admin, manager, cashier, accountant)
         if (userData.role !== 'doctor') {
           console.log('[AuthView] User is staff, attempting staff login');
+          console.log('[AuthView] User data:', userData);
           // Use staff login (Firestore-based)
           const staffProfile = await signInStaff(email.trim(), password);
           console.log('[AuthView] Staff login result:', staffProfile ? 'SUCCESS' : 'FAILED');
