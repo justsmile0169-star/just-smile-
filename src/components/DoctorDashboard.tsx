@@ -308,7 +308,7 @@ export default function DoctorDashboard({
                       return (
                         <tr key={order.id} className="text-sm hover:bg-slate-50/50 transition-colors">
                           <td className="py-4 font-bold text-slate-800">
-                            <div>#{order.id.slice(-6).toUpperCase()}</div>
+                            <div>#{order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN'}</div>
                             <div className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold mt-0.5">
                               {order.paymentMethod === 'cash' 
                                 ? (lang === 'fr' ? 'Comptant à la livraison' : 'مباشر عند الاستلام')

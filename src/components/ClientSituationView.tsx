@@ -299,7 +299,7 @@ export default function ClientSituationView({
                         clientOrders.map((order) => (
                           <tr key={order.id} className="hover:bg-slate-50/50">
                             <td className="py-2 px-3 font-mono text-xs font-bold">
-                              #{order.id.slice(-6).toUpperCase()}
+                              #{order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN'}
                             </td>
                             <td className="py-2 px-3 text-xs text-slate-500">{formatDate(order.createdAt)}</td>
                             <td className="py-2 px-3 font-bold">{formatPrice(order.totalAfterDiscount)}</td>
@@ -355,7 +355,7 @@ export default function ClientSituationView({
                             <tr key={`cancel-${order.id}`} className="hover:bg-slate-50/50 bg-rose-50/30">
                               <td className="py-2 px-3 text-xs text-slate-500">{formatDate(order.createdAt)}</td>
                               <td className="py-2 px-3 font-mono text-xs">
-                                #{order.id.slice(-6).toUpperCase()}
+                                #{order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN'}
                               </td>
                               <td className="py-2 px-3 font-bold text-amber-600">
                                 {formatPrice(order.totalAfterDiscount)}
@@ -448,7 +448,7 @@ export default function ClientSituationView({
                   <option value="">—</option>
                   {activeOrders.map((o) => (
                     <option key={o.id} value={o.id}>
-                      #{o.id.slice(-6).toUpperCase()} — {formatPrice(o.totalAfterDiscount)}
+                      #{o.id ? o.id.slice(-6).toUpperCase() : 'UNKNOWN'} — {formatPrice(o.totalAfterDiscount)}
                     </option>
                   ))}
                 </select>

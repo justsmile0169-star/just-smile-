@@ -252,7 +252,7 @@ export default function AdminDashboard({
         order.deliveryType === 'to_clinic' ? 'Clinique' : '';
 
       return [
-        order.id.slice(-6).toUpperCase(),
+        order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN',
         formatDate(order.createdAt),
         order.doctorName,
         order.doctorClinic,
@@ -336,8 +336,8 @@ export default function AdminDashboard({
         userId: selectedOrderForPayment.userId,
         titleFr: 'Paiement enregistré !',
         titleAr: 'تم تسجيل دفعة مالية!',
-        messageFr: `Un paiement de ${formatPrice(paymentAmount)} a été validé pour la commande #${selectedOrderForPayment.id.slice(-6).toUpperCase()}. Solde restant: ${formatPrice(newRemaining)}.`,
-        messageAr: `تم تسجيل دفعة بقيمة ${formatPrice(paymentAmount)} للطلب رقم #${selectedOrderForPayment.id.slice(-6).toUpperCase()}. الرصيد المتبقي: ${formatPrice(newRemaining)}.`,
+        messageFr: `Un paiement de ${formatPrice(paymentAmount)} a été validé pour la commande #${selectedOrderForPayment.id ? selectedOrderForPayment.id.slice(-6).toUpperCase() : 'UNKNOWN'}. Solde restant: ${formatPrice(newRemaining)}.`,
+        messageAr: `تم تسجيل دفعة بقيمة ${formatPrice(paymentAmount)} للطلب رقم #${selectedOrderForPayment.id ? selectedOrderForPayment.id.slice(-6).toUpperCase() : 'UNKNOWN'}. الرصيد المتبقي: ${formatPrice(newRemaining)}.`,
         type: 'payment_reminder',
         isRead: false,
         createdAt: new Date().toISOString()
@@ -1227,7 +1227,7 @@ export default function AdminDashboard({
                             <p className="text-xs text-slate-400">{order.doctorClinic}</p>
                           </td>
                           <td className="py-4">
-                            <p className="font-mono font-bold">#{order.id.slice(-6).toUpperCase()}</p>
+                            <p className="font-mono font-bold">#{order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN'}</p>
                             <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
                               {order.paymentMethod === 'cash' 
                                 ? (lang === 'fr' ? 'Comptant (COD)' : 'نقدي عند الاستلام')
@@ -1817,7 +1817,7 @@ export default function AdminDashboard({
 
             <div className="p-6 space-y-4">
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs text-slate-600 space-y-1">
-                <p><strong>Commande:</strong> #{selectedOrderForPayment.id.slice(-6).toUpperCase()}</p>
+                <p><strong>Commande:</strong> #{selectedOrderForPayment.id ? selectedOrderForPayment.id.slice(-6).toUpperCase() : 'UNKNOWN'}</p>
                 <p><strong>Médecin:</strong> {selectedOrderForPayment.doctorName}</p>
                 <p><strong>Total Facture:</strong> {formatPrice(selectedOrderForPayment.totalAfterDiscount)}</p>
                 <p><strong>Montant déjà payé:</strong> {formatPrice(selectedOrderForPayment.paidAmount)}</p>
@@ -1874,7 +1874,7 @@ export default function AdminDashboard({
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <span className="font-extrabold text-slate-800 text-base">
-                  {lang === 'fr' ? `Détails Commande #${selectedOrderForDetails.id.slice(-6).toUpperCase()}` : `تفاصيل الطلب #${selectedOrderForDetails.id.slice(-6).toUpperCase()}`}
+                  {lang === 'fr' ? `Détails Commande #${selectedOrderForDetails.id ? selectedOrderForDetails.id.slice(-6).toUpperCase() : 'UNKNOWN'}` : `تفاصيل الطلب #${selectedOrderForDetails.id ? selectedOrderForDetails.id.slice(-6).toUpperCase() : 'UNKNOWN'}`}
                 </span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase ${
                   selectedOrderForDetails.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :

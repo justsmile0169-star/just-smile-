@@ -58,7 +58,7 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList }: A
     const topProducts = [...productMap.values()]
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 8)
-      .map((p) => ({ name: p.name.length > 22 ? p.name.slice(0, 22) + '…' : p.name, qty: p.qty, revenue: p.revenue }));
+      .map((p) => ({ name: p.name && p.name.length > 22 ? p.name.slice(0, 22) + '…' : (p.name || 'Unknown'), qty: p.qty, revenue: p.revenue }));
 
     const dayMap = new Map<string, number>();
     activeOrders.forEach((o) => {

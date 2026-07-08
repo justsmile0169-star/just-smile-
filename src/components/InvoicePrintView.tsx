@@ -50,7 +50,7 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
 
   useEffect(() => {
     const payload = JSON.stringify({
-      invoice: order.id.slice(-8).toUpperCase(),
+      invoice: order.id ? order.id.slice(-8).toUpperCase() : 'UNKNOWN',
       total: order.totalAfterDiscount,
       date: order.createdAt,
       shop: shopInfo.companyName
@@ -67,7 +67,7 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
   const totalRemise = order.discountAmount;
 
   const isCash = order.paymentMethod === 'cash';
-  const invoiceNum = order.id.slice(-8).toUpperCase();
+  const invoiceNum = order.id ? order.id.slice(-8).toUpperCase() : 'UNKNOWN';
   const invoiceDate = new Date(order.createdAt).toLocaleDateString('fr-FR');
   const deadlineDate = new Date(order.deadlineDate).toLocaleDateString('fr-FR');
 
@@ -446,7 +446,7 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
         <table>
           {order.items.map((item, i) => (
             <tr key={i}>
-              <td>{item.name.slice(0, 20)}</td>
+              <td>{item.name ? item.name.slice(0, 20) : 'Unknown'}</td>
               <td>x{item.quantity}</td>
               <td>{fmt(item.price * item.quantity)}</td>
             </tr>
