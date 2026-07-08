@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Order, Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2 } from 'lucide-react';
+import { collection, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 interface DoctorDashboardProps {
@@ -38,6 +38,28 @@ export default function DoctorDashboard({
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+
+  const handleCancelOrder = async (orderId: string) => {
+    if (!confirm(lang === 'fr' ? 'Voulez-vous vraiment annuler cette commande ?' : 'هل أنت متأكد من إلغاء هذه الطلبية؟')) {
+      return;
+    }
+    
+    setCancellingOrderId(orderId);
+    try {
+      await updateDoc(doc(db, 'orders', orderId), {
+        status: 'cancelled',
+        cancelledAt: new Date().toISOString(),
+        cancelledBy: user.uid,
+        cancelledByName: user.name
+      });
+    } catch (error) {
+      console.error('Error cancelling order:', error);
+      alert(lang === 'fr' ? 'Erreur lors de l\'annulation de la commande.' : 'حدث خطأ أثناء إلغاء الطلبية.');
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!messageText.trim()) return;
@@ -331,6 +353,16 @@ export default function DoctorDashboard({
                           </td>
                           <td className="py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
+                              {order.status === 'pending' && (
+                                <button
+                                  onClick={() => handleCancelOrder(order.id)}
+                                  disabled={cancellingOrderId === order.id}
+                                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all disabled:opacity-50"
+                                  title={lang === 'fr' ? 'Annuler la commande' : 'إلغاء الطلبية'}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
                               <button
                                 onClick={() => onPrintInvoice(order)}
                                 className="p-2 text-slate-400 hover:text-brand-cyan hover:bg-brand-cyan/5 rounded-xl transition-all"

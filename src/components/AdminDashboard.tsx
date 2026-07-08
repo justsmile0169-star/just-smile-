@@ -1209,6 +1209,7 @@ export default function AdminDashboard({
                     <tr className="text-xs font-extrabold text-slate-400 uppercase border-b border-slate-100 pb-3">
                       <th className="pb-3">{lang === 'fr' ? 'Médecin / Cabinet' : 'الطبيب / العيادة'}</th>
                       <th className="pb-3">{getTranslation(lang, 'orderId')}</th>
+                      <th className="pb-3">{getTranslation(lang, 'status')}</th>
                       <th className="pb-3">{getTranslation(lang, 'deadline')}</th>
                       <th className="pb-3">{getTranslation(lang, 'total')}</th>
                       <th className="pb-3">{getTranslation(lang, 'paidAmount')}</th>
@@ -1232,6 +1233,22 @@ export default function AdminDashboard({
                                 ? (lang === 'fr' ? 'Comptant (COD)' : 'نقدي عند الاستلام')
                                 : (lang === 'fr' ? 'Crédit' : 'آجل (دين)')}
                             </p>
+                          </td>
+                          <td className="py-4">
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold tracking-wide uppercase ${
+                              order.status === 'delivered' 
+                                ? 'bg-emerald-50 text-emerald-600' 
+                                : order.status === 'cancelled' 
+                                  ? 'bg-rose-50 text-rose-600' 
+                                  : 'bg-brand-cyan/10 text-brand-cyan'
+                            }`}>
+                              {getTranslation(lang, `status_${order.status}` as any)}
+                            </span>
+                            {order.cancelledByName && (
+                              <p className="text-[10px] text-rose-500 mt-1">
+                                {lang === 'fr' ? 'Annulé par' : 'ألغاه'}: {order.cancelledByName}
+                              </p>
+                            )}
                           </td>
                           <td className="py-4">
                             {order.paymentMethod === 'cash' ? (

@@ -11,7 +11,13 @@ export interface UserProfile {
   phone: string;
   email: string;
   clinicName: string;
-  location: string; // Wilaya, Commune
+  location: string; // Legacy free-text or derived "Wilaya, Commune"
+  // ── Structured location fields (set during registration) ──────────────────
+  wilayaCode?: string;      // e.g. "17"
+  wilayaName?: string;      // e.g. "الجلفة"
+  communeName?: string;     // e.g. "الجلفة" (commune)
+  communeNameAscii?: string; // e.g. "Djelfa"
+  // ─────────────────────────────────────────────────────────────────────────
   role: UserRole;
   status: UserStatus;
   createdAt: string;
@@ -46,6 +52,8 @@ export interface CartItem {
   quantity: number;
 }
 
+export type DeliveryType = 'free' | 'to_office' | 'to_clinic';
+
 export interface Order {
   id: string;
   userId: string;
@@ -74,6 +82,20 @@ export interface Order {
   notes?: string;
   processedBy?: string; // uid of staff member who processed this order
   processedByName?: string; // name of staff member who processed this order
+  // ── Cancellation ───────────────────────────────────────────────────────────
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelledByName?: string;
+  // ── Delivery ─────────────────────────────────────────────────────────────
+  deliveryType?: DeliveryType;   // 'free' | 'to_office' | 'to_clinic'
+  deliveryCost?: number;          // 0 for free, otherwise in DZD
+  doctorWilayaCode?: string;      // wilaya code at order time
+  doctorWilayaName?: string;      // wilaya name at order time
+  doctorCommuneName?: string;     // commune at order time
+  // Yalidine Integration Fields
+  yalidineTrackingNumber?: string;
+  yalidineStatus?: string;
+  yalidineLabelUrl?: string;
 }
 
 export interface Payment {
@@ -156,6 +178,7 @@ export interface Promotion {
   endDate: string;
   isActive: boolean;
   createdAt: string;
+  imageUrl?: string;
 }
 
 export type ExpenseCategory = 'rent' | 'electricity' | 'salaries' | 'supplies' | 'other';
@@ -186,4 +209,21 @@ export interface ActivityLog {
 export interface BackupMeta {
   lastBackupAt?: string;
   collectionCounts?: Record<string, number>;
+}
+
+// ── Announcements (Ads) ────────────────────────────────────────────────────────
+export interface Announcement {
+  id: string;
+  titleFr: string;
+  titleAr: string;
+  descriptionFr?: string;
+  descriptionAr?: string;
+  imageUrl?: string;      // URL to image (base64 or https)
+  linkUrl?: string;       // Optional CTA link
+  isActive: boolean;
+  createdBy: string;      // UID of creator
+  createdByName: string;
+  createdAt: string;
+  expiresAt?: string;     // Optional expiry date ISO string
+  order?: number;         // Display order (lower = first)
 }

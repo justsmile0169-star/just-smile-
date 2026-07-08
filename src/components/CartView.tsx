@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { CartItem, UserProfile, Order, Product, Promotion } from '../types';
+import { CartItem, UserProfile, Order, Product, Promotion, DeliveryType } from '../types';
 import { calculatePromotionDiscount } from '../utils/promotionEngine';
 import { Language, getTranslation } from '../translations';
 import { db } from '../firebase';
-import { collection, addDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
-import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, CheckCircle, Clock } from 'lucide-react';
+import { collection, addDoc, doc, updateDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
+import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, CheckCircle, Clock, Truck } from 'lucide-react';
 import { useAppDialog } from '../context/AppDialogContext';
+import { isFreeDelivery, getDeliveryPricing } from '../utils/algeriaData';
 
 interface CartViewProps {
   cart: CartItem[];
@@ -39,6 +40,7 @@ export default function CartView({
   const [notes, setNotes] = useState('');
   const [success, setSuccess] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'credit' | 'cash'>('cash');
+  const [deliveryOption, setDeliveryOption] = useState<'to_office' | 'to_clinic'>('to_clinic');
 
   const isRtl = lang === 'ar';
 
@@ -71,7 +73,19 @@ export default function CartView({
 
   const promoResult = calculatePromotionDiscount(cart, promotions);
   const totalDiscount = totals.productDiscounts + doctorDiscountAmount + promoResult.promotionDiscount;
-  const netTotalToPay = totals.grossTotal - totalDiscount;
+  
+  // --- Delivery cost calculations ---
+  const userWilayaCode = user?.wilayaCode || '';
+  const userCommuneNameAscii = user?.communeNameAscii || '';
+  
+  const hasFreeDelivery = userWilayaCode && userCommuneNameAscii 
+    ? isFreeDelivery(userWilayaCode, userCommuneNameAscii) 
+    : false;
+
+  const deliveryPricing = userWilayaCode ? getDeliveryPricing(userWilayaCode) : { toOffice: 450, toClinic: 700 };
+  const deliveryCost = hasFreeDelivery ? 0 : (deliveryOption === 'to_office' ? deliveryPricing.toOffice : deliveryPricing.toClinic);
+
+  const netTotalToPay = totals.grossTotal - totalDiscount + deliveryCost;
 
   // --- Blocking Rule Check ---
   // Overdue means: order remaining balance > 0 and current time > order creation + 20 days. Cash on delivery is not counted.
@@ -142,12 +156,36 @@ export default function CartView({
         commercialName: user.commercialName || 'Directe',
         notes: notes.trim() || "",
         processedBy: currentUser?.uid,
-        processedByName: currentUser?.name
+        processedByName: currentUser?.name,
+        // Delivery fields
+        deliveryType: hasFreeDelivery ? 'free' : deliveryOption,
+        deliveryCost: deliveryCost,
+        doctorWilayaCode: user.wilayaCode || '',
+        doctorWilayaName: user.wilayaName || '',
+        doctorCommuneName: user.communeName || '',
       };
 
       // 1. Write the order
       const orderDoc = await addDoc(orderRef, newOrder);
       await updateDoc(doc(db, 'orders', orderDoc.id), { id: orderDoc.id });
+
+      // 2. Send notification to admin and cashiers about new order
+      const staffQuery = query(collection(db, 'users'), where('role', 'in', ['admin', 'cashier']));
+      const staffSnapshot = await getDocs(staffQuery);
+      
+      for (const staffDoc of staffSnapshot.docs) {
+        await addDoc(collection(db, 'notifications'), {
+          userId: staffDoc.id,
+          titleFr: 'Nouvelle commande',
+          titleAr: 'طلبية جديدة',
+          messageFr: `Nouvelle commande de ${user.name} - ${user.clinicName}. Total: ${netTotalToPay} DZD`,
+          messageAr: `طلبية جديدة من ${user.name} - ${user.clinicName}. المجموع: ${netTotalToPay} دج`,
+          type: 'order_update',
+          isRead: false,
+          createdAt: new Date().toISOString(),
+          orderId: orderDoc.id
+        });
+      }
 
       // 2. Decrement inventory stock inside transaction/batch
       const batch = writeBatch(db);
@@ -365,6 +403,20 @@ export default function CartView({
                   </div>
                 )}
 
+                {deliveryCost > 0 ? (
+                  <div className="flex justify-between text-slate-600 font-semibold">
+                    <span>{lang === 'fr' ? 'Frais de livraison' : 'سعر التوصيل'}</span>
+                    <span>+{formatPrice(deliveryCost)}</span>
+                  </div>
+                ) : (
+                  hasFreeDelivery && (
+                    <div className="flex justify-between text-emerald-600 font-bold">
+                      <span>{lang === 'fr' ? 'Livraison' : 'التوصيل'}</span>
+                      <span>{lang === 'fr' ? 'Gratuit (Djelfa)' : 'مجاني (الجلفة)'}</span>
+                    </div>
+                  )
+                )}
+
                 <div className="flex justify-between text-base font-black text-slate-800 border-t border-slate-50 pt-3.5">
                   <span>
                     {paymentMethod === 'credit'
@@ -383,8 +435,77 @@ export default function CartView({
                 </div>
               )}
 
-              {/* Payment Method Info (Cash Only) */}
-              <div className="space-y-3">
+              {/* Delivery Option Selection */}
+              {user && !isBlockedFromOrdering && (
+                <div className="space-y-3 border-t border-slate-100 pt-4">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest block">
+                    {lang === 'fr' ? 'Option de livraison' : 'خيارات التوصيل والشحن'}
+                  </label>
+                  {hasFreeDelivery ? (
+                    <div className="flex items-start gap-2.5 bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs font-semibold p-3.5 rounded-xl">
+                      <Truck size={16} className="shrink-0 mt-0.5" />
+                      <span>
+                        {lang === 'fr'
+                          ? 'Félicitations ! La livraison est gratuite pour la commune de Djelfa.'
+                          : 'تهانينا! التوصيل مجاني بالكامل لبلدية الجلفة.'}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryOption('to_office')}
+                        className={`w-full p-3.5 rounded-2xl border text-left flex items-start gap-3 transition-all ${
+                          deliveryOption === 'to_office'
+                            ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark'
+                            : 'border-slate-200 bg-white text-slate-650 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="w-4 h-4 rounded-full border border-slate-350 flex items-center justify-center mt-1 shrink-0">
+                          {deliveryOption === 'to_office' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
+                        </div>
+                        <div className="text-xs space-y-0.5">
+                          <p className="font-extrabold text-slate-800">
+                            {lang === 'fr' ? 'Livraison vers Bureau de livraison' : 'شحن إلى مكتب التوصيل'}
+                          </p>
+                          <p className="text-slate-400">
+                            {lang === 'fr'
+                              ? `Récupérez votre colis au bureau. Tarif : ${formatPrice(deliveryPricing.toOffice)}`
+                              : `استلام الطرد من مكتب شركة الشحن. السعر: ${formatPrice(deliveryPricing.toOffice)}`}
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryOption('to_clinic')}
+                        className={`w-full p-3.5 rounded-2xl border text-left flex items-start gap-3 transition-all ${
+                          deliveryOption === 'to_clinic'
+                            ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark'
+                            : 'border-slate-200 bg-white text-slate-650 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="w-4 h-4 rounded-full border border-slate-350 flex items-center justify-center mt-1 shrink-0">
+                          {deliveryOption === 'to_clinic' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
+                        </div>
+                        <div className="text-xs space-y-0.5">
+                          <p className="font-extrabold text-slate-800">
+                            {lang === 'fr' ? 'Livraison à la Clinique / Cabinet' : 'توصيل مباشر إلى العيادة'}
+                          </p>
+                          <p className="text-slate-400">
+                            {lang === 'fr'
+                              ? `Livraison à domicile à votre adresse. Tarif : ${formatPrice(deliveryPricing.toClinic)}`
+                              : `توصيل الطرد مباشرة إلى مقر عيادتك. السعر: ${formatPrice(deliveryPricing.toClinic)}`}
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Payment Method Info (Cash on Delivery Only) */}
+              <div className="space-y-3 border-t border-slate-100 pt-4">
                 <label className="text-xs font-black text-slate-400 uppercase tracking-widest block">
                   {lang === 'fr' ? 'Mode de paiement' : 'طريقة الدفع والسداد'}
                 </label>
@@ -394,12 +515,12 @@ export default function CartView({
                   </div>
                   <div className="text-xs space-y-0.5">
                     <p className="font-extrabold text-slate-800 dark:text-slate-200">
-                      {lang === 'fr' ? 'Paiement au Comptant à la Livraison' : 'الدفع عند الاستلام نقداً (كاش / شيك)'}
+                      {lang === 'fr' ? 'Paiement au Comptant à la Livraison' : 'الدفع عند الاستلام نقداً'}
                     </p>
                     <p className="text-slate-400">
                       {lang === 'fr'
-                        ? 'Règlement direct (espèces ou chèque) au livreur.'
-                        : 'الدفع المباشر نقداً أو بشيك للموزع فور الاستلام.'}
+                        ? 'Règlement en espèces au livreur à la réception.'
+                        : 'الدفع المباشر نقداً للمندوب فور استلام الطلب.'}
                     </p>
                   </div>
                 </div>
