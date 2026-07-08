@@ -77,7 +77,7 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (isAuthenticated() && resource.data.userId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy', 'cancelledByName']) && request.resource.data.status == 'cancelled');
+      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (isAuthenticated() && resource.data.userId == request.auth.uid && resource.data.status == 'pending');
       allow delete: if isAdmin();
     }
     
