@@ -167,6 +167,9 @@ export default function CartView({
 
       // 1. Write the order
       const orderDoc = await addDoc(orderRef, newOrder);
+      if (!orderDoc.id) {
+        throw new Error('Failed to create order document');
+      }
       await updateDoc(doc(db, 'orders', orderDoc.id), { id: orderDoc.id });
 
       // 2. Send notification to admin and cashiers about new order
