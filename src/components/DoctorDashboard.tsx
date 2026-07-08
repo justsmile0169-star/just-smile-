@@ -4,6 +4,7 @@ import { Language, getTranslation } from '../translations';
 import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { useAppDialog } from '../context/AppDialogContext';
 
 interface DoctorDashboardProps {
   user: UserProfile;
@@ -35,15 +36,15 @@ export default function DoctorDashboard({
   onSelectCategory
 }: DoctorDashboardProps) {
   const isRtl = lang === 'ar';
+  const { alert, confirm } = useAppDialog();
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
 
   const handleCancelOrder = async (orderId: string) => {
-    if (!confirm(lang === 'fr' ? 'Voulez-vous vraiment annuler cette commande ?' : 'هل أنت متأكد من إلغاء هذه الطلبية؟')) {
-      return;
-    }
+    const confirmed = await confirm(lang === 'fr' ? 'Voulez-vous vraiment annuler cette commande ?' : 'هل أنت متأكد من إلغاء هذه الطلبية؟');
+    if (!confirmed) return;
     
     setCancellingOrderId(orderId);
     try {
@@ -55,7 +56,7 @@ export default function DoctorDashboard({
       });
     } catch (error) {
       console.error('Error cancelling order:', error);
-      alert(lang === 'fr' ? 'Erreur lors de l\'annulation de la commande.' : 'حدث خطأ أثناء إلغاء الطلبية.');
+      alert(lang === 'fr' ? 'Erreur lors de l\'annulation de la commande.' : 'حدث خطأ أثناء إلغاء الطلبية.', 'error');
     } finally {
       setCancellingOrderId(null);
     }
@@ -78,10 +79,10 @@ export default function DoctorDashboard({
       });
       setMessageText('');
       setShowMessageModal(false);
-      alert(lang === 'fr' ? 'Message envoyé avec succès!' : 'تم إرسال الرسالة بنجاح!');
+      alert(lang === 'fr' ? 'Message envoyé avec succès!' : 'تم إرسال الرسالة بنجاح!', 'success');
     } catch (error) {
       console.error('Error sending message:', error);
-      alert(lang === 'fr' ? 'Erreur lors de l\'envoi du message.' : 'حدث خطأ أثناء إرسال الرسالة.');
+      alert(lang === 'fr' ? 'Erreur lors de l\'envoi du message.' : 'حدث خطأ أثناء إرسال الرسالة.', 'error');
     } finally {
       setSendingMessage(false);
     }

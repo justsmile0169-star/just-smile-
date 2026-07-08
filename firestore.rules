@@ -37,8 +37,10 @@ service cloud.firestore {
 
     // User Profiles
     match /users/{userId} {
-      // Allow read for authenticated users (own profile only)
-      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Allow get for authenticated users (own profile only) or staff
+      allow get: if isStaff() || (isAuthenticated() && request.auth.uid == userId);
+      // Allow list queries for all users (needed for login system)
+      allow list: if true;
       // Allow create for doctors (self-registration) and admins (staff creation)
       allow create: if isAuthenticated() && request.auth.uid == userId &&
                       request.resource.data.role == 'doctor' &&
@@ -50,12 +52,13 @@ service cloud.firestore {
       allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
       // Allow delete for admins only
       allow delete: if isAdmin();
-    }
-    
-    // Allow list queries for all users (needed for login system)
-    match /users {
-      allow list: if true;
-      allow get: if false;
+      // ── Bootstrap: allow setting password for accounts that have none yet ──
+      // This allows the first-time admin setup without authentication.
+      // Only allows updating the single 'password' field when it doesn't exist.
+      allow update: if !('password' in resource.data) &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['password']) &&
+                      request.resource.data.password is string &&
+                      request.resource.data.password.size() > 20;
     }
     
     // Products
@@ -74,7 +77,7 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.status == resource.data.status);
+      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.status == 'cancelled');
       allow delete: if isAdmin();
     }
     
@@ -133,10 +136,16 @@ service cloud.firestore {
 
     // Admin Messages (doctor to admin communication)
     match /admin_messages/{messageId} {
-      allow read: if isStaff();
+      allow read: if isAdmin();
       allow create: if isAuthenticated() && userExists() && userRole() == 'doctor';
-      allow update: if isStaff();
+      allow update: if isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // Announcements / Ads (visible to all, writable by manager+)
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin() || (isAuthenticated() && userExists() && userRole() == 'cashier');
     }
   }
 }

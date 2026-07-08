@@ -87,7 +87,8 @@ export default function ExpiryScanner({
       alert(
         lang === 'fr' 
           ? `Remise de ${discountValue}% appliquée avec succès à ${liquidateProduct.name} !` 
-          : `تم تطبيق خصم ${discountValue}% بنجاح على ${liquidateProduct.name}!`
+          : `تم تطبيق خصم ${discountValue}% بنجاح على ${liquidateProduct.name}!`,
+        'success'
       );
       setLiquidateProduct(null);
       onRefreshData();
