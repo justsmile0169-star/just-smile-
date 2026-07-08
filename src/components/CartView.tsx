@@ -172,24 +172,6 @@ export default function CartView({
       }
       await updateDoc(doc(db, 'orders', orderDoc.id), { id: orderDoc.id });
 
-      // 2. Send notification to admin and cashiers about new order
-      const staffQuery = query(collection(db, 'users'), where('role', 'in', ['admin', 'cashier']));
-      const staffSnapshot = await getDocs(staffQuery);
-      
-      for (const staffDoc of staffSnapshot.docs) {
-        await addDoc(collection(db, 'notifications'), {
-          userId: staffDoc.id,
-          titleFr: 'Nouvelle commande',
-          titleAr: 'طلبية جديدة',
-          messageFr: `Nouvelle commande de ${user.name} - ${user.clinicName}. Total: ${netTotalToPay} DZD`,
-          messageAr: `طلبية جديدة من ${user.name} - ${user.clinicName}. المجموع: ${netTotalToPay} دج`,
-          type: 'order_update',
-          isRead: false,
-          createdAt: new Date().toISOString(),
-          orderId: orderDoc.id
-        });
-      }
-
       // 2. Decrement inventory stock inside transaction/batch
       const batch = writeBatch(db);
       const lowStockAlertsToCreate: { product: Product; newStock: number }[] = [];
@@ -244,7 +226,11 @@ export default function CartView({
       onClearCart();
       onCheckoutSuccess();
     } catch (err) {
-      console.error(err);
+      console.error('Order creation error:', err);
+      if (err instanceof Error) {
+        console.error('Error message:', err.message);
+        console.error('Error code:', (err as any).code);
+      }
       alert(lang === 'fr' ? 'Erreur lors du passage de commande.' : 'حدث خطأ أثناء إتمام الطلب.', 'error');
     } finally {
       setLoading(false);
