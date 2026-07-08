@@ -9,54 +9,66 @@ import { comparePassword } from './crypto';
  */
 export async function signInStaff(email: string, password: string): Promise<UserProfile | null> {
   try {
-    console.log('[staffAuth] Attempting staff sign in with email:', email);
-    
     const usersRef = collection(db, 'users');
-    const q = query(
-      usersRef,
-      where('email', '==', email)
-    );
-    
-    console.log('[staffAuth] Executing query...');
-    const querySnapshot = await getDocs(q);
-    console.log('[staffAuth] Query completed, found', querySnapshot.size, 'documents');
+    // Try the email as-is first, then lowercase as fallback
+    let querySnapshot = await getDocs(query(usersRef, where('email', '==', email)));
+    if (querySnapshot.empty && email !== email.toLowerCase()) {
+      querySnapshot = await getDocs(query(usersRef, where('email', '==', email.toLowerCase())));
+    }
     
     if (querySnapshot.empty) {
-      console.log('[staffAuth] No user found with matching email');
       return null;
     }
     
     // Check all users with matching email (should be only one)
     for (const userDoc of querySnapshot.docs) {
       const userData = userDoc.data() as UserProfile;
-      console.log('[staffAuth] Checking user:', userData.name, 'role:', userData.role, 'status:', userData.status);
       
       // Check if user is staff (not doctor)
       if (userData.role === 'doctor') {
-        console.log('[staffAuth] User is a doctor, skipping');
         continue;
       }
       
       // Check if user is approved (or has no status field)
       if (userData.status && userData.status !== 'approved') {
-        console.log('[staffAuth] User status is not approved:', userData.status);
         continue;
       }
       
       // Compare password with hashed password
-      console.log('[staffAuth] Comparing password...');
-      if (userData.password && await comparePassword(password, userData.password)) {
-        console.log('[staffAuth] Password match! User authenticated:', userData.name);
+      let passwordMatches = false;
+
+      if (userData.password) {
+        // Try bcrypt first (modern accounts)
+        const isBcryptHash = userData.password.startsWith('$2') && userData.password.length > 50;
+        if (isBcryptHash) {
+          passwordMatches = await comparePassword(password, userData.password);
+        }
+
+        // Fallback: plaintext comparison for legacy accounts
+        if (!passwordMatches && !isBcryptHash) {
+          passwordMatches = (userData.password === password);
+        }
+
+        // If plaintext matched → auto-upgrade to bcrypt hash
+        if (passwordMatches && !isBcryptHash) {
+          try {
+            const { hashPassword } = await import('./crypto');
+            const newHash = await hashPassword(password);
+            const { doc, updateDoc } = await import('firebase/firestore');
+            await updateDoc(doc(db, 'users', userDoc.id), { password: newHash });
+          } catch (upgradeError) {
+            // Silent fail on upgrade
+          }
+        }
+      }
+
+      if (passwordMatches) {
         return userData;
-      } else {
-        console.log('[staffAuth] Password does not match');
       }
     }
     
-    console.log('[staffAuth] No matching staff user found');
     return null;
   } catch (error) {
-    console.error('[staffAuth] Error signing in staff:', error);
     return null;
   }
 }

@@ -1,11 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
 import { UserProfile } from '../types';
 import { signInStaff } from '../utils/staffAuth';
-import { User, Phone, Mail, Lock, Building, MapPin, AlertCircle, CheckCircle, Shield } from 'lucide-react';
+import {
+  getWilayas, getCommunesByWilaya, isFreeDelivery,
+  WilayaOption, CommuneOption,
+} from '../utils/algeriaData';
+import {
+  User, Phone, Mail, Lock, Building, MapPin,
+  AlertCircle, CheckCircle, Shield, Truck, ChevronDown,
+} from 'lucide-react';
 
 interface AuthViewProps {
   lang: Language;
@@ -14,22 +21,57 @@ interface AuthViewProps {
 
 export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
   const [isLogin, setIsLogin] = useState(true);
-  
-  // Form fields
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [clinicName, setClinicName] = useState('');
-  const [location, setLocation] = useState('');
 
-  // States
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  // ── Form fields ──────────────────────────────────────────────────────────────
+  const [name, setName]             = useState('');
+  const [phone, setPhone]           = useState('');
+  const [email, setEmail]           = useState('');
+  const [password, setPassword]     = useState('');
+  const [clinicName, setClinicName] = useState('');
+
+  // ── Location (structured) ────────────────────────────────────────────────────
+  const [wilayas, setWilayas]               = useState<WilayaOption[]>([]);
+  const [communes, setCommunes]             = useState<CommuneOption[]>([]);
+  const [selectedWilaya, setSelectedWilaya] = useState<WilayaOption | null>(null);
+  const [selectedCommune, setSelectedCommune] = useState<CommuneOption | null>(null);
+  const [loadingWilayas, setLoadingWilayas] = useState(false);
+
+  // ── UI States ────────────────────────────────────────────────────────────────
+  const [loading, setLoading]       = useState(false);
+  const [errorMsg, setErrorMsg]     = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
   const isRtl = lang === 'ar';
 
+  // Load wilayas lazily when registration form is shown
+  useEffect(() => {
+    if (!isLogin && wilayas.length === 0) {
+      setLoadingWilayas(true);
+      getWilayas()
+        .then(setWilayas)
+        .finally(() => setLoadingWilayas(false));
+    }
+  }, [isLogin, wilayas.length]);
+
+  // When wilaya changes → reload communes
+  const handleWilayaChange = async (code: string) => {
+    const w = wilayas.find((w) => w.code === code) ?? null;
+    setSelectedWilaya(w);
+    setSelectedCommune(null);
+    setCommunes([]);
+    if (w) {
+      const list = await getCommunesByWilaya(w.code);
+      setCommunes(list);
+    }
+  };
+
+  // Determine free delivery badge for registration form
+  const freeDelivery =
+    selectedWilaya && selectedCommune
+      ? isFreeDelivery(selectedWilaya.code, selectedCommune.nameAscii)
+      : false;
+
+  // ── Form submission ──────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -38,137 +80,158 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
 
     try {
       if (isLogin) {
-        // --- LOGIN FLOW ---
+        // ── LOGIN FLOW ─────────────────────────────────────────────────────────
+        const emailTrimmed = email.trim();
+        const emailLower   = emailTrimmed.toLowerCase();
 
-        console.log('[AuthView] Attempting login with email:', email.trim());
-
-        // First, check if user exists in Firestore to determine auth method
         const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('email', '==', email.trim()));
-        const userSnapshot = await getDocs(q);
-
-        console.log('[AuthView] User snapshot size:', userSnapshot.size);
+        let userSnapshot = await getDocs(query(usersRef, where('email', '==', emailLower)));
+        if (userSnapshot.empty && emailTrimmed !== emailLower) {
+          userSnapshot = await getDocs(query(usersRef, where('email', '==', emailTrimmed)));
+        }
 
         if (userSnapshot.empty) {
-          // User not found
-          console.log('[AuthView] User not found in Firestore');
           setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
           setLoading(false);
           return;
         }
 
         const userData = userSnapshot.docs[0].data() as UserProfile;
-        console.log('[AuthView] User found:', userData.name, 'role:', userData.role, 'status:', userData.status);
+        const storedEmail = userData.email || emailLower;
 
-        // Check if user is staff (admin, manager, cashier, accountant)
-        if (userData.role !== 'doctor') {
-          console.log('[AuthView] User is staff, attempting staff login');
-          console.log('[AuthView] User data:', userData);
-          // Use staff login (Firestore-based)
-          const staffProfile = await signInStaff(email.trim(), password);
-          console.log('[AuthView] Staff login result:', staffProfile ? 'SUCCESS' : 'FAILED');
-          if (staffProfile) {
-            // Update last login time
-            await updateDoc(doc(db, 'users', staffProfile.uid), {
-              lastLoginAt: new Date().toISOString()
-            });
-            onAuthSuccess(staffProfile);
+        // 1. Try Firebase Auth first (for doctors and any staff who have Firebase Auth accounts)
+        let firebaseAuthProfile: UserProfile | null = null;
+        let authError: any = null;
+
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, storedEmail, password);
+          const userDocRef     = doc(db, 'users', userCredential.user.uid);
+          const userDoc        = await getDoc(userDocRef);
+
+          if (userDoc.exists()) {
+            firebaseAuthProfile = userDoc.data() as UserProfile;
+          }
+        } catch (err: any) {
+          authError = err;
+        }
+
+        // If authenticated via Firebase Auth successfully
+        if (firebaseAuthProfile) {
+          if (firebaseAuthProfile.status === 'pending') {
+            setErrorMsg(getTranslation(lang, 'pendingApproval'));
+            await signOut(auth);
             setLoading(false);
             return;
+          }
+
+          if (firebaseAuthProfile.status === 'rejected') {
+            setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
+
+          // Bootstrap/Auto-upgrade: If they are staff but don't have a password in Firestore,
+          // save the hashed password so custom staff check passes in the future.
+          if (firebaseAuthProfile.role !== 'doctor' && !firebaseAuthProfile.password) {
+            try {
+              const { hashPassword } = await import('../utils/crypto');
+              const hashedPassword = await hashPassword(password.trim());
+              await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { 
+                password: hashedPassword,
+                lastLoginAt: new Date().toISOString()
+              });
+            } catch (err) {
+              // We still allow them to log in since Firebase Auth succeeded
+              await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
+            }
           } else {
-            // Staff login failed - wrong password
-            console.log('[AuthView] Staff login failed - setting error message');
-            setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+            // Just update last login
+            await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
+          }
+
+          onAuthSuccess(firebaseAuthProfile);
+          setLoading(false);
+          return;
+        }
+
+        // 2. Fallback for Firestore-only staff accounts (which won't succeed in Firebase Auth)
+        if (userData.role !== 'doctor') {
+          const staffProfile = await signInStaff(storedEmail, password);
+          if (staffProfile) {
+            await updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() });
+            onAuthSuccess(staffProfile);
             setLoading(false);
             return;
           }
         }
 
-        // User is doctor - use Firebase Auth
-        console.log('[AuthView] User is doctor, attempting Firebase Auth');
-        try {
-          const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-          const userDocRef = doc(db, 'users', userCredential.user.uid);
-          const userDoc = await getDoc(userDocRef);
-
-          if (!userDoc.exists()) {
-            setErrorMsg(lang === 'fr' ? 'Profil utilisateur introuvable.' : 'موقع الطبيب غير موجود.');
-            await signOut(auth);
-            setLoading(false);
-            return;
-          }
-
-          const profile = userDoc.data() as UserProfile;
-
-          // Doctor validation status check
-          if (profile.status === 'pending') {
-            setErrorMsg(lang === 'fr' ? 'Votre compte est en attente de validation' : 'حسابك في انتظار تفعيل المدير. يرجى الانتظار.');
-            await signOut(auth);
-            setLoading(false);
-            return;
-          }
-
-          if (profile.status === 'rejected') {
-            setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé. Veuillez contacter le support.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
-            await signOut(auth);
-            setLoading(false);
-            return;
-          }
-
-          onAuthSuccess(profile);
-        } catch (err: any) {
-          console.error('Firebase Auth error:', err);
-          if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        // 3. If both failed, display appropriate error message
+        if (authError) {
+          if (
+            authError.code === 'auth/wrong-password' ||
+            authError.code === 'auth/user-not-found' ||
+            authError.code === 'auth/invalid-credential'
+          ) {
             setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
           } else {
             setErrorMsg(lang === 'fr' ? 'Erreur de connexion.' : 'خطأ في تسجيل الدخول.');
           }
-          setLoading(false);
-          return;
+        } else {
+          setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
         }
+        setLoading(false);
+        return;
+
       } else {
-        // --- REGISTER FLOW ---
-        if (!name || !phone || !email || !password || !clinicName || !location) {
+        // ── REGISTER FLOW ──────────────────────────────────────────────────────
+        if (!name || !phone || !email || !password || !clinicName || !selectedWilaya || !selectedCommune) {
           setErrorMsg(lang === 'fr' ? 'Tous les champs sont requis.' : 'جميع الحقول مطلوبة.');
           setLoading(false);
           return;
         }
 
+        const wilayaName  = lang === 'ar' ? selectedWilaya.nameAr : selectedWilaya.nameAscii;
+        const communeName = lang === 'ar' ? selectedCommune.nameAr : selectedCommune.nameAscii;
+        const locationStr = `${wilayaName}، ${communeName}`;
+
         const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        const uid = userCredential.user.uid;
+        const uid            = userCredential.user.uid;
 
         const newProfile: UserProfile = {
           uid,
-          name: name.trim(),
-          phone: phone.trim(),
-          email: email.trim().toLowerCase(),
+          name:      name.trim(),
+          phone:     phone.trim(),
+          email:     email.trim().toLowerCase(),
           clinicName: clinicName.trim(),
-          location: location.trim(),
-          role: 'doctor',
-          status: 'pending',
-          createdAt: new Date().toISOString()
+          location:  locationStr,
+          // structured location
+          wilayaCode:       selectedWilaya.code,
+          wilayaName:       selectedWilaya.nameAr,
+          communeName:      selectedCommune.nameAr,
+          communeNameAscii: selectedCommune.nameAscii,
+          role:    'doctor',
+          status:  'pending',
+          createdAt: new Date().toISOString(),
         };
 
-        // Save to Firestore
         await setDoc(doc(db, 'users', uid), newProfile);
 
-        // Notify user and log out so they can't browse approved content yet
-        setSuccessMsg(lang === 'fr' ? 'Votre inscription a été enregistrée avec succès. Votre compte est en attente de validation.' : 'تم تسجيل طلب انضمامك بنجاح. حسابك الآن في انتظار التفعيل من قبل الإدارة.');
+        setSuccessMsg(
+          lang === 'fr'
+            ? 'Votre inscription a été enregistrée avec succès. Votre compte est en attente de validation.'
+            : 'تم تسجيل طلب انضمامك بنجاح. حسابك الآن في انتظار التفعيل من قبل الإدارة.'
+        );
         await signOut(auth);
-        
+
         // Reset form
-        setName('');
-        setPhone('');
-        setEmail('');
-        setPassword('');
-        setClinicName('');
-        setLocation('');
+        setName(''); setPhone(''); setEmail(''); setPassword(''); setClinicName('');
+        setSelectedWilaya(null); setSelectedCommune(null); setCommunes([]);
         setIsLogin(true);
       }
     } catch (err: any) {
-      console.error(err);
       let msg = err.message;
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
         msg = lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
       } else if (err.code === 'auth/email-already-in-use') {
         msg = lang === 'fr' ? 'Cet e-mail est déjà utilisé.' : 'هذا البريد الإلكتروني مستخدم بالفعل.';
@@ -178,8 +241,8 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
         msg = lang === 'fr' ? 'Adresse e-mail invalide.' : 'البريد الإلكتروني غير صالح.';
       } else if (err.code === 'auth/operation-not-allowed') {
         msg = lang === 'fr'
-          ? "L'authentification par e-mail/mot de passe n'est pas activée dans votre console Firebase. Veuillez vous rendre sur la console Firebase, puis aller dans Build > Authentication > Sign-in method pour l'activer."
-          : "تسجيل الدخول بالبريد الإلكتروني وكلمة المرور غير مفعّل في لوحة تحكم Firebase. يرجى تفعيله بالذهاب إلى لوحة تحكم Firebase ثم قسم Build > Authentication > Sign-in method.";
+          ? "L'authentification par e-mail/mot de passe n'est pas activée dans Firebase."
+          : 'تسجيل الدخول بالبريد الإلكتروني غير مفعّل في Firebase.';
       }
       setErrorMsg(msg);
     } finally {
@@ -187,17 +250,24 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
     }
   };
 
+  // ── Shared input class ───────────────────────────────────────────────────────
+  const inputCls = (extra = '') =>
+    `w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-10 focus:outline-hidden focus:border-brand-cyan transition-colors text-sm ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} ${extra}`;
+
+  const selectCls = () =>
+    `w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan transition-colors text-sm appearance-none cursor-pointer`;
+
   return (
     <div className="flex items-center justify-center min-h-[70vh] py-12 px-4" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="bg-white rounded-3xl border border-slate-100 p-8 w-full max-w-md shadow-lg space-y-6">
-        
+
         {/* Form Title */}
         <div className="text-center space-y-2">
           <h2 className="text-2xl font-black text-brand-dark tracking-tight">
             {isLogin ? getTranslation(lang, 'login') : getTranslation(lang, 'register')}
           </h2>
           <p className="text-xs text-slate-400">
-            {isLogin 
+            {isLogin
               ? (lang === 'fr' ? 'Accédez à vos commandes et votre crédit' : 'الوصول إلى سجل طلباتك والائتمان')
               : (lang === 'fr' ? 'Créez votre dossier praticien pour commander' : 'أنشئ ملفك الطبي للطلب والاستفادة من الخدمات')}
           </p>
@@ -220,7 +290,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
 
         {/* Input Form */}
         <form onSubmit={handleSubmit} className="space-y-4 text-sm font-medium">
-          
+
           {!isLogin && (
             <>
               {/* Name */}
@@ -229,14 +299,10 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
                 <div className="relative">
                   <User size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
-                    type="text"
-                    required
-                    value={name}
+                    type="text" required value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder={lang === 'fr' ? 'Dr. Ahmed Benali' : 'د. أحمد بن علي'}
-                    className={`w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-10 focus:outline-hidden focus:border-brand-cyan transition-colors ${
-                      isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'
-                    }`}
+                    className={inputCls()}
                   />
                 </div>
               </div>
@@ -247,14 +313,10 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
                 <div className="relative">
                   <Phone size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
-                    type="tel"
-                    required
-                    value={phone}
+                    type="tel" required value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="0550 12 34 56"
-                    className={`w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-10 focus:outline-hidden focus:border-brand-cyan transition-colors ${
-                      isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'
-                    }`}
+                    className={inputCls()}
                   />
                 </div>
               </div>
@@ -265,34 +327,93 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
                 <div className="relative">
                   <Building size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
-                    type="text"
-                    required
-                    value={clinicName}
+                    type="text" required value={clinicName}
                     onChange={(e) => setClinicName(e.target.value)}
                     placeholder={lang === 'fr' ? 'Cabinet Dentaire El-Yasmine' : 'عيادة الياسمين لطب الأسنان'}
-                    className={`w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-10 focus:outline-hidden focus:border-brand-cyan transition-colors ${
-                      isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'
-                    }`}
+                    className={inputCls()}
                   />
                 </div>
               </div>
 
-              {/* Location */}
+              {/* ── Wilaya dropdown ─────────────────────────────────────────────── */}
               <div className="space-y-1">
-                <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'location')}</label>
+                <label className="text-slate-500 font-bold text-xs flex items-center gap-1.5">
+                  <MapPin size={13} />
+                  {lang === 'fr' ? 'Wilaya (Département)' : 'الولاية'}
+                </label>
                 <div className="relative">
-                  <MapPin size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
-                  <input
-                    type="text"
+                  <select
                     required
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder={lang === 'fr' ? 'Alger Centre, Alger' : 'الجزائر الوسطى، الجزائر'}
-                    className={`w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-10 focus:outline-hidden focus:border-brand-cyan transition-colors ${
-                      isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'
-                    }`}
-                  />
+                    disabled={loadingWilayas}
+                    value={selectedWilaya?.code ?? ''}
+                    onChange={(e) => handleWilayaChange(e.target.value)}
+                    className={selectCls()}
+                  >
+                    <option value="">
+                      {loadingWilayas
+                        ? (lang === 'fr' ? 'Chargement…' : 'جارٍ التحميل…')
+                        : (lang === 'fr' ? '— Choisir une wilaya —' : '— اختر الولاية —')}
+                    </option>
+                    {wilayas.map((w) => (
+                      <option key={w.code} value={w.code}>
+                        {w.code} – {lang === 'ar' ? w.nameAr : w.nameAscii}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
                 </div>
+              </div>
+
+              {/* ── Commune dropdown ────────────────────────────────────────────── */}
+              <div className="space-y-1">
+                <label className="text-slate-500 font-bold text-xs flex items-center gap-1.5">
+                  <MapPin size={13} />
+                  {lang === 'fr' ? 'Commune (Ville)' : 'البلدية'}
+                </label>
+                <div className="relative">
+                  <select
+                    required
+                    disabled={!selectedWilaya || communes.length === 0}
+                    value={selectedCommune?.id ?? ''}
+                    onChange={(e) => {
+                      const c = communes.find((c) => String(c.id) === e.target.value) ?? null;
+                      setSelectedCommune(c);
+                    }}
+                    className={selectCls()}
+                  >
+                    <option value="">
+                      {!selectedWilaya
+                        ? (lang === 'fr' ? '— Choisir d\'abord la wilaya —' : '— اختر الولاية أولاً —')
+                        : (lang === 'fr' ? '— Choisir une commune —' : '— اختر البلدية —')}
+                    </option>
+                    {communes.map((c) => (
+                      <option key={c.id} value={String(c.id)}>
+                        {lang === 'ar' ? c.nameAr : c.nameAscii}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
+                </div>
+
+                {/* Delivery badge */}
+                {selectedCommune && (
+                  <div
+                    className={`mt-2 flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border ${
+                      freeDelivery
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-amber-50 border-amber-200 text-amber-700'
+                    }`}
+                  >
+                    <Truck size={14} className="shrink-0" />
+                    {freeDelivery
+                      ? (lang === 'fr'
+                          ? '🎉 Livraison GRATUITE — Vous êtes dans la commune de Djelfa !'
+                          : '🎉 التوصيل مجاني — أنت مسجل في بلدية الجلفة!')
+                      : (lang === 'fr'
+                          ? '📦 Des frais de livraison s\'appliqueront selon votre localisation.'
+                          : '📦 سيتم احتساب تكلفة التوصيل حسب موقع عيادتك.')}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -303,14 +424,10 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
             <div className="relative">
               <Mail size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
               <input
-                type="email"
-                required
-                value={email}
+                type="email" required value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="dentiste@domain.com"
-                className={`w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-10 focus:outline-hidden focus:border-brand-cyan transition-colors ${
-                  isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'
-                }`}
+                className={inputCls()}
               />
             </div>
           </div>
@@ -321,26 +438,22 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
             <div className="relative">
               <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
               <input
-                type="password"
-                required
-                value={password}
+                type="password" required value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className={`w-full bg-slate-50/50 border border-slate-200 rounded-xl py-3 px-10 focus:outline-hidden focus:border-brand-cyan transition-colors ${
-                  isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'
-                }`}
+                className={inputCls()}
               />
             </div>
           </div>
 
-          {/* Submit Button */}
+          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
             className="w-full bg-brand-cyan text-white font-bold py-3.5 px-4 rounded-xl hover:bg-brand-cyan/90 transition-all flex items-center justify-center shadow-xs focus:ring-2 focus:ring-brand-cyan/20"
           >
             {loading ? (
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
             ) : isLogin ? (
               getTranslation(lang, 'login')
             ) : (
@@ -349,7 +462,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
           </button>
         </form>
 
-        {/* Toggle between login / registration */}
+        {/* Toggle login / register */}
         <div className="text-center pt-2">
           <button
             onClick={() => {

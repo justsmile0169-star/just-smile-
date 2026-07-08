@@ -353,10 +353,6 @@ export default function App() {
         snapshot.forEach((doc) => {
           items.push(doc.data() as UserProfile);
         });
-        console.log('[App] Loaded usersList:', items.length);
-        console.log('[App] Users with role=doctor:', items.filter(u => u.role === 'doctor').length);
-        console.log('[App] Users with role=doctor and status=pending:', items.filter(u => u.role === 'doctor' && u.status === 'pending').length);
-        console.log('[App] All users:', items.map(u => ({ name: u.name, role: u.role, status: u.status })));
         setUsersList(items);
       }, (err) => {
         console.error("Error syncing users list for admin:", err);
@@ -421,19 +417,22 @@ export default function App() {
         setActivityLogsList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200));
       });
 
-      // Sync admin messages
-      const messagesQuery = collection(db, 'admin_messages');
-      const unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
-        const items: AdminMessage[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdminMessage, 'id'>) });
+      // Sync admin messages (only for admin role)
+      let unsubscribeMessages = () => {};
+      if (currentUser.role === 'admin') {
+        const messagesQuery = collection(db, 'admin_messages');
+        unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+          const items: AdminMessage[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdminMessage, 'id'>) });
+          });
+          setAdminMessagesList(items.sort((a, b) => {
+            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return dateB - dateA;
+          }));
         });
-        setAdminMessagesList(items.sort((a, b) => {
-          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return dateB - dateA;
-        }));
-      });
+      }
 
       // Sync admin notifications
       const notifsQuery = query(collection(db, 'notifications'), where('userId', '==', 'admin'));
@@ -707,6 +706,7 @@ export default function App() {
                 onToggleFavorite={handleToggleFavorite}
                 onViewProduct={handleViewProductDetails}
                 user={currentUser}
+                currentUser={currentUser}
                 selectedCategory={selectedCategory}
                 onSelectCategory={setSelectedCategory}
                 onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}

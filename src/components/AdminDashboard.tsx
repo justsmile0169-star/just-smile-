@@ -13,16 +13,18 @@ import ExpenseManager from './admin/ExpenseManager';
 import ActivityLogView from './admin/ActivityLogView';
 import StaffManager from './admin/StaffManager';
 import BackupManager from './admin/BackupManager';
+import AnnouncementsSection from './AnnouncementsSection';
 import { useAppDialog } from '../context/AppDialogContext';
 import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { hasPermission } from '../utils/permissions';
 import { logActivity } from '../utils/activityLogger';
 import { deleteProductFully } from '../utils/productFirestore';
+import { getYalidineConfig, saveYalidineConfig } from '../utils/yalidineService';
 import {
   Users, DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
-  History, Shield, Cloud, ImageIcon, Search, MessageSquare
+  History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -47,7 +49,7 @@ interface AdminDashboardProps {
 
 type AdminSubTab =
   | 'analytics' | 'users' | 'doctors' | 'clientSituation' | 'debts' | 'inventory'
-  | 'promotions' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages';
+  | 'promotions' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages' | 'announcements';
 
 export default function AdminDashboard({
   lang,
@@ -81,16 +83,9 @@ export default function AdminDashboard({
   };
 
   // --- 1. Filter Doctor Profiles ---
-  console.log('[AdminDashboard] Total usersList:', usersList.length);
-  console.log('[AdminDashboard] All users:', usersList.map(u => ({ name: u.name, role: u.role, status: u.status })));
-
   const pendingDoctors = usersList.filter((u) => u.role === 'doctor' && u.status === 'pending');
   const approvedDoctors = usersList.filter((u) => u.role === 'doctor' && u.status === 'approved');
   const allDoctors = usersList.filter((u) => u.role === 'doctor');
-
-  console.log('[AdminDashboard] pendingDoctors:', pendingDoctors.length);
-  console.log('[AdminDashboard] approvedDoctors:', approvedDoctors.length);
-  console.log('[AdminDashboard] allDoctors:', allDoctors.length);
 
   const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
 
@@ -143,6 +138,76 @@ export default function AdminDashboard({
   const [orderPaymentFilter, setOrderPaymentFilter] = useState<'all' | 'unpaid' | 'paid'>('unpaid');
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
 
+  // --- Order Details & Yalidine Integration States ---
+  const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<Order | null>(null);
+  const [yalidineSubmitting, setYalidineSubmitting] = useState(false);
+
+  const handleSendToYalidine = async (order: Order) => {
+    setYalidineSubmitting(true);
+    try {
+      const { createYalidineParcel } = await import('../utils/yalidineService');
+      const result = await createYalidineParcel(order, yalidineConfig);
+      if (result.success && result.trackingNumber) {
+        const orderRef = doc(db, 'orders', order.id);
+        const updateData = {
+          yalidineTrackingNumber: result.trackingNumber,
+          yalidineStatus: 'created',
+          yalidineLabelUrl: result.labelUrl || '',
+          status: 'confirmed' as const
+        };
+        await updateDoc(orderRef, updateData);
+        
+        alert(
+          lang === 'fr' 
+            ? `Colis créé sur Yalidine ! N° de suivi : ${result.trackingNumber}` 
+            : `تم إنشاء الشحنة بنجاح في يالدين! رقم التتبع: ${result.trackingNumber}`,
+          'success'
+        );
+        
+        await logActivity({
+          userId: currentUser.uid,
+          userName: currentUser.name,
+          action: 'yalidine_parcel_created',
+          details: `Created Yalidine parcel for order ${order.id}. Tracking: ${result.trackingNumber}`,
+          createdAt: new Date().toISOString()
+        });
+
+        setSelectedOrderForDetails(prev => prev && prev.id === order.id ? {
+          ...prev,
+          ...updateData
+        } : prev);
+      } else {
+        alert(
+          lang === 'fr'
+            ? `Erreur Yalidine: ${result.error}`
+            : `خطأ في يالدين: ${result.error}`,
+          'error'
+        );
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('Erreur: ' + (err.message || err), 'error');
+    } finally {
+      setYalidineSubmitting(false);
+    }
+  };
+
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: any) => {
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      await updateDoc(orderRef, { status: newStatus });
+      alert(lang === 'fr' ? 'Statut mis à jour !' : 'تم تحديث حالة الطلب!', 'success');
+      
+      setSelectedOrderForDetails(prev => prev && prev.id === orderId ? {
+        ...prev,
+        status: newStatus
+      } : prev);
+    } catch (err) {
+      console.error(err);
+      alert('Erreur lors de la mise à jour.', 'error');
+    }
+  };
+
   const handleExportCSV = (ordersToExport: Order[]) => {
     // CSV headers
     const headers = [
@@ -151,6 +216,10 @@ export default function AdminDashboard({
       'Medecin',
       'Clinique',
       'Telephone',
+      'Wilaya',
+      'Commune',
+      'Type Livraison',
+      'Frais Livraison (DA)',
       'Total Brut (DA)',
       'Remise (DA)',
       'Total Net (DA)',
@@ -159,6 +228,7 @@ export default function AdminDashboard({
       'Statut Paiement',
       'Statut Commande',
       'Date Echeance',
+      'N° Suivi Yalidine',
       'Resume des Produits'
     ];
 
@@ -176,12 +246,21 @@ export default function AdminDashboard({
         }
       };
 
+      const deliveryTypeLabel =
+        order.deliveryType === 'free' ? 'Gratuit (Djelfa)' :
+        order.deliveryType === 'to_office' ? 'Bureau de livraison' :
+        order.deliveryType === 'to_clinic' ? 'Clinique' : '';
+
       return [
         order.id.slice(-6).toUpperCase(),
         formatDate(order.createdAt),
         order.doctorName,
         order.doctorClinic,
         order.doctorPhone,
+        order.doctorWilayaName || '',
+        order.doctorCommuneName || '',
+        deliveryTypeLabel,
+        order.deliveryCost ?? 0,
         order.totalBeforeDiscount,
         order.discountAmount,
         order.totalAfterDiscount,
@@ -190,6 +269,7 @@ export default function AdminDashboard({
         order.paymentStatus,
         order.status,
         formatDate(order.deadlineDate),
+        order.yalidineTrackingNumber || '',
         itemsSummary
       ];
     });
@@ -592,8 +672,25 @@ export default function AdminDashboard({
   // --- 5. Shop Settings State ---
   const [shopForm, setShopForm] = useState<ShopInfo>(shopInfo);
   const [shopSaving, setShopSaving] = useState(false);
+  const [yalidineConfig, setYalidineConfig] = useState<any>({
+    enabled: false,
+    apiKey: '',
+    apiToken: '',
+    senderName: 'JUST SMILE',
+    senderPhone: '0770821021',
+    senderAddress: 'Djelfa, Algérie',
+    isSandbox: true,
+  });
 
   useEffect(() => { setShopForm(shopInfo); }, [shopInfo]);
+
+  useEffect(() => {
+    async function loadYalidine() {
+      const cfg = await getYalidineConfig();
+      setYalidineConfig(cfg);
+    }
+    loadYalidine();
+  }, []);
 
   useEffect(() => {
     if (!seedBarcode) return;
@@ -619,6 +716,7 @@ export default function AdminDashboard({
     try {
       await setDoc(doc(db, 'settings', 'shop_info'), shopForm);
       onShopInfoChange(shopForm);
+      await saveYalidineConfig(yalidineConfig);
       alert(lang === 'fr' ? 'Paramètres sauvegardés !' : 'تم حفظ الإعدادات!', 'success');
     } catch (err) {
       console.error(err);
@@ -753,22 +851,38 @@ export default function AdminDashboard({
           </button>
         )}
 
-        <button
-          onClick={() => setActiveSubTab('messages')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'messages'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-          }`}
-        >
-          <MessageSquare size={16} />
-          {lang === 'fr' ? 'Messages' : 'الرسائل'}
-          {adminMessagesList.filter(m => !m.isRead).length > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-              {adminMessagesList.filter(m => !m.isRead).length}
-            </span>
-          )}
-        </button>
+        {currentUser.role === 'admin' && (
+          <button
+            onClick={() => setActiveSubTab('messages')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
+              activeSubTab === 'messages'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <MessageSquare size={16} />
+            {lang === 'fr' ? 'Messages' : 'الرسائل'}
+            {adminMessagesList.filter(m => !m.isRead).length > 0 && (
+              <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {adminMessagesList.filter(m => !m.isRead).length}
+              </span>
+            )}
+          </button>
+        )}
+
+        {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier') && (
+          <button
+            onClick={() => setActiveSubTab('announcements')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
+              activeSubTab === 'announcements'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Megaphone size={16} />
+            {lang === 'fr' ? 'Publicités / Annonces' : 'إعلانات الواجهة'}
+          </button>
+        )}
       </div>
 
       {/* --- CONTENT RENDER PANELS --- */}
@@ -806,6 +920,12 @@ export default function AdminDashboard({
       {activeSubTab === 'backup' && hasPermission(currentUser, 'manage_backup') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
           <BackupManager lang={lang} currentUser={currentUser} />
+        </div>
+      )}
+
+      {activeSubTab === 'announcements' && (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier') && (
+        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
+          <AnnouncementsSection lang={lang} currentUser={currentUser} />
         </div>
       )}
 
@@ -1129,36 +1249,35 @@ export default function AdminDashboard({
                           <td className="py-4 text-emerald-600 font-bold">{formatPrice(order.paidAmount)}</td>
                           <td className="py-4 text-rose-600 font-black">{formatPrice(order.remainingBalance)}</td>
                           <td className="py-4 text-right">
-                            {order.remainingBalance > 0 ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => onPrintInvoice(order)}
-                                  className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Voir la facture"
-                                >
-                                  <FileText size={14} />
-                                </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* View Details + Yalidine button */}
+                              <button
+                                onClick={() => setSelectedOrderForDetails(order)}
+                                className="p-1.5 text-slate-400 hover:text-brand-cyan hover:bg-brand-cyan/10 rounded-lg transition-colors"
+                                title={lang === 'fr' ? 'Détails & Yalidine' : 'التفاصيل ويالدين'}
+                              >
+                                <Truck size={14} />
+                              </button>
+                              <button
+                                onClick={() => onPrintInvoice(order)}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title={lang === 'fr' ? 'Imprimer Facture' : 'طباعة الفاتورة'}
+                              >
+                                <FileText size={14} />
+                              </button>
+                              {order.remainingBalance > 0 ? (
                                 <button
                                   onClick={() => setSelectedOrderForPayment(order)}
                                   className="bg-brand-cyan/10 text-brand-cyan hover:bg-brand-cyan hover:text-white font-bold text-xs py-1.5 px-3 rounded-lg transition-all"
                                 >
                                   {getTranslation(lang, 'registerPayment')}
                                 </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => onPrintInvoice(order)}
-                                  className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Voir la facture"
-                                >
-                                  <FileText size={14} />
-                                </button>
+                              ) : (
                                 <span className="text-emerald-600 font-bold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg">
                                   {lang === 'fr' ? 'Payé' : 'مسدد'}
                                 </span>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1518,6 +1637,133 @@ export default function AdminDashboard({
             </div>
           </div>
 
+          {/* Yalidine Express Integration */}
+          <div className="border-t border-slate-100 pt-6 mt-6 space-y-6">
+            <div>
+              <h4 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Truck size={18} className="text-brand-cyan" />
+                {lang === 'fr' ? 'Intégration Yalidine Express' : 'ربط شركة التوصيل يالدين إكسبريس (Yalidine)'}
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                {lang === 'fr'
+                  ? 'Connectez directement votre boutique à Yalidine Express pour générer automatiquement les colis, le suivi et imprimer les bordereaux.'
+                  : 'اربط متجرك مباشرة بـ Yalidine لإنشاء الطرود تلقائياً وتتبع الشحنات وطباعة ملصقات الشحن.'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">
+                    {lang === 'fr' ? 'Activer la connexion Yalidine' : 'تفعيل ربط شركة يالدين'}
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    {lang === 'fr' ? 'Activer la synchronisation automatique.' : 'تفعيل إرسال الطلبات لشركة الشحن.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setYalidineConfig((prev: any) => ({ ...prev, enabled: !prev.enabled }))}
+                  className={`w-11 h-6 rounded-full transition-all relative ${
+                    yalidineConfig.enabled ? 'bg-brand-cyan' : 'bg-slate-200'
+                  }`}
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
+                      yalidineConfig.enabled ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">
+                    {lang === 'fr' ? 'Mode Simulation / Sandbox' : 'وضع المحاكاة (Sandbox)'}
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    {lang === 'fr' ? 'Simule les appels API sans envoyer de colis réels.' : 'محاكاة الطلبات والعمليات دون إرسال شحنات حقيقية.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setYalidineConfig((prev: any) => ({ ...prev, isSandbox: !prev.isSandbox }))}
+                  className={`w-11 h-6 rounded-full transition-all relative ${
+                    yalidineConfig.isSandbox ? 'bg-amber-500' : 'bg-slate-200'
+                  }`}
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
+                      yalidineConfig.isSandbox ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {yalidineConfig.enabled && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border border-slate-100 p-4 rounded-2xl bg-slate-50/20">
+                <div className="space-y-1">
+                  <label className="text-slate-500 font-bold text-xs">API Key</label>
+                  <input
+                    type="text"
+                    value={yalidineConfig.apiKey || ''}
+                    onChange={(e) => setYalidineConfig((prev: any) => ({ ...prev, apiKey: e.target.value }))}
+                    placeholder="Ex: 87192837198273928172"
+                    className="w-full bg-white border border-slate-200 rounded-xl py-3 px-4 focus:outline-none focus:border-brand-cyan text-sm text-slate-800"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-500 font-bold text-xs">API Token</label>
+                  <input
+                    type="password"
+                    value={yalidineConfig.apiToken || ''}
+                    onChange={(e) => setYalidineConfig((prev: any) => ({ ...prev, apiToken: e.target.value }))}
+                    placeholder="••••••••••••••••"
+                    className="w-full bg-white border border-slate-200 rounded-xl py-3 px-4 focus:outline-none focus:border-brand-cyan text-sm text-slate-800"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-500 font-bold text-xs">
+                    {lang === 'fr' ? 'Nom de l\'Expéditeur' : 'اسم المرسل'}
+                  </label>
+                  <input
+                    type="text"
+                    value={yalidineConfig.senderName || ''}
+                    onChange={(e) => setYalidineConfig((prev: any) => ({ ...prev, senderName: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 rounded-xl py-3 px-4 focus:outline-none focus:border-brand-cyan text-sm text-slate-800"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-500 font-bold text-xs">
+                    {lang === 'fr' ? 'Téléphone de l\'Expéditeur' : 'هاتف المرسل'}
+                  </label>
+                  <input
+                    type="text"
+                    value={yalidineConfig.senderPhone || ''}
+                    onChange={(e) => setYalidineConfig((prev: any) => ({ ...prev, senderPhone: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 rounded-xl py-3 px-4 focus:outline-none focus:border-brand-cyan text-sm text-slate-800"
+                  />
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-slate-500 font-bold text-xs">
+                    {lang === 'fr' ? 'Adresse de l\'Expéditeur' : 'عنوان المرسل'}
+                  </label>
+                  <input
+                    type="text"
+                    value={yalidineConfig.senderAddress || ''}
+                    onChange={(e) => setYalidineConfig((prev: any) => ({ ...prev, senderAddress: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 rounded-xl py-3 px-4 focus:outline-none focus:border-brand-cyan text-sm text-slate-800"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end pt-2">
             <button
               onClick={handleSaveShopInfo}
@@ -1600,6 +1846,222 @@ export default function AdminDashboard({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Order Details & Yalidine express Modal */}
+      {selectedOrderForDetails && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-8">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <span className="font-extrabold text-slate-800 text-base">
+                  {lang === 'fr' ? `Détails Commande #${selectedOrderForDetails.id.slice(-6).toUpperCase()}` : `تفاصيل الطلب #${selectedOrderForDetails.id.slice(-6).toUpperCase()}`}
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase ${
+                  selectedOrderForDetails.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
+                  selectedOrderForDetails.status === 'cancelled' ? 'bg-rose-100 text-rose-800' :
+                  selectedOrderForDetails.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
+                  selectedOrderForDetails.status === 'preparing' ? 'bg-amber-100 text-amber-800' :
+                  'bg-slate-100 text-slate-800'
+                }`}>
+                  {selectedOrderForDetails.status}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedOrderForDetails(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Left side: Items & Financial Summary */}
+                <div className="lg:col-span-2 space-y-4">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                    {lang === 'fr' ? 'Articles commandés' : 'المنتجات المطلوبة'}
+                  </h4>
+                  <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                    <table className="w-full text-left md:rtl:text-right border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-[10px] font-bold text-slate-500 border-b border-slate-100">
+                          <th className="p-3">{lang === 'fr' ? 'Désignation' : 'المنتج'}</th>
+                          <th className="p-3 text-center">{lang === 'fr' ? 'Prix' : 'السعر'}</th>
+                          <th className="p-3 text-center">{lang === 'fr' ? 'Qté' : 'الكمية'}</th>
+                          <th className="p-3 text-right">{lang === 'fr' ? 'Total' : 'المجموع'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50 text-xs">
+                        {selectedOrderForDetails.items.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/50">
+                            <td className="p-3 font-semibold text-slate-800">{item.name}</td>
+                            <td className="p-3 text-center text-slate-500">{formatPrice(item.price)}</td>
+                            <td className="p-3 text-center font-bold text-slate-700">{item.quantity}</td>
+                            <td className="p-3 text-right font-bold text-slate-800">{formatPrice(item.price * item.quantity)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Financial breakdown */}
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs space-y-2">
+                    <div className="flex justify-between text-slate-600">
+                      <span>{lang === 'fr' ? 'Sous-total brut' : 'المجموع الإجمالي'}</span>
+                      <span className="font-semibold">{formatPrice(selectedOrderForDetails.totalBeforeDiscount)}</span>
+                    </div>
+                    {selectedOrderForDetails.discountAmount > 0 && (
+                      <div className="flex justify-between text-rose-500 font-semibold">
+                        <span>{lang === 'fr' ? 'Remises appliquées' : 'التخفيضات المطبقة'}</span>
+                        <span>-{formatPrice(selectedOrderForDetails.discountAmount)}</span>
+                      </div>
+                    )}
+                    {selectedOrderForDetails.deliveryCost !== undefined && (
+                      <div className="flex justify-between text-slate-600 font-semibold">
+                        <span>{lang === 'fr' ? 'Frais de livraison' : 'تكلفة التوصيل'}</span>
+                        <span>+{formatPrice(selectedOrderForDetails.deliveryCost)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-slate-200/60 pt-2 font-black text-slate-800 text-sm">
+                      <span>{lang === 'fr' ? 'Net à payer' : 'الصافي المطلوب'}</span>
+                      <span>{formatPrice(selectedOrderForDetails.totalAfterDiscount)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right side: Doctor, Delivery Address & Yalidine Action */}
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">
+                      {lang === 'fr' ? 'Destinataire / Cabinet' : 'معلومات المستلم والعيادة'}
+                    </h4>
+                    <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 text-xs space-y-2">
+                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Nom :' : 'الاسم:'}</strong> {selectedOrderForDetails.doctorName}</p>
+                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Téléphone :' : 'الهاتف:'}</strong> {selectedOrderForDetails.doctorPhone}</p>
+                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Clinique :' : 'العيادة:'}</strong> {selectedOrderForDetails.doctorClinic}</p>
+                      {selectedOrderForDetails.doctorWilayaName && (
+                        <p className="text-slate-800">
+                          <strong className="text-slate-500">{lang === 'fr' ? 'Adresse :' : 'العنوان:'}</strong> {selectedOrderForDetails.doctorWilayaName} - {selectedOrderForDetails.doctorCommuneName}
+                        </p>
+                      )}
+                      {selectedOrderForDetails.deliveryType && (
+                        <p className="text-slate-800">
+                          <strong className="text-slate-500">{lang === 'fr' ? 'Type Livraison :' : 'نوع التوصيل:'}</strong>{' '}
+                          {selectedOrderForDetails.deliveryType === 'free' ? (lang === 'fr' ? 'Gratuit (Djelfa)' : 'مجاني (الجلفة)') :
+                           selectedOrderForDetails.deliveryType === 'to_office' ? (lang === 'fr' ? 'Bureau de livraison' : 'مكتب شركة الشحن') :
+                           (lang === 'fr' ? 'Clinique' : 'العيادة')}
+                        </p>
+                      )}
+                      {selectedOrderForDetails.notes && (
+                        <p className="text-slate-800 italic bg-amber-50/50 border border-amber-100 p-2 rounded-xl mt-1 text-[11px]">
+                          <strong>Note:</strong> {selectedOrderForDetails.notes}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Status Management */}
+                  <div>
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">
+                      {lang === 'fr' ? 'Statut du flux' : 'إدارة حالة الطلب'}
+                    </h4>
+                    <select
+                      value={selectedOrderForDetails.status}
+                      onChange={(e) => handleUpdateOrderStatus(selectedOrderForDetails.id, e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 focus:outline-none focus:border-brand-cyan text-xs text-slate-800 font-bold"
+                    >
+                      <option value="pending">En attente / Pending</option>
+                      <option value="confirmed">Confirmé / Confirmed</option>
+                      <option value="preparing">En préparation / Preparing</option>
+                      <option value="shipped">Expédié / Shipped</option>
+                      <option value="delivered">Livré / Delivered</option>
+                      <option value="cancelled">Annulé / Cancelled</option>
+                    </select>
+                  </div>
+
+                  {/* Yalidine Integration */}
+                  <div className="border-t border-slate-100 pt-4">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Truck size={14} className="text-brand-cyan" />
+                      Yalidine Express
+                    </h4>
+                    
+                    {!yalidineConfig.enabled ? (
+                      <p className="text-[10px] text-slate-400 italic">
+                        {lang === 'fr' ? 'L\'intégration Yalidine est désactivée dans les réglages.' : 'ربط شركة يالدين معطل في الإعدادات.'}
+                      </p>
+                    ) : selectedOrderForDetails.yalidineTrackingNumber ? (
+                      <div className="bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl text-xs space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-500 font-bold">{lang === 'fr' ? 'N° Suivi :' : 'رقم التتبع:'}</span>
+                          <span className="font-mono font-black text-slate-800">{selectedOrderForDetails.yalidineTrackingNumber}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-500 font-bold">{lang === 'fr' ? 'Statut Yalidine :' : 'حالة الطرد:'}</span>
+                          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-semibold text-[10px]">{selectedOrderForDetails.yalidineStatus || 'created'}</span>
+                        </div>
+                        {selectedOrderForDetails.yalidineLabelUrl && (
+                          <a
+                            href={selectedOrderForDetails.yalidineLabelUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-center bg-brand-cyan text-white font-extrabold text-[10px] py-1.5 rounded-xl hover:bg-brand-cyan/95 transition-colors mt-2"
+                          >
+                            {lang === 'fr' ? 'Imprimer le bordereau' : 'طباعة ملصق الشحن'}
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSendToYalidine(selectedOrderForDetails)}
+                        disabled={yalidineSubmitting}
+                        className="w-full flex items-center justify-center gap-2 bg-brand-cyan text-white font-bold text-xs py-2.5 px-4 rounded-xl hover:bg-brand-cyan/90 transition-all shadow-xs disabled:opacity-50"
+                      >
+                        {yalidineSubmitting ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                        ) : (
+                          <Truck size={14} />
+                        )}
+                        <span>
+                          {yalidineConfig.isSandbox
+                            ? (lang === 'fr' ? 'Simuler l\'envoi (Sandbox)' : 'محاكاة الشحن (تجريبي)')
+                            : (lang === 'fr' ? 'Générer Colis Yalidine' : 'إرسال لشركة يالدين')}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+
+                </div>
+
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => onPrintInvoice(selectedOrderForDetails)}
+                className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs transition-colors"
+              >
+                <FileText size={14} />
+                {lang === 'fr' ? 'Imprimer Facture (A4)' : 'طباعة الفاتورة (A4)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedOrderForDetails(null)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs transition-colors"
+              >
+                {lang === 'fr' ? 'Fermer' : 'إغلاق'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1780,7 +2242,7 @@ export default function AdminDashboard({
       )}
 
       {/* Messages Section */}
-      {activeSubTab === 'messages' && (
+      {activeSubTab === 'messages' && currentUser.role === 'admin' && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
           <div className="border-b border-slate-50 pb-4">
             <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
