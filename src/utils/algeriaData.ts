@@ -116,7 +116,7 @@ let _communes: CommuneOption[] | null = null;
 async function loadRaw(): Promise<RawCity[]> {
   if (_rawData) return _rawData;
   // Dynamic import so it doesn't bloat the initial bundle
-  const mod = await import('../../algeria-cities-master/json/algeria_cities.json');
+  const mod = await import('../data/algeria_cities.json');
   _rawData = (mod.default ?? mod) as RawCity[];
   return _rawData;
 }
