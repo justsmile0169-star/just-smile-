@@ -16,7 +16,7 @@ export function productsFromSnapshot(
   docs.forEach((docSnap) => {
     if (seenDocIds.has(docSnap.id)) return;
     seenDocIds.add(docSnap.id);
-    const data = docSnap.data() as Product;
+    const data = docSnap.data() as unknown as Product;
     items.push({ ...data, id: docSnap.id });
   });
 

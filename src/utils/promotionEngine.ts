@@ -24,7 +24,8 @@ export function calculatePromotionDiscount(
   cart: CartItem[],
   promotions: Promotion[]
 ): PromotionResult {
-  const active = promotions.filter(isPromotionActive);
+  const currentDate = new Date();
+  const active = promotions.filter(p => isPromotionActive(p, currentDate));
   let promotionDiscount = 0;
   let freeItems = 0;
   const appliedPromotions: PromotionResult['appliedPromotions'] = [];

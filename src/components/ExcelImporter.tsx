@@ -307,7 +307,7 @@ export default function ExcelImporter({
           batch.set(
             newDocRef,
             cleanFirestoreData({
-              ...prod,
+              ...(prod as any),
               id: newDocRef.id
             })
           );

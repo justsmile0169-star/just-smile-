@@ -164,13 +164,13 @@ export default function AdminDashboard({
           'success'
         );
         
-        await logActivity({
-          userId: currentUser.uid,
-          userName: currentUser.name,
-          action: 'yalidine_parcel_created',
-          details: `Created Yalidine parcel for order ${order.id}. Tracking: ${result.trackingNumber}`,
-          createdAt: new Date().toISOString()
-        });
+        await logActivity(
+          currentUser,
+          'yalidine_parcel_created',
+          'order',
+          `Created Yalidine parcel for order ${order.id}. Tracking: ${result.trackingNumber}`,
+          order.id
+        );
 
         setSelectedOrderForDetails(prev => prev && prev.id === order.id ? {
           ...prev,
