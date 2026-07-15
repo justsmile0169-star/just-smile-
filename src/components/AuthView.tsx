@@ -40,6 +40,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
   const [loading, setLoading]       = useState(false);
   const [errorMsg, setErrorMsg]     = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [isPendingAccount, setIsPendingAccount] = useState(false);
 
   const isRtl = lang === 'ar';
 
@@ -77,6 +78,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
     setLoading(true);
     setErrorMsg('');
     setSuccessMsg('');
+    setIsPendingAccount(false);
 
     try {
       if (isLogin) {
@@ -166,7 +168,7 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
         // If authenticated via Firebase Auth successfully
         if (firebaseAuthProfile) {
           if (firebaseAuthProfile.status === 'pending') {
-            setErrorMsg(getTranslation(lang, 'pendingApproval'));
+            setIsPendingAccount(true);
             await signOut(auth);
             setLoading(false);
             return;
@@ -319,7 +321,19 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
         </div>
 
         {/* Messaging banners */}
-        {errorMsg && (
+        {isPendingAccount && (
+          <div className="flex flex-col items-center gap-3 bg-amber-50 border border-amber-200 text-amber-800 text-sm font-semibold p-5 rounded-2xl text-center" dir="rtl">
+            <div className="text-3xl">⏳</div>
+            <p className="font-black text-amber-900 text-base leading-snug">
+              حسابك قيد المراجعة
+            </p>
+            <p className="text-amber-700 text-xs font-medium leading-relaxed">
+              ستتمكن من تسجيل الدخول فور تفعيله من طرف الإدارة، شكرا على تفهمك 😊
+            </p>
+          </div>
+        )}
+
+        {errorMsg && !isPendingAccount && (
           <div className="flex items-start gap-2.5 bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold p-3.5 rounded-xl">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
             <span>{errorMsg}</span>
