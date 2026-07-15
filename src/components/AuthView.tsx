@@ -99,7 +99,55 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
         const userData = userSnapshot.docs[0].data() as UserProfile;
         const storedEmail = userData.email || emailLower;
 
-        // 1. Try Firebase Auth first (for doctors and any staff who have Firebase Auth accounts)
+        // 1. For staff accounts (non-doctor), first verify via custom Firestore auth,
+        // then silently create/sign-in a Firebase Auth account so Firestore rules
+        // (request.auth != null) are satisfied — fixing all "Missing permissions" errors.
+        if (userData.role !== 'doctor' && userData.password) {
+          const staffProfile = await signInStaff(storedEmail, password);
+          if (!staffProfile) {
+            setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+            setLoading(false);
+            return;
+          }
+
+          // Password correct — now link to Firebase Auth so Firestore rules see request.auth
+          try {
+            // Try signing in first (account may already exist in Firebase Auth)
+            await signInWithEmailAndPassword(auth, storedEmail, password);
+          } catch (firebaseErr: any) {
+            if (
+              firebaseErr.code === 'auth/user-not-found' ||
+              firebaseErr.code === 'auth/invalid-credential' ||
+              firebaseErr.code === 'auth/wrong-password'
+            ) {
+              // Account doesn't exist in Firebase Auth yet — create it silently
+              try {
+                const { user: newFirebaseUser } = await createUserWithEmailAndPassword(auth, storedEmail, password);
+                // Update Firestore doc UID to match new Firebase Auth UID if different
+                if (newFirebaseUser.uid !== staffProfile.uid) {
+                  // Create new doc with Firebase UID and copy data
+                  await setDoc(doc(db, 'users', newFirebaseUser.uid), {
+                    ...staffProfile,
+                    uid: newFirebaseUser.uid,
+                    lastLoginAt: new Date().toISOString()
+                  });
+                }
+              } catch (createErr: any) {
+                // If creation also fails (e.g. email already taken by different password),
+                // we still allow login since custom auth already confirmed credentials.
+                console.warn('Firebase Auth link warning:', createErr.code);
+              }
+            }
+            // For other errors (network, etc.) we silently continue — custom auth passed
+          }
+
+          await updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
+          onAuthSuccess(staffProfile);
+          setLoading(false);
+          return;
+        }
+
+        // 2. For doctors and legacy staff with no Firestore password: use Firebase Auth
         let firebaseAuthProfile: UserProfile | null = null;
         let authError: any = null;
 
@@ -131,22 +179,19 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
             return;
           }
 
-          // Bootstrap/Auto-upgrade: If they are staff but don't have a password in Firestore,
-          // save the hashed password so custom staff check passes in the future.
+          // Auto-upgrade: save hashed password for staff without one
           if (firebaseAuthProfile.role !== 'doctor' && !firebaseAuthProfile.password) {
             try {
               const { hashPassword } = await import('../utils/crypto');
               const hashedPassword = await hashPassword(password.trim());
-              await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { 
+              await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), {
                 password: hashedPassword,
                 lastLoginAt: new Date().toISOString()
               });
-            } catch (err) {
-              // We still allow them to log in since Firebase Auth succeeded
+            } catch {
               await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
             }
           } else {
-            // Just update last login
             await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
           }
 
@@ -155,18 +200,18 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
           return;
         }
 
-        // 2. Fallback for Firestore-only staff accounts (which won't succeed in Firebase Auth)
+        // 3. Last fallback: legacy staff with no password field at all
         if (userData.role !== 'doctor') {
           const staffProfile = await signInStaff(storedEmail, password);
           if (staffProfile) {
-            await updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() });
+            await updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
             onAuthSuccess(staffProfile);
             setLoading(false);
             return;
           }
         }
 
-        // 3. If both failed, display appropriate error message
+        // 4. All methods failed — show error
         if (authError) {
           if (
             authError.code === 'auth/wrong-password' ||

@@ -1,4 +1,4 @@
-import { Phone, Mail, MapPin } from 'lucide-react';
+import { Phone, Mail, MapPin, Facebook, Instagram } from 'lucide-react';
 import { Language } from '../translations';
 import { ShopInfo } from '../types';
 import { getLogoUrl } from '../constants/brand';
@@ -27,20 +27,42 @@ export default function Footer({ lang, shopInfo }: FooterProps) {
     >
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-8 md:py-10">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-8">
-          {/* Brand */}
-          <div className="flex items-center gap-3 shrink-0">
-            <img
-              src={getLogoUrl(shopInfo.logoUrl)}
-              alt={shopInfo.companyName}
-              className="h-10 w-auto object-contain"
-            />
-            <div>
-              <p className="text-base font-black text-brand-dark dark:text-slate-100 tracking-tight">
-                {shopInfo.companyName}
-              </p>
-              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mt-0.5">
-                {shopInfo.activity}
-              </p>
+          {/* Brand & Socials */}
+          <div className="flex flex-col gap-4 max-w-xs shrink-0">
+            <div className="flex items-center gap-3">
+              <img
+                src={getLogoUrl(shopInfo.logoUrl)}
+                alt={shopInfo.companyName}
+                className="h-10 w-auto object-contain"
+              />
+              <div>
+                <p className="text-base font-black text-brand-dark dark:text-slate-100 tracking-tight">
+                  {shopInfo.companyName}
+                </p>
+                <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mt-0.5">
+                  {shopInfo.activity}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <a
+                href="https://www.facebook.com/profile.php?id=61574673363661"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-450 hover:text-[#1877F2] hover:bg-[#1877F2]/10 transition-all border border-slate-100 dark:border-slate-805 hover:scale-105 shadow-xs"
+                title="Facebook"
+              >
+                <Facebook size={16} />
+              </a>
+              <a
+                href="https://www.instagram.com/j.u.st._.s.m.i.l.e/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-450 hover:text-[#E1306C] hover:bg-[#E1306C]/10 transition-all border border-slate-100 dark:border-slate-805 hover:scale-105 shadow-xs"
+                title="Instagram"
+              >
+                <Instagram size={16} />
+              </a>
             </div>
           </div>
 

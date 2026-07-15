@@ -166,19 +166,26 @@ export default function CartView({
       };
 
       // 1. Write the order
+      console.log('Creating order with data:', newOrder);
       const orderDoc = await addDoc(orderRef, newOrder);
+      console.log('Order created with ID:', orderDoc.id);
       if (!orderDoc.id) {
         throw new Error('Failed to create order document');
       }
       await updateDoc(doc(db, 'orders', orderDoc.id), { id: orderDoc.id });
+      console.log('Order ID updated successfully');
 
-      // 2. Decrement inventory stock inside transaction/batch
+      // 2. Decrement inventory stock and increment salesCount inside transaction/batch
       const batch = writeBatch(db);
       const lowStockAlertsToCreate: { product: Product; newStock: number }[] = [];
       cart.forEach((item) => {
         const prodRef = doc(db, 'products', item.product.id);
         const newStock = Math.max(0, item.product.stock - item.quantity);
-        batch.update(prodRef, { stock: newStock });
+        const newSalesCount = (item.product.salesCount || 0) + item.quantity;
+        batch.update(prodRef, { 
+          stock: newStock,
+          salesCount: newSalesCount
+        });
 
         const threshold = item.product.lowStockAlert ?? 5;
         if (newStock <= threshold && item.product.stock > threshold) {

@@ -42,6 +42,7 @@ export interface Product {
   discountPercent?: number; // per-product custom discount
   barcode?: string; // EAN / barcode for scanner
   isDeleted?: boolean; // Soft delete flag
+  salesCount?: number; // Total units sold
 }
 
 export type OrderStatus = 'pending' | 'confirmed' | 'preparing' | 'shipped' | 'delivered' | 'cancelled';

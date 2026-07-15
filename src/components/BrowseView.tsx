@@ -2,7 +2,9 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 import ProductCard from './ProductCard';
-import { Search, ChevronRight, X, Heart, ShieldAlert, Sparkles, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, ScanBarcode } from 'lucide-react';
+import AnnouncementsSection from './AnnouncementsSection';
+import ProductSlider from './ProductSlider';
+import { Search, X, ShieldAlert, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, ScanBarcode, Sparkles, Flame, ShoppingBag } from 'lucide-react';
 
 interface BrowseViewProps {
   products: Product[];
@@ -12,6 +14,7 @@ interface BrowseViewProps {
   onToggleFavorite: (product: Product) => void;
   onViewProduct: (product: Product) => void;
   user: UserProfile | null;
+  currentUser?: UserProfile | null;
   selectedCategory?: string;
   onSelectCategory?: (category: string) => void;
   onOpenBarcodeScanner?: () => void;
@@ -25,6 +28,7 @@ export default function BrowseView({
   onToggleFavorite,
   onViewProduct,
   user,
+  currentUser,
   selectedCategory: propSelectedCategory,
   onSelectCategory,
   onOpenBarcodeScanner
@@ -36,6 +40,35 @@ export default function BrowseView({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Latest 20 products sorted by createdAt desc
+  const latestProducts = useMemo(() => {
+    return [...products]
+      .filter(p => !p.isDeleted)
+      .sort((a, b) => {
+        const da = (a as any).createdAt || '';
+        const db2 = (b as any).createdAt || '';
+        return db2.localeCompare(da);
+      })
+      .slice(0, 20);
+  }, [products]);
+
+  // Most requested: products sorted by salesCount desc (limit 20)
+  const mostRequestedProducts = useMemo(() => {
+    return [...products]
+      .filter(p => !p.isDeleted)
+      .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
+      .slice(0, 20);
+  }, [products]);
+
+  // Routine clinic products: Consommables, Hygiène & Stérilisation, Instruments categories, sorted by salesCount desc (limit 20)
+  const routineClinicProducts = useMemo(() => {
+    const routineCategories = ['Consommables', 'Hygiène & Stérilisation', 'Instruments'];
+    return [...products]
+      .filter(p => !p.isDeleted && routineCategories.includes(p.category))
+      .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
+      .slice(0, 20);
+  }, [products]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -137,8 +170,8 @@ export default function BrowseView({
           </h2>
           <p className="text-xs sm:text-sm md:text-sm text-slate-200 font-medium max-w-lg">
             {lang === 'fr'
-              ? 'JUST SMILE propose un large choix de produits d\'équipements, consommables, et instruments de haute qualité avec un délai de paiement avantageux de 20 jours.'
-              : 'منصة JUST SMILE توفر تشكيلة واسعة من مستهلكات ومعدات طب الأسنان عالية الجودة مع إمكانية الدفع المريح خلال 20 يومًا.'}
+              ? 'JUST SMILE propose un large choix de produits d\'équipements, consommables, et instruments de haute qualité.'
+              : 'منصة JUST SMILE توفر تشكيلة واسعة من مستهلكات ومعدات طب الأسنان عالية الجودة.'}
           </p>
 
           {/* Smart Search Bar & Category Dropdown */}
@@ -320,6 +353,52 @@ export default function BrowseView({
           </div>
         </div>
       </div>
+
+      {/* Announcements carousel */}
+      <AnnouncementsSection lang={lang} currentUser={currentUser ?? null} />
+
+      {/* New Products Slider */}
+      <ProductSlider
+        title={lang === 'fr' ? 'Nouveaux Produits' : 'آخر المنتجات المضافة'}
+        icon={<Sparkles size={18} className="text-brand-cyan" />}
+        products={latestProducts}
+        favorites={favorites}
+        lang={lang}
+        onAddToCart={onAddToCart}
+        onToggleFavorite={onToggleFavorite}
+        onViewProduct={onViewProduct}
+        user={user}
+      />
+
+      {/* Most Requested Section (Only for logged-in doctors) */}
+      {currentUser && currentUser.role === 'doctor' && (
+        <ProductSlider
+          title={lang === 'fr' ? 'Produits les plus demandés' : 'المنتجات الأكثر طلباً'}
+          icon={<Flame size={18} className="text-amber-500 animate-pulse" />}
+          products={mostRequestedProducts}
+          favorites={favorites}
+          lang={lang}
+          onAddToCart={onAddToCart}
+          onToggleFavorite={onToggleFavorite}
+          onViewProduct={onViewProduct}
+          user={user}
+        />
+      )}
+
+      {/* Routine Clinic Products Section (Only for logged-in doctors) */}
+      {currentUser && currentUser.role === 'doctor' && (
+        <ProductSlider
+          title={lang === 'fr' ? 'Routine de Clinique' : 'منتجات العيادة الروتينية'}
+          icon={<ShoppingBag size={18} className="text-emerald-500" />}
+          products={routineClinicProducts}
+          favorites={favorites}
+          lang={lang}
+          onAddToCart={onAddToCart}
+          onToggleFavorite={onToggleFavorite}
+          onViewProduct={onViewProduct}
+          user={user}
+        />
+      )}
 
       {/* Category Pills Navigation Filter Bar */}
       <div className="space-y-3 shrink-0">
