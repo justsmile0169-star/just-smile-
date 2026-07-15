@@ -129,6 +129,17 @@ export default function App() {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
           const profile = userDoc.data() as UserProfile;
+
+          // Block pending/rejected doctors — sign them out immediately
+          // so they stay on the auth page and see the pending message.
+          if (profile.role === 'doctor' && (profile.status === 'pending' || profile.status === 'rejected')) {
+            await signOut(auth);
+            setCurrentUser(null);
+            setActiveTab('auth');
+            setLoadingUser(false);
+            return;
+          }
+
           setCurrentUser(profile);
           
           // Route accordingly
@@ -144,7 +155,6 @@ export default function App() {
         }
       } else {
         setCurrentUser(null);
-        setActiveTab('browse');
       }
       setLoadingUser(false);
     });
