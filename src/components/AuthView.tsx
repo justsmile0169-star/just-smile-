@@ -54,6 +54,18 @@ export default function AuthView({ lang, onAuthSuccess }: AuthViewProps) {
     }
   }, [isLogin, wilayas.length]);
 
+  // Restore pending/rejected flags from sessionStorage (since AuthView gets unmounted during auth state change)
+  useEffect(() => {
+    if (sessionStorage.getItem('pending_doctor_login') === 'true') {
+      setIsPendingAccount(true);
+      sessionStorage.removeItem('pending_doctor_login');
+    }
+    if (sessionStorage.getItem('rejected_doctor_login') === 'true') {
+      setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
+      sessionStorage.removeItem('rejected_doctor_login');
+    }
+  }, [lang]);
+
   // When wilaya changes → reload communes
   const handleWilayaChange = async (code: string) => {
     const w = wilayas.find((w) => w.code === code) ?? null;

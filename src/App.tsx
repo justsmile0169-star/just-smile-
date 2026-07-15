@@ -133,6 +133,11 @@ export default function App() {
           // Block pending/rejected doctors — sign them out immediately
           // so they stay on the auth page and see the pending message.
           if (profile.role === 'doctor' && (profile.status === 'pending' || profile.status === 'rejected')) {
+            if (profile.status === 'pending') {
+              sessionStorage.setItem('pending_doctor_login', 'true');
+            } else {
+              sessionStorage.setItem('rejected_doctor_login', 'true');
+            }
             await signOut(auth);
             setCurrentUser(null);
             setActiveTab('auth');
