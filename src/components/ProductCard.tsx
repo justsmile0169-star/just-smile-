@@ -26,7 +26,7 @@ export default function ProductCard({
   const isRtl = lang === 'ar';
   
   // Calculate final product price after product-level discounts
-  const hasProductDiscount = product.discountPercent && product.discountPercent > 0;
+  const hasProductDiscount = typeof product.discountPercent === 'number' && product.discountPercent > 0;
   const finalPrice = hasProductDiscount
     ? Math.round(product.price * (1 - (product.discountPercent || 0) / 100))
     : product.price;
