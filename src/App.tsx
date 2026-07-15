@@ -55,6 +55,8 @@ export default function App() {
   const [favorites, setFavorites] = useState<string[]>([]); // Array of favorited product IDs
   const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]); // Array of viewed product IDs
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [favoriteProducts, setFavoriteProducts] = useState<Product[]>([]);
+  const [recentlyViewedProducts, setRecentlyViewedProducts] = useState<Product[]>([]);
 
   // Admin sync lists
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
@@ -187,8 +189,14 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. Synchronize Products Collection (Real-Time) ---
+  // --- 4. Synchronize Products Collection (Real-Time for Admins/Staff only) ---
   useEffect(() => {
+    const isStaff = currentUser && canAccessAdmin(currentUser);
+    if (!isStaff) {
+      setProducts([]);
+      return;
+    }
+
     const q = collection(db, 'products');
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items: Product[] = [];
@@ -205,7 +213,67 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [currentUser]);
+
+  // Sync favorites details from Firestore
+  useEffect(() => {
+    if (!currentUser || favorites.length === 0) {
+      setFavoriteProducts([]);
+      return;
+    }
+
+    const fetchFavs = async () => {
+      try {
+        const promises = favorites.map(async (id) => {
+          const docRef = doc(db, 'products', id);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const data = snap.data() as Product;
+            if (!data.isDeleted) {
+              return { ...data, id: snap.id } as Product;
+            }
+          }
+          return null;
+        });
+        const results = await Promise.all(promises);
+        setFavoriteProducts(results.filter((p): p is Product => p !== null));
+      } catch (err) {
+        console.error("Error fetching favorite products details:", err);
+      }
+    };
+
+    fetchFavs();
+  }, [favorites, currentUser]);
+
+  // Sync recently viewed details from Firestore
+  useEffect(() => {
+    if (recentlyViewed.length === 0) {
+      setRecentlyViewedProducts([]);
+      return;
+    }
+
+    const fetchRecent = async () => {
+      try {
+        const promises = recentlyViewed.map(async (id) => {
+          const docRef = doc(db, 'products', id);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const data = snap.data() as Product;
+            if (!data.isDeleted) {
+              return { ...data, id: snap.id } as Product;
+            }
+          }
+          return null;
+        });
+        const results = await Promise.all(promises);
+        setRecentlyViewedProducts(results.filter((p): p is Product => p !== null));
+      } catch (err) {
+        console.error("Error fetching recently viewed products details:", err);
+      }
+    };
+
+    fetchRecent();
+  }, [recentlyViewed]);
 
   // Helper: Seed Default Products (only callable by admin/manager)
   const seedDefaultProducts = async () => {
@@ -551,13 +619,28 @@ export default function App() {
   };
 
   // --- 8. Quick Reorder Handler ---
-  const handleQuickReorder = (items: { productId: string; quantity: number }[]) => {
+  const handleQuickReorder = async (items: { productId: string; quantity: number }[]) => {
     // Attempt to match and add items to cart
     const newCartItems: CartItem[] = [...cart];
     let addedCount = 0;
 
-    items.forEach((reorderItem) => {
-      const match = products.find((p) => p.id === reorderItem.productId);
+    for (const reorderItem of items) {
+      let match = products.find((p) => p.id === reorderItem.productId);
+      if (!match) {
+        try {
+          const docRef = doc(db, 'products', reorderItem.productId);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data() as Product;
+            if (!data.isDeleted) {
+              match = { ...data, id: docSnap.id };
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching product for reorder:", err);
+        }
+      }
+
       if (match && match.stock > 0) {
         const qtyToAdd = Math.min(reorderItem.quantity, match.stock);
         const existingIdx = newCartItems.findIndex((ci) => ci.product.id === match.id);
@@ -569,7 +652,7 @@ export default function App() {
         }
         addedCount++;
       }
-    });
+    }
 
     if (addedCount > 0) {
       saveCart(newCartItems);
@@ -762,7 +845,7 @@ export default function App() {
               <DoctorDashboard
                 user={currentUser}
                 orders={userOrders}
-                allProducts={products}
+                allProducts={favoriteProducts.concat(recentlyViewedProducts)}
                 favorites={favorites}
                 recentlyViewed={recentlyViewed}
                 lang={lang}
@@ -804,11 +887,11 @@ export default function App() {
                 <div className="flex items-center gap-2 border-b border-slate-100 pb-4">
                   <Heart size={24} className="text-red-500" fill="currentColor" />
                   <h2 className="text-2xl font-black text-slate-900">
-                    {getTranslation(lang, 'favorites')} ({products.filter((p) => favorites.includes(p.id)).length})
+                    {getTranslation(lang, 'favorites')} ({favoriteProducts.length})
                   </h2>
                 </div>
 
-                {products.filter((p) => favorites.includes(p.id)).length === 0 ? (
+                {favoriteProducts.length === 0 ? (
                   <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-4">
                     <Heart className="mx-auto text-slate-300" size={48} />
                     <h3 className="font-bold text-slate-700 text-sm">{lang === 'fr' ? 'Aucun favori enregistré.' : 'لم تقم بحفظ أي منتجات في المفضلة بعد.'}</h3>
@@ -821,20 +904,18 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {products
-                      .filter((p) => favorites.includes(p.id))
-                      .map((p) => (
-                        <ProductCard
-                          key={p.id}
-                          product={p}
-                          lang={lang}
-                          onAddToCart={handleAddToCart}
-                          isFavorite={true}
-                          onToggleFavorite={handleToggleFavorite}
-                          onViewDetails={handleViewProductDetails}
-                          user={currentUser}
-                        />
-                      ))}
+                    {favoriteProducts.map((p) => (
+                      <ProductCard
+                        key={p.id}
+                        product={p}
+                        lang={lang}
+                        onAddToCart={handleAddToCart}
+                        isFavorite={true}
+                        onToggleFavorite={handleToggleFavorite}
+                        onViewDetails={handleViewProductDetails}
+                        user={currentUser}
+                      />
+                    ))}
                   </div>
                 )}
               </div>

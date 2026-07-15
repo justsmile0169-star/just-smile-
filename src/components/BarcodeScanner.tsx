@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { findProductByCode } from '../utils/productFirestore';
+import { findProductByCode, findProductByCodeFirestore } from '../utils/productFirestore';
 import { hasPermission } from '../utils/permissions';
 import { ScanBarcode, X, Keyboard, Printer, Plus, ShoppingCart, PackagePlus } from 'lucide-react';
 
@@ -44,25 +44,36 @@ export default function BarcodeScanner({
     new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(n) +
     ' ' + getTranslation(lang, 'currency');
 
+  const handleProductFound = (product: Product) => {
+    setFoundProduct(product);
+    setQuantity(1);
+    setPhase('found');
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    setScanning(false);
+  };
+
   const processCode = useCallback(
-    (code: string) => {
+    async (code: string) => {
       const normalized = code.trim();
       if (!normalized) return;
 
       setScannedCode(normalized);
       setError('');
 
-      const product = findProductByCode(products, normalized);
+      let product = findProductByCode(products, normalized);
       if (product) {
-        setFoundProduct(product);
-        setQuantity(1);
-        setPhase('found');
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        setScanning(false);
+        handleProductFound(product);
+        return;
+      }
+
+      // Try Firestore fallback
+      product = await findProductByCodeFirestore(normalized);
+      if (product) {
+        handleProductFound(product);
       } else {
         setFoundProduct(null);
         setPhase('not_found');
@@ -77,24 +88,23 @@ export default function BarcodeScanner({
     productsRef.current = products;
   }, [products]);
 
-  const processCodeStable = useCallback((code: string) => {
+  const processCodeStable = useCallback(async (code: string) => {
     const normalized = code.trim();
     if (!normalized) return;
 
     setScannedCode(normalized);
     setError('');
 
-    const product = findProductByCode(productsRef.current, normalized);
+    let product = findProductByCode(productsRef.current, normalized);
     if (product) {
-      setFoundProduct(product);
-      setQuantity(1);
-      setPhase('found');
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      setScanning(false);
+      handleProductFound(product);
+      return;
+    }
+
+    // Try Firestore fallback
+    product = await findProductByCodeFirestore(normalized);
+    if (product) {
+      handleProductFound(product);
     } else {
       setFoundProduct(null);
       setPhase('not_found');

@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { collection, query, where, orderBy, limit, startAfter, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
 import { Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 import ProductCard from './ProductCard';
@@ -41,34 +43,261 @@ export default function BrowseView({
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Latest 20 products sorted by createdAt desc
-  const latestProducts = useMemo(() => {
-    return [...products]
-      .filter(p => !p.isDeleted)
-      .sort((a, b) => {
-        const da = (a as any).createdAt || '';
-        const db2 = (b as any).createdAt || '';
-        return db2.localeCompare(da);
-      })
-      .slice(0, 20);
-  }, [products]);
+  const [latestProducts, setLatestProducts] = useState<Product[]>([]);
+  const [mostRequestedProducts, setMostRequestedProducts] = useState<Product[]>([]);
+  const [routineClinicProducts, setRoutineClinicProducts] = useState<Product[]>([]);
 
-  // Most requested: products sorted by salesCount desc (limit 20)
-  const mostRequestedProducts = useMemo(() => {
-    return [...products]
-      .filter(p => !p.isDeleted)
-      .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
-      .slice(0, 20);
-  }, [products]);
+  // Main catalog products pagination state
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
-  // Routine clinic products: Consommables, Hygiène & Stérilisation, Instruments categories, sorted by salesCount desc (limit 20)
-  const routineClinicProducts = useMemo(() => {
-    const routineCategories = ['Consommables', 'Hygiène & Stérilisation', 'Instruments'];
-    return [...products]
-      .filter(p => !p.isDeleted && routineCategories.includes(p.category))
-      .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
-      .slice(0, 20);
-  }, [products]);
+  // Search state
+  const [searchProducts, setSearchProducts] = useState<Product[]>([]);
+  const [loadingSearch, setLoadingSearch] = useState(false);
+
+  const loaderRef = useRef<HTMLDivElement>(null);
+
+  // Fetch sliders on mount or when currentUser changes
+  useEffect(() => {
+    const fetchLatest = async () => {
+      try {
+        const q = query(
+          collection(db, 'products'),
+          orderBy('createdAt', 'desc'),
+          limit(20)
+        );
+        const snap = await getDocs(q);
+        const items: Product[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Product;
+          if (!data.isDeleted) items.push({ ...data, id: d.id });
+        });
+        setLatestProducts(items);
+      } catch (err) {
+        console.error("Error fetching latest products slider:", err);
+      }
+    };
+
+    const fetchMostRequested = async () => {
+      try {
+        const q = query(
+          collection(db, 'products'),
+          orderBy('salesCount', 'desc'),
+          limit(20)
+        );
+        const snap = await getDocs(q);
+        const items: Product[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Product;
+          if (!data.isDeleted) items.push({ ...data, id: d.id });
+        });
+        setMostRequestedProducts(items);
+      } catch (err) {
+        console.error("Error fetching most requested products slider:", err);
+      }
+    };
+
+    const fetchRoutine = async () => {
+      try {
+        const q = query(
+          collection(db, 'products'),
+          where('category', 'in', ['Consommables', 'Hygiène & Stérilisation', 'Instruments']),
+          limit(40)
+        );
+        const snap = await getDocs(q);
+        const items: Product[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Product;
+          if (!data.isDeleted) items.push({ ...data, id: d.id });
+        });
+        const sorted = items
+          .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
+          .slice(0, 20);
+        setRoutineClinicProducts(sorted);
+      } catch (err) {
+        console.error("Error fetching routine clinic products slider:", err);
+      }
+    };
+
+    fetchLatest();
+    if (currentUser && currentUser.role === 'doctor') {
+      fetchMostRequested();
+      fetchRoutine();
+    }
+  }, [currentUser]);
+
+  // Reset page and load first batch of catalog products when category changes
+  useEffect(() => {
+    const initFetch = async () => {
+      setLoading(true);
+      try {
+        let q;
+        const productsRef = collection(db, 'products');
+
+        if (selectedCategory === 'all') {
+          q = query(
+            productsRef,
+            orderBy('createdAt', 'desc'),
+            limit(40)
+          );
+        } else {
+          q = query(
+            productsRef,
+            where('category', '==', selectedCategory),
+            limit(40)
+          );
+        }
+
+        const snap = await getDocs(q);
+        const items: Product[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Product;
+          if (!data.isDeleted) {
+            items.push({ ...data, id: d.id });
+          }
+        });
+
+        setCatalogProducts(items);
+
+        if (snap.docs.length < 40) {
+          setHasMore(false);
+          setLastVisible(null);
+        } else {
+          setHasMore(true);
+          setLastVisible(snap.docs[snap.docs.length - 1]);
+        }
+      } catch (err) {
+        console.error("Error fetching initial catalog products:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initFetch();
+  }, [selectedCategory]);
+
+  // Fetch more products (Infinite Scroll)
+  const fetchMoreProducts = async () => {
+    if (loading || !hasMore || !lastVisible || searchQuery.trim()) return;
+
+    setLoading(true);
+    try {
+      let q;
+      const productsRef = collection(db, 'products');
+
+      if (selectedCategory === 'all') {
+        q = query(
+          productsRef,
+          orderBy('createdAt', 'desc'),
+          startAfter(lastVisible),
+          limit(40)
+        );
+      } else {
+        q = query(
+          productsRef,
+          where('category', '==', selectedCategory),
+          startAfter(lastVisible),
+          limit(40)
+        );
+      }
+
+      const snap = await getDocs(q);
+      const items: Product[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Product;
+        if (!data.isDeleted) {
+          items.push({ ...data, id: d.id });
+        }
+      });
+
+      setCatalogProducts((prev) => {
+        const ids = new Set(prev.map(p => p.id));
+        const newItems = items.filter(p => !ids.has(p.id));
+        return [...prev, ...newItems];
+      });
+
+      if (snap.docs.length < 40) {
+        setHasMore(false);
+        setLastVisible(null);
+      } else {
+        setHasMore(true);
+        setLastVisible(snap.docs[snap.docs.length - 1]);
+      }
+    } catch (err) {
+      console.error("Error fetching more catalog products:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // IntersectionObserver for Infinite Scroll
+  useEffect(() => {
+    if (!hasMore || loading || searchQuery.trim()) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          fetchMoreProducts();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentLoader = loaderRef.current;
+    if (currentLoader) {
+      observer.observe(currentLoader);
+    }
+
+    return () => {
+      if (currentLoader) {
+        observer.unobserve(currentLoader);
+      }
+    };
+  }, [loaderRef.current, hasMore, loading, searchQuery, lastVisible]);
+
+  // Debounced search queries database
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchProducts([]);
+      return;
+    }
+
+    const fetchAllForSearch = async () => {
+      setLoadingSearch(true);
+      try {
+        let q;
+        const productsRef = collection(db, 'products');
+        if (selectedCategory === 'all') {
+          q = query(productsRef);
+        } else {
+          q = query(productsRef, where('category', '==', selectedCategory));
+        }
+
+        const snap = await getDocs(q);
+        const items: Product[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Product;
+          if (!data.isDeleted) {
+            items.push({ ...data, id: d.id });
+          }
+        });
+        setSearchProducts(items);
+      } catch (err) {
+        console.error("Error fetching products for search:", err);
+      } finally {
+        setLoadingSearch(false);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      fetchAllForSearch();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedCategory]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -130,7 +359,10 @@ export default function BrowseView({
 
   // Filter products based on search query and category select
   const filteredProducts = useMemo(() => {
-    return products.filter((prod) => {
+    if (!searchQuery.trim()) {
+      return catalogProducts;
+    }
+    return searchProducts.filter((prod) => {
       const matchesCategory = selectedCategory === 'all' || prod.category === selectedCategory;
       const matchesSearch = prod.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             prod.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -138,15 +370,15 @@ export default function BrowseView({
                             (prod.barcode && prod.barcode.includes(searchQuery));
       return matchesCategory && matchesSearch;
     });
-  }, [products, selectedCategory, searchQuery]);
+  }, [catalogProducts, searchProducts, selectedCategory, searchQuery]);
 
   // Smart Search suggestions (max 5 suggestions)
   const searchSuggestions = useMemo(() => {
     if (!searchQuery.trim()) return [];
-    return products
+    return searchProducts
       .filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
       .slice(0, 5);
-  }, [products, searchQuery]);
+  }, [searchProducts, searchQuery]);
 
   return (
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -443,7 +675,14 @@ export default function BrowseView({
       </div>
 
       {/* Products Grid list */}
-      {filteredProducts.length === 0 ? (
+      {loading && catalogProducts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 space-y-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-cyan"></div>
+          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+            {lang === 'fr' ? 'Chargement des produits...' : 'جاري تحميل المنتجات...'}
+          </p>
+        </div>
+      ) : filteredProducts.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-8 space-y-2 shadow-xs">
           <ShieldAlert className="mx-auto text-slate-300 dark:text-slate-600" size={40} />
           <h4 className="font-bold text-slate-800 dark:text-slate-200 text-base">{lang === 'fr' ? 'Aucun produit trouvé' : 'لم يتم العثور على أي منتجات'}</h4>
@@ -466,6 +705,28 @@ export default function BrowseView({
         </div>
       )}
 
+      {/* Infinite Scroll trigger element */}
+      {hasMore && !searchQuery.trim() && (
+        <div ref={loaderRef} className="flex justify-center py-8">
+          {loading ? (
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan"></div>
+          ) : (
+            <div className="h-4 w-4"></div>
+          )}
+        </div>
+      )}
+
+      {/* Search loader */}
+      {searchQuery.trim() && loadingSearch && (
+        <div className="flex flex-col items-center justify-center py-10 space-y-2">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan"></div>
+          <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+            {lang === 'fr' ? 'Recherche en cours...' : 'جاري البحث...'}
+          </span>
+        </div>
+      )}
+
     </div>
   );
 }
+

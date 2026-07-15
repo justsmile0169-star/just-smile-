@@ -8,3 +8,4 @@ coverage/
 !.env.example
 .aistudio/
 service-account-key*.json
+.vercel

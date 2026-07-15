@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDoc, getDocs, query, where, writeBatch, DocumentReference
+  collection, doc, getDoc, getDocs, query, where, writeBatch, DocumentReference, limit
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product } from '../types';
@@ -59,6 +59,42 @@ export function findProductByCode(products: Product[], code: string): Product | 
       (normalized.length >= 10 && p.barcode?.includes(normalized))
   );
 }
+
+/** Retrieve product by code (document ID or barcode) directly from Firestore. */
+export async function findProductByCodeFirestore(code: string): Promise<Product | null> {
+  const normalized = code.trim();
+  if (!normalized) return null;
+
+  try {
+    const docRef = doc(db, 'products', normalized);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data() as Product;
+      if (!data.isDeleted) {
+        return { ...data, id: docSnap.id };
+      }
+    }
+  } catch (err) {
+    console.error("Error in findProductByCodeFirestore ID match:", err);
+  }
+
+  try {
+    const q = query(collection(db, 'products'), where('barcode', '==', normalized), limit(1));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      const docSnap = querySnap.docs[0];
+      const data = docSnap.data() as Product;
+      if (!data.isDeleted) {
+        return { ...data, id: docSnap.id };
+      }
+    }
+  } catch (err) {
+    console.error("Error in findProductByCodeFirestore barcode match:", err);
+  }
+
+  return null;
+}
+
 
 /** Fully delete product from database by removing all matching documents */
 export async function deleteProductFully(product: Product): Promise<number> {
