@@ -386,6 +386,19 @@ export default function AdminDashboard({
   const [pDiscount, setPDiscount] = useState(0);
   const [pImage, setPImage] = useState('');
   const [pBarcode, setPBarcode] = useState('');
+  const [pIsRoutineClinic, setPIsRoutineClinic] = useState(false);
+
+  // Generate a random EAN-13 style barcode
+  const generateBarcode = () => {
+    const base = '613' + String(Date.now()).slice(-9);
+    const digits = base.split('').map(Number);
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      sum += digits[i] * (i % 2 === 0 ? 1 : 3);
+    }
+    const checkDigit = (10 - (sum % 10)) % 10;
+    setPBarcode(base + checkDigit);
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -413,6 +426,7 @@ export default function AdminDashboard({
       setPDiscount(prod.discountPercent || 0);
       setPImage(prod.image || '');
       setPBarcode(prod.barcode || '');
+      setPIsRoutineClinic(prod.isRoutineClinic ?? false);
     } else {
       setEditingProduct(null);
       setPName('');
@@ -425,6 +439,7 @@ export default function AdminDashboard({
       setPLowStock(5);
       setPDiscount(0);
       setPImage('');
+      setPIsRoutineClinic(false);
       // Check for pre-filled barcode from scanner
       const scannedBarcode = localStorage.getItem('justsmile_new_product_barcode');
       setPBarcode(scannedBarcode || '');
@@ -456,7 +471,9 @@ export default function AdminDashboard({
         lowStockAlert: Number(pLowStock),
         discountPercent: Number(pDiscount),
         image: pImage || editingProduct?.image || `https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300`,
-        barcode: pBarcode.trim() || undefined
+        barcode: pBarcode.trim() || undefined,
+        isRoutineClinic: pIsRoutineClinic,
+        ...(!editingProduct && { createdAt: new Date().toISOString() })
       });
 
       if (editingProduct) {
@@ -2212,9 +2229,57 @@ export default function AdminDashboard({
                 />
               </div>
 
+              {/* Barcode Generator */}
               <div className="space-y-1">
-                <label className="text-slate-500 font-bold text-xs">{lang === 'fr' ? 'Code-barres (EAN)' : 'الباركود'}</label>
-                <input type="text" value={pBarcode} onChange={(e) => setPBarcode(e.target.value)} placeholder="6130987654321" className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan font-mono text-sm" />
+                <label className="text-slate-500 font-bold text-xs">{lang === 'fr' ? 'Code-barres (EAN)' : 'الباركود (EAN)'}</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={pBarcode}
+                    onChange={(e) => setPBarcode(e.target.value)}
+                    placeholder="6130987654321"
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={generateBarcode}
+                    title={lang === 'fr' ? 'Générer un code-barres automatique' : 'توليد باركود تلقائي'}
+                    className="shrink-0 flex items-center gap-1.5 bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30 font-bold text-xs px-3 py-2 rounded-xl transition-all"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14"/><path d="M8 5v14"/><path d="M12 5v14"/><path d="M17 5v14"/><path d="M21 5v14"/></svg>
+                    {lang === 'fr' ? 'Générer' : 'توليد'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {lang === 'fr' ? 'Saisissez manuellement ou cliquez sur «Générer» pour un EAN-13 automatique.' : 'أدخل يدوياً أو اضغط «توليد» لإنشاء باركود EAN-13 تلقائي.'}
+                </p>
+              </div>
+
+              {/* Routine Clinic Product Toggle */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div>
+                  <p className="text-sm font-bold text-slate-700">
+                    {lang === 'fr' ? 'Produit Clinique Routinier' : 'منتج عيادة روتيني'}
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    {lang === 'fr'
+                      ? 'Afficher ce produit dans la section "Clinique Routinière" de la boutique.'
+                      : 'عرض هذا المنتج في قسم "منتجات العيادة الروتينية" في المتجر.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPIsRoutineClinic(prev => !prev)}
+                  className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${
+                    pIsRoutineClinic ? 'bg-brand-cyan' : 'bg-slate-200'
+                  }`}
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
+                      pIsRoutineClinic ? 'right-1' : 'left-1'
+                    }`}
+                  />
+                </button>
               </div>
 
               <div className="space-y-1">

@@ -103,7 +103,7 @@ export default function BrowseView({
       try {
         const q = query(
           collection(db, 'products'),
-          where('category', 'in', ['Consommables', 'Hygiène & Stérilisation', 'Instruments']),
+          where('isRoutineClinic', '==', true),
           limit(40)
         );
         const snap = await getDocs(q);

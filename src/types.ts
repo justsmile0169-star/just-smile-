@@ -43,6 +43,8 @@ export interface Product {
   barcode?: string; // EAN / barcode for scanner
   isDeleted?: boolean; // Soft delete flag
   salesCount?: number; // Total units sold
+  isRoutineClinic?: boolean; // flag for routine clinic products
+  createdAt?: string; // creation timestamp
 }
 
 export type OrderStatus = 'pending' | 'confirmed' | 'preparing' | 'shipped' | 'delivered' | 'cancelled';
