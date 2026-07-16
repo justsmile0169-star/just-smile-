@@ -24,7 +24,7 @@ import {
   Users, DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
-  History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone
+  History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -43,6 +43,7 @@ interface AdminDashboardProps {
   onShopInfoChange: (info: ShopInfo) => void;
   onRefreshData: () => void;
   onPrintInvoice: (order: Order) => void;
+  onPrintBarcode?: (product: Product) => void;
   seedBarcode?: string | null;
   onSeedBarcodeConsumed?: () => void;
 }
@@ -67,6 +68,7 @@ export default function AdminDashboard({
   onShopInfoChange,
   onRefreshData,
   onPrintInvoice,
+  onPrintBarcode,
   seedBarcode,
   onSeedBarcodeConsumed
 }: AdminDashboardProps) {
@@ -1486,6 +1488,13 @@ export default function AdminDashboard({
                         <td className="py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button
+                              onClick={() => onPrintBarcode?.(p)}
+                              className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                              title={lang === 'fr' ? 'Imprimer le code-barres' : 'طباعة الباركود'}
+                            >
+                              <Printer size={14} />
+                            </button>
+                            <button
                               onClick={() => handleOpenProductForm(p)}
                               className="p-1.5 text-slate-400 hover:text-brand-cyan hover:bg-brand-cyan/5 rounded-lg transition-colors"
                               title={lang === 'fr' ? 'Modifier' : 'تعديل'}
@@ -2248,6 +2257,27 @@ export default function AdminDashboard({
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14"/><path d="M8 5v14"/><path d="M12 5v14"/><path d="M17 5v14"/><path d="M21 5v14"/></svg>
                     {lang === 'fr' ? 'Générer' : 'توليد'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onPrintBarcode?.({
+                        id: editingProduct?.id || 'temp',
+                        name: pName || (lang === 'fr' ? 'Nouveau produit' : 'منتج جديد'),
+                        barcode: pBarcode.trim() || editingProduct?.id || 'temp',
+                        price: pPrice,
+                        stock: pStock,
+                        category: pCategory,
+                        description: pDesc,
+                        isDeleted: false,
+                        isRoutineClinic: pIsRoutineClinic
+                      });
+                    }}
+                    title={lang === 'fr' ? 'Imprimer le code-barres' : 'طباعة الباركود'}
+                    className="shrink-0 flex items-center gap-1.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 border border-emerald-600/30 font-bold text-xs px-3 py-2 rounded-xl transition-all"
+                  >
+                    <Printer size={14} />
+                    {lang === 'fr' ? 'Imprimer' : 'طباعة'}
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-400">

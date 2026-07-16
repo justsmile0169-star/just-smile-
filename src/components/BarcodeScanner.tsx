@@ -37,8 +37,8 @@ export default function BarcodeScanner({
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<number | null>(null);
   const canManageInventory = hasPermission(user, 'manage_inventory');
-  const canSell = hasPermission(user, 'sell');
-  const canUseScanner = hasPermission(user, 'use_scanner');
+  const canSell = !user || hasPermission(user, 'sell');
+  const canUseScanner = !user || hasPermission(user, 'use_scanner');
 
   const formatPrice = (n: number) =>
     new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(n) +

@@ -878,6 +878,10 @@ export default function App() {
                 onShopInfoChange={setShopInfo}
                 onRefreshData={() => {}}
                 onPrintInvoice={setSelectedInvoiceOrder}
+                onPrintBarcode={(product) => {
+                  setProductToPrint(product);
+                  setShowBarcodePrint(true);
+                }}
               />
             )}
 
