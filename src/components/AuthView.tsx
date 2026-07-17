@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocFromServer, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
@@ -49,8 +49,26 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
 
   const isRtl = lang === 'ar';
 
-  // Listen to Auth State to handle profile completion for Google users
+  // Listen to Auth State to handle profile completion for Google users.
+  // Also handles the redirect result when the browser returns from Google's
+  // sign-in page (fallback for popup-blocked environments).
   useEffect(() => {
+    // ── Handle redirect result (fires once on page load after redirect) ──────
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) {
+          setLoading(true);
+          await processGoogleUser(result.user);
+        }
+      })
+      .catch((err) => {
+        // auth/no-auth-event is normal when there was no redirect — ignore it
+        if (err?.code !== 'auth/no-auth-event' && err?.code !== 'auth/null-user') {
+          console.error('Redirect result error:', err);
+        }
+      });
+
+    // ── Ongoing auth state listener ──────────────────────────────────────────
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
@@ -81,7 +99,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
       }
     });
     return unsub;
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load wilayas lazily when registration or profile completion form is shown
   useEffect(() => {
@@ -360,61 +378,86 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
     setSuccessMsg('');
     setIsPendingAccount(false);
 
+    const provider = new GoogleAuthProvider();
+
     try {
-      const provider = new GoogleAuthProvider();
+      // Attempt popup first — faster UX, works in most desktop browsers
       const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-
-      const userDocRef = doc(db, 'users', user.uid);
-      const docSnap = await getDoc(userDocRef);
-
-      if (docSnap.exists()) {
-        const profile = docSnap.data() as UserProfile;
-        if (profile.isProfileComplete === false) {
-          setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
-          setGoogleUser(user);
-          setIsCompletingProfile(true);
-        } else if (profile.status === 'pending') {
-          setIsPendingAccount(true);
-          await signOut(auth);
-        } else if (profile.status === 'rejected') {
-          setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
-          await signOut(auth);
-        } else {
-          // Approved doctor or staff
-          onAuthSuccess(profile);
-        }
-      } else {
-        // Create stub profile first, status: 'pending' but isProfileComplete: false
-        const newStub: UserProfile = {
-          uid: user.uid,
-          name: user.displayName || '',
-          email: user.email || '',
-          phone: '',
-          clinicName: '',
-          location: '',
-          role: 'doctor',
-          status: 'pending',
-          isProfileComplete: false,
-          createdAt: new Date().toISOString()
-        };
-        await setDoc(userDocRef, newStub);
-        setGoogleUser(user);
-        setIsCompletingProfile(true);
-        setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
-      }
+      await processGoogleUser(result.user);
     } catch (err: any) {
       console.error('Google Sign-in Error:', err);
-      if (err.code !== 'auth/popup-closed-by-user') {
+
+      // Popup was blocked by the browser (mobile / strict settings) → fall back to redirect
+      if (
+        err.code === 'auth/popup-blocked' ||
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'auth/cancelled-popup-request'
+      ) {
+        try {
+          // signInWithRedirect navigates the page; result is handled in the
+          // onAuthStateChanged listener when the page reloads after redirect.
+          await signInWithRedirect(auth, provider);
+          // (nothing after this line runs — browser navigates away)
+        } catch (redirectErr: any) {
+          console.error('Redirect fallback error:', redirectErr);
+          setErrorMsg(
+            lang === 'fr'
+              ? 'Impossible de se connecter avec Google. Veuillez réessayer.'
+              : 'تعذّر تسجيل الدخول بحساب جوجل. يرجى المحاولة مرة أخرى.'
+          );
+          setLoading(false);
+        }
+      } else {
         setErrorMsg(
           lang === 'fr'
             ? 'Erreur de connexion avec Google.'
             : 'حدث خطأ أثناء تسجيل الدخول باستخدام جوجل.'
         );
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
     }
+  };
+
+  // ── Shared helper: process a signed-in Google user ────────────────────────
+  const processGoogleUser = async (user: any) => {
+    const userDocRef = doc(db, 'users', user.uid);
+    const docSnap = await getDoc(userDocRef);
+
+    if (docSnap.exists()) {
+      const profile = docSnap.data() as UserProfile;
+      if (profile.isProfileComplete === false) {
+        setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
+        setGoogleUser(user);
+        setIsCompletingProfile(true);
+      } else if (profile.status === 'pending') {
+        setIsPendingAccount(true);
+        await signOut(auth);
+      } else if (profile.status === 'rejected') {
+        setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
+        await signOut(auth);
+      } else {
+        onAuthSuccess(profile);
+      }
+    } else {
+      // First-time Google sign-in → create stub and ask for clinic info
+      const newStub: UserProfile = {
+        uid: user.uid,
+        name: user.displayName || '',
+        email: user.email || '',
+        phone: '',
+        clinicName: '',
+        location: '',
+        role: 'doctor',
+        status: 'pending',
+        isProfileComplete: false,
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(userDocRef, newStub);
+      setGoogleUser(user);
+      setIsCompletingProfile(true);
+      setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
+    }
+    setLoading(false);
   };
 
   // ── Complete Profile Submission ───────────────────────────────────────────
