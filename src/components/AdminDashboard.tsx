@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocs, query, where, writeBatch } from 'firebase/firestore';
+import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocFromServer, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Order, Product, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage } from '../types';
 import { Language, getTranslation } from '../translations';
@@ -95,10 +95,17 @@ export default function AdminDashboard({
   const handleApproveDoctor = async (uid: string) => {
     setLoading(true);
     try {
+      // Write approval to Firestore
       await updateDoc(doc(db, 'users', uid), { status: 'approved' });
-      
-      // Send welcome notification
-      await addDoc(collection(db, 'notifications'), {
+
+      // Verify the write was persisted on the server (not just the local cache)
+      const verifySnap = await getDocFromServer(doc(db, 'users', uid));
+      if (!verifySnap.exists() || verifySnap.data().status !== 'approved') {
+        throw new Error('Server write verification failed — status did not persist.');
+      }
+
+      // Send welcome notification separately (failure here should NOT undo approval)
+      addDoc(collection(db, 'notifications'), {
         userId: uid,
         titleFr: 'Bienvenue sur JUST SMILE !',
         titleAr: 'مرحباً بك في JUST SMILE!',
@@ -107,12 +114,23 @@ export default function AdminDashboard({
         type: 'system',
         isRead: false,
         createdAt: new Date().toISOString()
-      });
+      }).catch((notifErr) => console.warn('Notification send failed (non-critical):', notifErr));
 
+      alert(
+        lang === 'fr'
+          ? 'Compte validé avec succès ! Le praticien peut maintenant se connecter.'
+          : 'تم تفعيل الحساب بنجاح! يمكن للطبيب الآن تسجيل الدخول.',
+        'success'
+      );
       onRefreshData();
-    } catch (err) {
-      console.error(err);
-      alert('Erreur lors de la validation.', 'error');
+    } catch (err: any) {
+      console.error('Approve doctor error:', err);
+      alert(
+        lang === 'fr'
+          ? `Erreur lors de la validation : ${err?.message || err}. Vérifiez vos permissions Firebase.`
+          : `فشل التفعيل: ${err?.message || err}. تحقق من صلاحيات Firebase.`,
+        'error'
+      );
     } finally {
       setLoading(false);
     }

@@ -48,8 +48,14 @@ service cloud.firestore {
       // Allow admin to create staff accounts
       allow create: if isAdmin() &&
                       request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];
-      // Allow update for password changes and profile updates
-      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      // Allow update:
+      // - Admin can update any user profile (including doctor approval/rejection)
+      // - Any authenticated user can update their own profile
+      // - Staff (manager, cashier, accountant) can update their own profile
+      // NOTE: isAdmin() checks request.auth.uid's Firestore doc for role=='admin'.
+      //       If the admin's Firebase Auth UID differs from their original Firestore UID,
+      //       the setDoc in AuthView.tsx creates a new doc at the Firebase Auth UID — ensure that runs.
+      allow update: if isAdmin() || isManagerOrAdmin() || (isAuthenticated() && request.auth.uid == userId);
       // Allow delete for admins only
       allow delete: if isAdmin();
       // ── Bootstrap: allow setting password for accounts that have none yet ──

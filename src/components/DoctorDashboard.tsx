@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Order, Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2 } from 'lucide-react';
+import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAppDialog } from '../context/AppDialogContext';
+import { getWilayas, getCommunesByWilaya, WilayaOption, CommuneOption, isFreeDelivery } from '../utils/algeriaData';
 
 interface DoctorDashboardProps {
   user: UserProfile;
@@ -41,6 +42,110 @@ export default function DoctorDashboard({
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+
+  // --- Profile Edit State ---
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState(user.name);
+  const [profilePhone, setProfilePhone] = useState(user.phone);
+  const [profileClinic, setProfileClinic] = useState(user.clinicName);
+  
+  const [wilayas, setWilayas] = useState<WilayaOption[]>([]);
+  const [communes, setCommunes] = useState<CommuneOption[]>([]);
+  const [selectedWilaya, setSelectedWilaya] = useState<WilayaOption | null>(null);
+  const [selectedCommune, setSelectedCommune] = useState<CommuneOption | null>(null);
+  const [loadingWilayas, setLoadingWilayas] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Update edit form values when user prop changes (e.g. after database load/update)
+  useEffect(() => {
+    setProfileName(user.name || '');
+    setProfilePhone(user.phone || '');
+    setProfileClinic(user.clinicName || '');
+  }, [user]);
+
+  const handleOpenProfileModal = async () => {
+    setShowProfileModal(true);
+    setLoadingWilayas(true);
+    try {
+      const wilayaList = await getWilayas();
+      setWilayas(wilayaList);
+      
+      const currentWilaya = wilayaList.find(w => w.code === user.wilayaCode) || null;
+      setSelectedWilaya(currentWilaya);
+      
+      if (currentWilaya) {
+        const communeList = await getCommunesByWilaya(currentWilaya.code);
+        setCommunes(communeList);
+        const currentCommune = communeList.find(c => c.nameAr === user.communeName || c.nameAscii === user.communeNameAscii) || null;
+        setSelectedCommune(currentCommune);
+      }
+    } catch (error) {
+      console.error('Error loading location data for edit profile:', error);
+    } finally {
+      setLoadingWilayas(false);
+    }
+  };
+
+  const handleWilayaChange = async (code: string) => {
+    const w = wilayas.find((w) => w.code === code) ?? null;
+    setSelectedWilaya(w);
+    setSelectedCommune(null);
+    setCommunes([]);
+    if (w) {
+      const list = await getCommunesByWilaya(w.code);
+      setCommunes(list);
+    }
+  };
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profileName.trim() || !profilePhone.trim() || !profileClinic.trim() || !selectedWilaya || !selectedCommune) {
+      alert(lang === 'fr' ? 'Tous les champs sont requis.' : 'جميع الحقول مطلوبة.', 'error');
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      const wilayaName  = lang === 'ar' ? selectedWilaya.nameAr : selectedWilaya.nameAscii;
+      const communeName = lang === 'ar' ? selectedCommune.nameAr : selectedCommune.nameAscii;
+      const locationStr = `${wilayaName}، ${communeName}`;
+
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        name: profileName.trim(),
+        phone: profilePhone.trim(),
+        clinicName: profileClinic.trim(),
+        location: locationStr,
+        wilayaCode: selectedWilaya.code,
+        wilayaName: selectedWilaya.nameAr,
+        communeName: selectedCommune.nameAr,
+        communeNameAscii: selectedCommune.nameAscii
+      });
+
+      alert(
+        lang === 'fr' 
+          ? 'Profil mis à jour avec succès!' 
+          : 'تم تحديث الملف الشخصي بنجاح!', 
+        'success'
+      );
+      setShowProfileModal(false);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      alert(
+        lang === 'fr' 
+          ? 'Erreur lors de la mise à jour du profil.' 
+          : 'حدث خطأ أثناء تحديث الملف الشخصي.', 
+        'error'
+      );
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const freeDelivery =
+    selectedWilaya && selectedCommune
+      ? isFreeDelivery(selectedWilaya.code, selectedCommune.nameAscii)
+      : false;
 
   const handleCancelOrder = async (orderId: string) => {
     const confirmed = await confirm(lang === 'fr' ? 'Voulez-vous vraiment annuler cette commande ?' : 'هل أنت متأكد من إلغاء هذه الطلبية؟');
@@ -155,14 +260,26 @@ export default function DoctorDashboard({
           </p>
         </div>
 
-        {/* Contact Admin Button */}
-        <button
-          onClick={() => setShowMessageModal(true)}
-          className="flex items-center gap-2 bg-brand-cyan text-white px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-brand-cyan/90 transition-colors shadow-xs"
-        >
-          <MessageSquare size={16} />
-          <span>{lang === 'fr' ? 'Contacter l\'administration' : 'اتصل بالإدارة'}</span>
-        </button>
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Edit Profile Button */}
+          <button
+            onClick={handleOpenProfileModal}
+            className="flex items-center gap-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-xs cursor-pointer"
+          >
+            <User size={16} className="text-slate-500" />
+            <span>{lang === 'fr' ? 'Modifier le profil' : 'تعديل الملف الشخصي'}</span>
+          </button>
+
+          {/* Contact Admin Button */}
+          <button
+            onClick={() => setShowMessageModal(true)}
+            className="flex items-center gap-2 bg-brand-cyan text-white px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-brand-cyan/90 transition-colors shadow-xs cursor-pointer"
+          >
+            <MessageSquare size={16} />
+            <span>{lang === 'fr' ? 'Contacter l\'administration' : 'اتصل بالإدارة'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Credit Status Summary Cards */}
@@ -473,6 +590,185 @@ export default function DoctorDashboard({
 
       </div>
 
+      {/* Profile Edit Modal */}
+      {showProfileModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-extrabold text-slate-800 text-base md:text-lg flex items-center gap-2">
+                <User size={20} className="text-brand-cyan" />
+                {lang === 'fr' ? 'Modifier mon Profil' : 'تعديل ملفي الشخصي'}
+              </h3>
+              <button
+                onClick={() => setShowProfileModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateProfile} className="p-6 space-y-4">
+              {/* Doctor Name */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  {getTranslation(lang, 'name')}
+                </label>
+                <div className="relative">
+                  <User size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
+                  <input
+                    type="text"
+                    required
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    placeholder={lang === 'fr' ? 'Dr. Ahmed Benali' : 'د. أحمد بن علي'}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-10 text-sm focus:outline-hidden focus:border-brand-cyan ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
+                  />
+                </div>
+              </div>
+
+              {/* Phone Number */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  {getTranslation(lang, 'phone')}
+                </label>
+                <div className="relative">
+                  <Phone size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
+                  <input
+                    type="tel"
+                    required
+                    value={profilePhone}
+                    onChange={(e) => setProfilePhone(e.target.value)}
+                    placeholder="0550 12 34 56"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-10 text-sm focus:outline-hidden focus:border-brand-cyan ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
+                  />
+                </div>
+              </div>
+
+              {/* Clinic Name */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  {getTranslation(lang, 'clinicName')}
+                </label>
+                <div className="relative">
+                  <Building size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
+                  <input
+                    type="text"
+                    required
+                    value={profileClinic}
+                    onChange={(e) => setProfileClinic(e.target.value)}
+                    placeholder={lang === 'fr' ? 'Cabinet Dentaire El-Yasmine' : 'عيادة الياسمين لطب الأسنان'}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-10 text-sm focus:outline-hidden focus:border-brand-cyan ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
+                  />
+                </div>
+              </div>
+
+              {/* Wilaya dropdown */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <MapPin size={13} />
+                  {lang === 'fr' ? 'Wilaya' : 'الولاية'}
+                </label>
+                <div className="relative">
+                  <select
+                    required
+                    disabled={loadingWilayas}
+                    value={selectedWilaya?.code ?? ''}
+                    onChange={(e) => handleWilayaChange(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan text-sm appearance-none cursor-pointer"
+                  >
+                    <option value="">
+                      {loadingWilayas
+                        ? (lang === 'fr' ? 'Chargement…' : 'جارٍ التحميل…')
+                        : (lang === 'fr' ? '— Choisir une wilaya —' : '— اختر الولاية —')}
+                    </option>
+                    {wilayas.map((w) => (
+                      <option key={w.code} value={w.code}>
+                        {w.code} – {lang === 'ar' ? w.nameAr : w.nameAscii}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Commune dropdown */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <MapPin size={13} />
+                  {lang === 'fr' ? 'Commune' : 'البلدية'}
+                </label>
+                <div className="relative">
+                  <select
+                    required
+                    disabled={!selectedWilaya || communes.length === 0}
+                    value={selectedCommune?.id ?? ''}
+                    onChange={(e) => {
+                      const c = communes.find((c) => String(c.id) === e.target.value) ?? null;
+                      setSelectedCommune(c);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan text-sm appearance-none cursor-pointer"
+                  >
+                    <option value="">
+                      {!selectedWilaya
+                        ? (lang === 'fr' ? '— Choisir d\'abord la wilaya —' : '— اختر الولاية أولاً —')
+                        : (lang === 'fr' ? '— Choisir une commune —' : '— اختر البلدية —')}
+                    </option>
+                    {communes.map((c) => (
+                      <option key={c.id} value={String(c.id)}>
+                        {lang === 'ar' ? c.nameAr : c.nameAscii}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
+                </div>
+
+                {/* Delivery badge */}
+                {selectedCommune && (
+                  <div
+                    className={`mt-2 flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border ${
+                      freeDelivery
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-amber-50 border-amber-200 text-amber-700'
+                    }`}
+                  >
+                    <Truck size={14} className="shrink-0" />
+                    {freeDelivery
+                      ? (lang === 'fr'
+                          ? '🎉 Livraison GRATUITE — Commune de Djelfa !'
+                          : '🎉 التوصيل مجاني — بلدية الجلفة!')
+                      : (lang === 'fr'
+                          ? '📦 Des frais de livraison s\'appliqueront selon la localisation.'
+                          : '📦 سيتم احتساب تكلفة التوصيل حسب الموقع.')}
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowProfileModal(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingProfile}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white bg-brand-cyan hover:bg-brand-cyan/90 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {savingProfile ? (
+                    <span>{lang === 'fr' ? 'Enregistrement...' : 'جاري الحفظ...'}</span>
+                  ) : (
+                    <span>{lang === 'fr' ? 'Enregistrer' : 'حفظ التعديلات'}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Message Modal */}
       {showMessageModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -506,12 +802,14 @@ export default function DoctorDashboard({
 
               <div className="flex gap-3 pt-2">
                 <button
+                  type="button"
                   onClick={() => setShowMessageModal(false)}
                   className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
                 >
                   {lang === 'fr' ? 'Annuler' : 'إلغاء'}
                 </button>
                 <button
+                  type="button"
                   onClick={handleSendMessage}
                   disabled={!messageText.trim() || sendingMessage}
                   className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white bg-brand-cyan hover:bg-brand-cyan/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"

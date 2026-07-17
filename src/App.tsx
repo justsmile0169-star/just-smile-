@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import { 
-  collection, onSnapshot, query, where, doc, getDoc, setDoc, 
+  collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc, 
   writeBatch, addDoc, updateDoc, deleteDoc 
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
@@ -124,49 +124,81 @@ export default function App() {
 
   // --- 2. Initialize Firebase authentication state listener ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubscribeDoc: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+        unsubscribeDoc = null;
+      }
+
       setLoadingUser(true);
       if (firebaseUser) {
-        // Sync user profile
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
-          const profile = userDoc.data() as UserProfile;
+        // Subscribe to real-time updates for the user profile document
+        unsubscribeDoc = onSnapshot(doc(db, 'users', firebaseUser.uid), async (docSnap) => {
+          if (docSnap.exists()) {
+            const profile = docSnap.data() as UserProfile;
 
-          // Block pending/rejected doctors — sign them out immediately
-          // so they stay on the auth page and see the pending message.
-          if (profile.role === 'doctor' && (profile.status === 'pending' || profile.status === 'rejected')) {
-            if (profile.status === 'pending') {
-              sessionStorage.setItem('pending_doctor_login', 'true');
-            } else {
-              sessionStorage.setItem('rejected_doctor_login', 'true');
+            // If doctor has NOT completed profile details (for Google signups)
+            if (profile.role === 'doctor' && profile.isProfileComplete === false) {
+              setCurrentUser(profile);
+              setActiveTab('auth');
+              setLoadingUser(false);
+              return;
             }
-            await signOut(auth);
-            setCurrentUser(null);
-            setActiveTab('auth');
-            setLoadingUser(false);
-            return;
-          }
 
-          setCurrentUser(profile);
-          
-          // Route accordingly
-          if (profile.role === 'admin' || profile.role === 'manager' || profile.role === 'cashier' || profile.role === 'accountant') {
-            setActiveTab('admin');
+            // Block pending/rejected doctors — sign them out immediately
+            // so they stay on the auth page and see the pending message.
+            if (profile.role === 'doctor' && (profile.status === 'pending' || profile.status === 'rejected')) {
+              if (profile.status === 'pending') {
+                sessionStorage.setItem('pending_doctor_login', 'true');
+              } else {
+                sessionStorage.setItem('rejected_doctor_login', 'true');
+              }
+              if (unsubscribeDoc) {
+                unsubscribeDoc();
+                unsubscribeDoc = null;
+              }
+              await signOut(auth);
+              setCurrentUser(null);
+              setActiveTab('auth');
+              setLoadingUser(false);
+              return;
+            }
+
+            // Only change tab if we didn't have a user before
+            setCurrentUser((prev) => {
+              if (!prev) {
+                if (profile.role === 'admin' || profile.role === 'manager' || profile.role === 'cashier' || profile.role === 'accountant') {
+                  setActiveTab('admin');
+                } else {
+                  setActiveTab('browse');
+                }
+              }
+              return profile;
+            });
+            setLoadingUser(false);
           } else {
-            setActiveTab('browse');
+            // Profile not found for this Firebase Auth UID.
+            // This is normal for staff members whose Firestore UID differs from Firebase Auth UID.
+            // Do NOT sign out — they may have logged in via custom staff auth.
+            console.warn('No Firestore profile found for Firebase Auth UID:', firebaseUser.uid);
+            setLoadingUser(false);
           }
-        } else {
-          // Fallback if profile didn't get saved
-          setCurrentUser(null);
-          await signOut(auth);
-        }
+        }, (error) => {
+          console.error('Error listening to user document:', error);
+          setLoadingUser(false);
+        });
       } else {
         setCurrentUser(null);
+        setLoadingUser(false);
       }
-      setLoadingUser(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeDoc) unsubscribeDoc();
+    };
   }, []);
 
   // --- 3. Load Shop Settings from Firestore ---
@@ -830,6 +862,7 @@ export default function App() {
             {activeTab === 'auth' && (
               <AuthView
                 lang={lang}
+                currentUser={currentUser}
                 onAuthSuccess={(profile) => {
                   setCurrentUser(profile);
                   if (profile.role !== 'doctor') {

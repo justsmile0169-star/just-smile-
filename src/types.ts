@@ -26,6 +26,7 @@ export interface UserProfile {
   allowCreditPayment?: boolean; // if true, doctor can pay by credit (20 days debt). if false, only cash payment allowed
   password?: string; // for staff accounts login
   lastLoginAt?: string; // track last login time
+  isProfileComplete?: boolean; // check if Google Auth user has completed profile details
 }
 
 export interface Product {
