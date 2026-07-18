@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import { 
   collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc, 
-  writeBatch, addDoc, updateDoc, deleteDoc 
+  writeBatch, addDoc, updateDoc, deleteDoc, getCountFromServer
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import {
@@ -57,6 +57,15 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [favoriteProducts, setFavoriteProducts] = useState<Product[]>([]);
   const [recentlyViewedProducts, setRecentlyViewedProducts] = useState<Product[]>([]);
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({
+    all: 0,
+    'Équipements': 0,
+    'Consommables': 0,
+    'Instruments': 0,
+    'Orthodontie': 0,
+    'Hygiène & Stérilisation': 0,
+    'Prothèse dentaire': 0
+  });
 
   // Admin sync lists
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
@@ -145,6 +154,12 @@ export default function App() {
               setActiveTab('auth');
               setLoadingUser(false);
               return;
+            }
+
+            // If the doctor is pending, auto-approve them (as per client request for automatic confirmation)
+            if (profile.role === 'doctor' && profile.status === 'pending') {
+              profile.status = 'active';
+              await updateDoc(doc(db, 'users', firebaseUser.uid), { status: 'active' }).catch(console.error);
             }
 
             // Block pending/rejected doctors — sign them out immediately
@@ -246,6 +261,54 @@ export default function App() {
 
     return () => unsubscribe();
   }, [currentUser]);
+
+  // --- 4.1 Fetch / calculate product counts by category ---
+  useEffect(() => {
+    if (!currentUser) return;
+    const isStaff = canAccessAdmin(currentUser);
+
+    if (isStaff) {
+      // Calculate counts from memory since admins have the full list
+      const counts: Record<string, number> = {
+        all: products.length,
+        'Équipements': products.filter(p => p.category === 'Équipements').length,
+        'Consommables': products.filter(p => p.category === 'Consommables').length,
+        'Instruments': products.filter(p => p.category === 'Instruments').length,
+        'Orthodontie': products.filter(p => p.category === 'Orthodontie').length,
+        'Hygiène & Stérilisation': products.filter(p => p.category === 'Hygiène & Stérilisation').length,
+        'Prothèse dentaire': products.filter(p => p.category === 'Prothèse dentaire').length
+      };
+      setCategoryCounts(counts);
+    } else {
+      // For doctors, fetch counts on mount/change once via Firestore count queries
+      const fetchCounts = async () => {
+        try {
+          const productsRef = collection(db, 'products');
+          
+          // Count all active products
+          const qAll = query(productsRef, where('isDeleted', '==', false));
+          const snapAll = await getCountFromServer(qAll);
+          const countAll = snapAll.data().count;
+
+          const cats = ['Équipements', 'Consommables', 'Instruments', 'Orthodontie', 'Hygiène & Stérilisation', 'Prothèse dentaire'];
+          const counts: Record<string, number> = { all: countAll };
+
+          await Promise.all(
+            cats.map(async (cat) => {
+              const qCat = query(productsRef, where('category', '==', cat), where('isDeleted', '==', false));
+              const snapCat = await getCountFromServer(qCat);
+              counts[cat] = snapCat.data().count;
+            })
+          );
+
+          setCategoryCounts(counts);
+        } catch (err) {
+          console.error("Error fetching category counts:", err);
+        }
+      };
+      fetchCounts();
+    }
+  }, [products, currentUser]);
 
   // Sync favorites details from Firestore
   useEffect(() => {
@@ -882,6 +945,7 @@ export default function App() {
                 favorites={favorites}
                 recentlyViewed={recentlyViewed}
                 lang={lang}
+                categoryCounts={categoryCounts}
                 onAddToCart={handleAddToCart}
                 onToggleFavorite={handleToggleFavorite}
                 onViewProduct={handleViewProductDetails}

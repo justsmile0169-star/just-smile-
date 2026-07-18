@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, linkWithCredential } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocFromServer, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
@@ -47,6 +47,11 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
   const [isCompletingProfile, setIsCompletingProfile] = useState(false);
   const [googleUser, setGoogleUser] = useState<any>(null);
 
+  // Google Auth Linking states
+  const [pendingLinkCredential, setPendingLinkCredential] = useState<any>(null);
+  const [linkEmail, setLinkEmail] = useState('');
+  const [linkPassword, setLinkPassword] = useState('');
+
   const isRtl = lang === 'ar';
 
   // Listen to Auth State to handle profile completion for Google users.
@@ -62,9 +67,8 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         }
       })
       .catch((err) => {
-        // auth/no-auth-event is normal when there was no redirect — ignore it
         if (err?.code !== 'auth/no-auth-event' && err?.code !== 'auth/null-user') {
-          console.error('Redirect result error:', err);
+          handleGoogleAuthError(err);
         }
       });
 
@@ -332,23 +336,18 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
           communeName:      selectedCommune.nameAr,
           communeNameAscii: selectedCommune.nameAscii,
           role:    'doctor',
-          status:  'pending',
+          status:  'active',
           createdAt: new Date().toISOString(),
         };
 
         await setDoc(doc(db, 'users', uid), newProfile);
 
-        setSuccessMsg(
-          lang === 'fr'
-            ? 'Votre inscription a été enregistrée avec succès. Votre compte est en attente de validation.'
-            : 'تم تسجيل طلب انضمامك بنجاح. حسابك الآن في انتظار التفعيل من قبل الإدارة.'
-        );
-        await signOut(auth);
+        // Auto-activate: sign in immediately without waiting for admin approval
+        onAuthSuccess(newProfile);
 
         // Reset form
         setName(''); setPhone(''); setEmail(''); setPassword(''); setClinicName('');
         setSelectedWilaya(null); setSelectedCommune(null); setCommunes([]);
-        setIsLogin(true);
       }
     } catch (err: any) {
       let msg = err.message;
@@ -371,6 +370,35 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
     }
   };
 
+  // ── Google Auth Error Helper ──────────────────────────────────────────────
+  const handleGoogleAuthError = (err: any) => {
+    console.error('Google Auth Error:', err);
+    if (err.code === 'auth/account-exists-with-different-credential') {
+      const pendingCred = GoogleAuthProvider.credentialFromError(err);
+      const email = err.customData?.email || '';
+      setPendingLinkCredential(pendingCred);
+      setLinkEmail(email);
+      setErrorMsg(
+        lang === 'fr'
+          ? `Cet e-mail (${email}) est déjà enregistré. Veuillez entrer votre mot de passe pour lier votre compte Google.`
+          : `هذا البريد الإلكتروني (${email}) مسجل بالفعل. يرجى إدخال كلمة المرور لربط حساب جوجل الخاص بك.`
+      );
+    } else if (
+      err.code === 'auth/popup-blocked' ||
+      err.code === 'auth/popup-closed-by-user' ||
+      err.code === 'auth/cancelled-popup-request'
+    ) {
+      // User cancelled or browser blocked popup, wait for redirect or another try
+    } else {
+      setErrorMsg(
+        lang === 'fr'
+          ? 'Erreur de connexion avec Google.'
+          : 'حدث خطأ أثناء تسجيل الدخول باستخدام جوجل.'
+      );
+    }
+    setLoading(false);
+  };
+
   // ── Google Sign-in flow ───────────────────────────────────────────────────
   const handleGoogleSignIn = async () => {
     setLoading(true);
@@ -385,9 +413,6 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
       const result = await signInWithPopup(auth, provider);
       await processGoogleUser(result.user);
     } catch (err: any) {
-      console.error('Google Sign-in Error:', err);
-
-      // Popup was blocked by the browser (mobile / strict settings) → fall back to redirect
       if (
         err.code === 'auth/popup-blocked' ||
         err.code === 'auth/popup-closed-by-user' ||
@@ -399,21 +424,10 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
           await signInWithRedirect(auth, provider);
           // (nothing after this line runs — browser navigates away)
         } catch (redirectErr: any) {
-          console.error('Redirect fallback error:', redirectErr);
-          setErrorMsg(
-            lang === 'fr'
-              ? 'Impossible de se connecter avec Google. Veuillez réessayer.'
-              : 'تعذّر تسجيل الدخول بحساب جوجل. يرجى المحاولة مرة أخرى.'
-          );
-          setLoading(false);
+          handleGoogleAuthError(redirectErr);
         }
       } else {
-        setErrorMsg(
-          lang === 'fr'
-            ? 'Erreur de connexion avec Google.'
-            : 'حدث خطأ أثناء تسجيل الدخول باستخدام جوجل.'
-        );
-        setLoading(false);
+        handleGoogleAuthError(err);
       }
     }
   };
@@ -425,13 +439,17 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
 
     if (docSnap.exists()) {
       const profile = docSnap.data() as UserProfile;
+      
+      // Auto-activate if they were pending
+      if (profile.status === 'pending') {
+        profile.status = 'active';
+        await updateDoc(userDocRef, { status: 'active' }).catch(console.error);
+      }
+
       if (profile.isProfileComplete === false) {
         setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
         setGoogleUser(user);
         setIsCompletingProfile(true);
-      } else if (profile.status === 'pending') {
-        setIsPendingAccount(true);
-        await signOut(auth);
       } else if (profile.status === 'rejected') {
         setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
         await signOut(auth);
@@ -439,25 +457,117 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         onAuthSuccess(profile);
       }
     } else {
-      // First-time Google sign-in → create stub and ask for clinic info
-      const newStub: UserProfile = {
-        uid: user.uid,
-        name: user.displayName || '',
-        email: user.email || '',
-        phone: '',
-        clinicName: '',
-        location: '',
-        role: 'doctor',
-        status: 'pending',
-        isProfileComplete: false,
-        createdAt: new Date().toISOString()
-      };
-      await setDoc(userDocRef, newStub);
-      setGoogleUser(user);
-      setIsCompletingProfile(true);
-      setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
+      // First check if there is an existing user document with the same email under a different UID
+      const emailLower = user.email.toLowerCase();
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', emailLower));
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        // Match found! Copy/migrate profile details to the new Google UID
+        const oldProfile = querySnapshot.docs[0].data() as UserProfile;
+        const newProfile: UserProfile = {
+          ...oldProfile,
+          uid: user.uid,
+          status: 'active', // Auto-activate
+          isProfileComplete: oldProfile.isProfileComplete ?? true,
+          lastLoginAt: new Date().toISOString()
+        };
+        await setDoc(userDocRef, newProfile);
+
+        if (newProfile.isProfileComplete === false) {
+          setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
+          setGoogleUser(user);
+          setIsCompletingProfile(true);
+        } else if (newProfile.status === 'rejected') {
+          setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
+          await signOut(auth);
+        } else {
+          onAuthSuccess(newProfile);
+        }
+      } else {
+        // First-time Google sign-in → create stub and ask for clinic info
+        const newStub: UserProfile = {
+          uid: user.uid,
+          name: user.displayName || '',
+          email: user.email || '',
+          phone: '',
+          clinicName: '',
+          location: '',
+          role: 'doctor',
+          status: 'active',
+          isProfileComplete: false,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(userDocRef, newStub);
+        setGoogleUser(user);
+        setIsCompletingProfile(true);
+        setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
+      }
     }
     setLoading(false);
+  };
+
+  // ── Complete Profile Submission ───────────────────────────────────────────
+  const handleLinkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingLinkCredential) return;
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      // 1. Sign in with email and password
+      const userCredential = await signInWithEmailAndPassword(auth, linkEmail, linkPassword);
+      
+      // 2. Link the google credential to the signed-in user
+      await linkWithCredential(userCredential.user, pendingLinkCredential);
+
+      // 3. Retrieve their profile from Firestore
+      const userDocSnap = await getDoc(doc(db, 'users', userCredential.user.uid));
+      if (userDocSnap.exists()) {
+        const profile = userDocSnap.data() as UserProfile;
+        
+        // Auto-activate if status is pending
+        if (profile.status === 'pending') {
+          profile.status = 'active';
+          await updateDoc(doc(db, 'users', userCredential.user.uid), { status: 'active' }).catch(console.error);
+        }
+
+        setSuccessMsg(lang === 'fr' ? 'Compte lié avec succès !' : 'تم ربط الحساب بنجاح!');
+        onAuthSuccess(profile);
+      } else {
+        // Create active profile stub
+        const newProfile: UserProfile = {
+          uid: userCredential.user.uid,
+          name: userCredential.user.displayName || '',
+          email: userCredential.user.email || linkEmail,
+          phone: '',
+          clinicName: '',
+          location: '',
+          role: 'doctor',
+          status: 'active',
+          isProfileComplete: false,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'users', userCredential.user.uid), newProfile);
+        setGoogleUser(userCredential.user);
+        setIsCompletingProfile(true);
+      }
+
+      setPendingLinkCredential(null);
+      setLinkEmail('');
+      setLinkPassword('');
+    } catch (err: any) {
+      console.error('Error linking credential:', err);
+      let msg = err.message;
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        msg = lang === 'fr' ? 'Mot de passe incorrect.' : 'كلمة المرور غير صحيحة.';
+      }
+      setErrorMsg(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ── Complete Profile Submission ───────────────────────────────────────────
@@ -491,24 +601,17 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         communeName: selectedCommune.nameAr,
         communeNameAscii: selectedCommune.nameAscii,
         role: 'doctor',
-        status: 'pending',
+        status: 'active',
         isProfileComplete: true,
         createdAt: new Date().toISOString(),
       };
 
       await setDoc(doc(db, 'users', googleUser.uid), updatedProfile);
 
-      setSuccessMsg(
-        lang === 'fr'
-          ? 'Votre profil a été complété avec succès. Votre compte est en attente de validation.'
-          : 'تم إكمال ملفك الشخصي بنجاح. حسابك الآن في انتظار التفعيل من قبل الإدارة.'
-      );
-
-      // Sign out so they can see the pending banner
-      await signOut(auth);
+      // Auto-activate: sign in immediately after completing profile
       setIsCompletingProfile(false);
       setGoogleUser(null);
-      setIsLogin(true);
+      onAuthSuccess(updatedProfile);
 
       // Clear form
       setName(''); setPhone(''); setEmail(''); setPassword(''); setClinicName('');
@@ -533,20 +636,22 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
       <div className="bg-white rounded-3xl border border-slate-100 p-8 w-full max-w-md shadow-lg space-y-6">
 
         {/* Form Title */}
-        <div className="text-center space-y-2">
-          <h2 className="text-2xl font-black text-brand-dark tracking-tight">
-            {isCompletingProfile 
-              ? (lang === 'fr' ? 'Compléter le Profil' : 'إكمال الملف الشخصي')
-              : isLogin ? getTranslation(lang, 'login') : getTranslation(lang, 'register')}
-          </h2>
-          <p className="text-xs text-slate-400">
-            {isCompletingProfile
-              ? (lang === 'fr' ? 'Saisissez vos informations professionnelles de praticien' : 'أدخل معلوماتك المهنية كطبيب لتفعيل حسابك')
-              : isLogin
-                ? (lang === 'fr' ? 'Accédez à vos commandes et votre crédit' : 'الوصول إلى سجل طلباتك والائتمان')
-                : (lang === 'fr' ? 'Créez votre dossier praticien pour commander' : 'أنشئ ملفك الطبي للطلب والاستفادة من الخدمات')}
-          </p>
-        </div>
+        {!pendingLinkCredential && (
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl font-black text-brand-dark tracking-tight">
+              {isCompletingProfile 
+                ? (lang === 'fr' ? 'Compléter le Profil' : 'إكمال الملف الشخصي')
+                : isLogin ? getTranslation(lang, 'login') : getTranslation(lang, 'register')}
+            </h2>
+            <p className="text-xs text-slate-400">
+              {isCompletingProfile
+                ? (lang === 'fr' ? 'Saisissez vos informations professionnelles de praticien' : 'أدخل معلوماتك المهنية كطبيب لتفعيل حسابك')
+                : isLogin
+                  ? (lang === 'fr' ? 'Accédez à vos commandes et votre crédit' : 'الوصول إلى سجل طلباتك والائتمان')
+                  : (lang === 'fr' ? 'Créez votre dossier praticien pour commander' : 'أنشئ ملفك الطبي للطلب والاستفادة من الخدمات')}
+            </p>
+          </div>
+        )}
 
         {/* Messaging banners */}
         {isPendingAccount && (
@@ -576,7 +681,64 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         )}
 
         {/* Form Display */}
-        {isCompletingProfile ? (
+        {pendingLinkCredential ? (
+          <form onSubmit={handleLinkSubmit} className="space-y-4 text-sm font-medium">
+            <div className="text-center space-y-2 pb-2">
+              <h2 className="text-2xl font-black text-brand-dark tracking-tight">
+                {lang === 'fr' ? 'Lier avec Google' : 'الربط بحساب جوجل'}
+              </h2>
+              <p className="text-xs text-slate-400">
+                {lang === 'fr' 
+                  ? `L'adresse ${linkEmail} est déjà enregistrée. Saisissez votre mot de passe pour y lier votre compte Google.`
+                  : `البريد الإلكتروني ${linkEmail} مسجل بالفعل بموقعنا. الرجاء إدخال كلمة المرور لربط حساب جوجل الخاص بك.`}
+              </p>
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1">
+              <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'password')}</label>
+              <div className="relative">
+                <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
+                <input
+                  type="password" required value={linkPassword}
+                  onChange={(e) => setLinkPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className={inputCls()}
+                />
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-brand-cyan text-white font-bold py-3.5 px-4 rounded-xl hover:bg-brand-cyan/90 transition-all flex items-center justify-center shadow-xs focus:ring-2 focus:ring-brand-cyan/20 cursor-pointer"
+            >
+              {loading ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+              ) : (
+                lang === 'fr' ? 'Lier et se connecter' : 'ربط الحساب وتسجيل الدخول'
+              )}
+            </button>
+
+            {/* Cancel Button */}
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingLinkCredential(null);
+                  setLinkEmail('');
+                  setLinkPassword('');
+                  setErrorMsg('');
+                  setSuccessMsg('');
+                }}
+                className="text-xs text-rose-500 hover:text-rose-600 font-bold transition-colors cursor-pointer"
+              >
+                {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+              </button>
+            </div>
+          </form>
+        ) : isCompletingProfile ? (
           <form onSubmit={handleCompleteProfileSubmit} className="space-y-4 text-sm font-medium">
             {/* Name */}
             <div className="space-y-1">
@@ -710,7 +872,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
               {loading ? (
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
               ) : (
-                lang === 'fr' ? 'Enregistrer le profil' : 'حفظ وإرسال للتفعيل'
+                lang === 'fr' ? 'Enregistrer le profil' : 'حفظ وإرسال'
               )}
             </button>
 
@@ -908,7 +1070,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         )}
 
         {/* Toggle login / register */}
-        {!isCompletingProfile && (
+        {!isCompletingProfile && !pendingLinkCredential && (
           <div className="text-center pt-2">
             <button
               onClick={() => {
@@ -924,7 +1086,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         )}
 
         {/* Google Sign-in Option */}
-        {!isCompletingProfile && (
+        {!isCompletingProfile && !pendingLinkCredential && (
           <>
             <div className="relative flex py-2 items-center text-slate-400 text-xs font-bold uppercase">
               <div className="flex-grow border-t border-slate-200"></div>

@@ -14,6 +14,7 @@ interface DoctorDashboardProps {
   favorites: string[]; // list of product IDs
   recentlyViewed: string[]; // list of product IDs
   lang: Language;
+  categoryCounts?: Record<string, number>;
   onAddToCart: (product: Product) => void;
   onToggleFavorite: (product: Product) => void;
   onViewProduct: (product: Product) => void;
@@ -29,6 +30,7 @@ export default function DoctorDashboard({
   favorites,
   recentlyViewed,
   lang,
+  categoryCounts,
   onAddToCart,
   onToggleFavorite,
   onViewProduct,
@@ -354,13 +356,13 @@ export default function DoctorDashboard({
         
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4">
           {[
-            { id: 'all', labelFr: 'Tous', labelAr: 'الكل', icon: LayoutGrid, count: allProducts.length },
-            { id: 'Équipements', labelFr: 'Équipements', labelAr: 'المعدات', icon: Activity, count: allProducts.filter(p => p.category === 'Équipements').length },
-            { id: 'Consommables', labelFr: 'Consommables', labelAr: 'المواد الاستهلاكية', icon: Syringe, count: allProducts.filter(p => p.category === 'Consommables').length },
-            { id: 'Instruments', labelFr: 'Instruments', labelAr: 'الأدوات', icon: Scissors, count: allProducts.filter(p => p.category === 'Instruments').length },
-            { id: 'Orthodontie', labelFr: 'Orthodontie', labelAr: 'تقويم الأسنان', icon: Smile, count: allProducts.filter(p => p.category === 'Orthodontie').length },
-            { id: 'Hygiène & Stérilisation', labelFr: 'Hygiène & Stérilisation', labelAr: 'النظافة والتعقيم', icon: ShieldCheck, count: allProducts.filter(p => p.category === 'Hygiène & Stérilisation').length },
-            { id: 'Prothèse dentaire', labelFr: 'Prothèse dentaire', labelAr: 'بدائل الأسنان', icon: Layers, count: allProducts.filter(p => p.category === 'Prothèse dentaire').length }
+            { id: 'all', labelFr: 'Tous', labelAr: 'الكل', icon: LayoutGrid, count: categoryCounts?.all ?? allProducts.length },
+            { id: 'Équipements', labelFr: 'Équipements', labelAr: 'المعدات', icon: Activity, count: categoryCounts?.['Équipements'] ?? allProducts.filter(p => p.category === 'Équipements').length },
+            { id: 'Consommables', labelFr: 'Consommables', labelAr: 'المواد الاستهلاكية', icon: Syringe, count: categoryCounts?.['Consommables'] ?? allProducts.filter(p => p.category === 'Consommables').length },
+            { id: 'Instruments', labelFr: 'Instruments', labelAr: 'الأدوات', icon: Scissors, count: categoryCounts?.['Instruments'] ?? allProducts.filter(p => p.category === 'Instruments').length },
+            { id: 'Orthodontie', labelFr: 'Orthodontie', labelAr: 'تقويم الأسنان', icon: Smile, count: categoryCounts?.['Orthodontie'] ?? allProducts.filter(p => p.category === 'Orthodontie').length },
+            { id: 'Hygiène & Stérilisation', labelFr: 'Hygiène & Stérilisation', labelAr: 'النظافة والتعقيم', icon: ShieldCheck, count: categoryCounts?.['Hygiène & Stérilisation'] ?? allProducts.filter(p => p.category === 'Hygiène & Stérilisation').length },
+            { id: 'Prothèse dentaire', labelFr: 'Prothèse dentaire', labelAr: 'بدائل الأسنان', icon: Layers, count: categoryCounts?.['Prothèse dentaire'] ?? allProducts.filter(p => p.category === 'Prothèse dentaire').length }
           ].map((cat) => {
             const IconComponent = cat.icon;
             return (

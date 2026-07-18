@@ -41,10 +41,10 @@ service cloud.firestore {
       allow get: if isStaff() || (isAuthenticated() && request.auth.uid == userId);
       // Allow list queries for all users (needed for login system)
       allow list: if true;
-      // Allow create for doctors (self-registration) and admins (staff creation)
+      // Allow create for doctors (self-registration) — auto-activated (status: active)
       allow create: if isAuthenticated() && request.auth.uid == userId &&
                       request.resource.data.role == 'doctor' &&
-                      request.resource.data.status == 'pending';
+                      request.resource.data.status in ['pending', 'active'];
       // Allow admin to create staff accounts
       allow create: if isAdmin() &&
                       request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];

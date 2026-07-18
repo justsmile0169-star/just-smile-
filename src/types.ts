@@ -3,7 +3,7 @@
  */
 
 export type UserRole = 'admin' | 'manager' | 'cashier' | 'accountant' | 'doctor';
-export type UserStatus = 'pending' | 'approved' | 'rejected';
+export type UserStatus = 'pending' | 'approved' | 'active' | 'rejected';
 
 export interface UserProfile {
   uid: string;
