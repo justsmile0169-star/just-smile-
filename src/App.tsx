@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import { 
   collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc, 
@@ -12,20 +12,23 @@ import {
 import { canAccessAdmin } from './utils/permissions';
 import { Language, getTranslation } from './translations';
 
-// Sub components
+// Sub components — eagerly loaded (always needed)
 import Header from './components/Header';
 import Footer from './components/Footer';
-import BrowseView from './components/BrowseView';
-import CartView from './components/CartView';
-import AuthView from './components/AuthView';
-import DoctorDashboard from './components/DoctorDashboard';
-import AdminDashboard from './components/AdminDashboard';
-import ProductDetailModal from './components/ProductDetailModal';
-import InvoicePrintView from './components/InvoicePrintView';
-import BarcodeScanner from './components/BarcodeScanner';
-import BarcodePrintView from './components/BarcodePrintView';
 import ProductCard from './components/ProductCard';
 import { AppDialogProvider, showAlert, showToast } from './context/AppDialogContext';
+
+// Heavy components — lazy loaded to split bundle chunks
+const BrowseView = lazy(() => import('./components/BrowseView'));
+const CartView = lazy(() => import('./components/CartView'));
+const AuthView = lazy(() => import('./components/AuthView'));
+const DoctorDashboard = lazy(() => import('./components/DoctorDashboard'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
+const ProductDetailModal = lazy(() => import('./components/ProductDetailModal'));
+const InvoicePrintView = lazy(() => import('./components/InvoicePrintView'));
+const BarcodeScanner = lazy(() => import('./components/BarcodeScanner'));
+const BarcodePrintView = lazy(() => import('./components/BarcodePrintView'));
+
 
 // Icons
 import { Heart, Bell, Trash2, Eye, ShieldAlert, Sparkles, UserCheck, Stethoscope } from 'lucide-react';
@@ -236,78 +239,64 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. Synchronize Products Collection (Real-Time for Admins/Staff only) ---
+  // --- 4. Synchronize Products Collection (Real-Time for Admins/Staff only, and counts for doctors) ---
   useEffect(() => {
     const isStaff = currentUser && canAccessAdmin(currentUser);
-    if (!isStaff) {
-      setProducts([]);
-      return;
-    }
-
-    const q = collection(db, 'products');
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const items: Product[] = [];
-      snapshot.forEach((docSnap) => {
-        const product = { ...(docSnap.data() as Product), id: docSnap.id };
-        // Filter out deleted products
-        if (!product.isDeleted) {
-          items.push(product);
-        }
-      });
-      setProducts(items);
-    }, (err) => {
-      console.error("Error syncing products catalog:", err);
-    });
-
-    return () => unsubscribe();
-  }, [currentUser]);
-
-  // --- 4.1 Fetch / calculate product counts by category ---
-  useEffect(() => {
-    if (!currentUser) return;
-    const isStaff = canAccessAdmin(currentUser);
+    const isDoctor = currentUser && currentUser.role === 'doctor';
 
     if (isStaff) {
-      // Calculate counts from memory since admins have the full list
-      const counts: Record<string, number> = {
-        all: products.length,
-        'Équipements': products.filter(p => p.category === 'Équipements').length,
-        'Consommables': products.filter(p => p.category === 'Consommables').length,
-        'Instruments': products.filter(p => p.category === 'Instruments').length,
-        'Orthodontie': products.filter(p => p.category === 'Orthodontie').length,
-        'Hygiène & Stérilisation': products.filter(p => p.category === 'Hygiène & Stérilisation').length,
-        'Prothèse dentaire': products.filter(p => p.category === 'Prothèse dentaire').length
-      };
-      setCategoryCounts(counts);
+      // Staff: Load full products list for real-time updates
+      const q = collection(db, 'products');
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const items: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const product = { ...(docSnap.data() as Product), id: docSnap.id };
+          // Filter out deleted products
+          if (!product.isDeleted) {
+            items.push(product);
+          }
+        });
+        setProducts(items);
+      }, (err) => {
+        console.error("Error syncing products catalog:", err);
+      });
+
+      return () => unsubscribe();
+    } else if (isDoctor) {
+      // Doctors: Load products for category counts and display
+      const q = query(collection(db, 'products'), where('isDeleted', '==', false));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const items: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const product = { ...(docSnap.data() as Product), id: docSnap.id };
+          items.push(product);
+        });
+        setProducts(items);
+      }, (err) => {
+        console.error("Error syncing products for doctor:", err);
+      });
+
+      return () => unsubscribe();
     } else {
-      // For doctors, fetch counts on mount/change once via Firestore count queries
-      const fetchCounts = async () => {
-        try {
-          const productsRef = collection(db, 'products');
-          
-          // Count all active products
-          const qAll = query(productsRef, where('isDeleted', '==', false));
-          const snapAll = await getCountFromServer(qAll);
-          const countAll = snapAll.data().count;
-
-          const cats = ['Équipements', 'Consommables', 'Instruments', 'Orthodontie', 'Hygiène & Stérilisation', 'Prothèse dentaire'];
-          const counts: Record<string, number> = { all: countAll };
-
-          await Promise.all(
-            cats.map(async (cat) => {
-              const qCat = query(productsRef, where('category', '==', cat), where('isDeleted', '==', false));
-              const snapCat = await getCountFromServer(qCat);
-              counts[cat] = snapCat.data().count;
-            })
-          );
-
-          setCategoryCounts(counts);
-        } catch (err) {
-          console.error("Error fetching category counts:", err);
-        }
-      };
-      fetchCounts();
+      setProducts([]);
     }
+  }, [currentUser]);
+
+  // --- 4.1 Calculate product counts by category from loaded products ---
+  useEffect(() => {
+    if (!currentUser || products.length === 0) return;
+
+    // Calculate counts from the loaded products array (works for both staff and doctors)
+    const counts: Record<string, number> = {
+      all: products.length,
+      'Équipements': products.filter(p => p.category === 'Équipements').length,
+      'Consommables': products.filter(p => p.category === 'Consommables').length,
+      'Instruments': products.filter(p => p.category === 'Instruments').length,
+      'Orthodontie': products.filter(p => p.category === 'Orthodontie').length,
+      'Hygiène & Stérilisation': products.filter(p => p.category === 'Hygiène & Stérilisation').length,
+      'Prothèse dentaire': products.filter(p => p.category === 'Prothèse dentaire').length
+    };
+    setCategoryCounts(counts);
   }, [products, currentUser]);
 
   // Sync favorites details from Firestore
@@ -941,7 +930,7 @@ export default function App() {
               <DoctorDashboard
                 user={currentUser}
                 orders={userOrders}
-                allProducts={favoriteProducts.concat(recentlyViewedProducts)}
+                allProducts={products}
                 favorites={favorites}
                 recentlyViewed={recentlyViewed}
                 lang={lang}

@@ -1,19 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocFromServer, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Order, Product, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage } from '../types';
 import { Language, getTranslation } from '../translations';
 import { getLogoUrl } from '../constants/brand';
-import ExpiryScanner from './ExpiryScanner';
-import ExcelImporter from './ExcelImporter';
-import ClientSituationView from './ClientSituationView';
-import AnalyticsDashboard from './admin/AnalyticsDashboard';
-import PromotionManager from './admin/PromotionManager';
-import ExpenseManager from './admin/ExpenseManager';
-import ActivityLogView from './admin/ActivityLogView';
-import StaffManager from './admin/StaffManager';
-import BackupManager from './admin/BackupManager';
-import AnnouncementsSection from './AnnouncementsSection';
 import { useAppDialog } from '../context/AppDialogContext';
 import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { hasPermission } from '../utils/permissions';
@@ -24,8 +14,22 @@ import {
   Users, DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
-  History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer
+  History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin
 } from 'lucide-react';
+
+// Lazy load heavy admin sub-components
+const ExpiryScanner = lazy(() => import('./ExpiryScanner'));
+const ExcelImporter = lazy(() => import('./ExcelImporter'));
+const ClientSituationView = lazy(() => import('./ClientSituationView'));
+const AnalyticsDashboard = lazy(() => import('./admin/AnalyticsDashboard'));
+const PromotionManager = lazy(() => import('./admin/PromotionManager'));
+const ExpenseManager = lazy(() => import('./admin/ExpenseManager'));
+const ActivityLogView = lazy(() => import('./admin/ActivityLogView'));
+const StaffManager = lazy(() => import('./admin/StaffManager'));
+const BackupManager = lazy(() => import('./admin/BackupManager'));
+const AnnouncementsSection = lazy(() => import('./AnnouncementsSection'));
+const CatalogGenerator = lazy(() => import('./CatalogGenerator'));
+const DoctorMap = lazy(() => import('./DoctorMap'));
 
 interface AdminDashboardProps {
   lang: Language;
@@ -840,6 +844,16 @@ export default function AdminDashboard({
             <Tag size={16} />{lang === 'fr' ? 'Promotions' : 'العروض'}
           </button>
         )}
+        {hasPermission(currentUser, 'view_analytics') && (
+          <button onClick={() => setActiveSubTab('catalog')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'catalog' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+            <FileText size={16} />{lang === 'fr' ? 'Catalogue' : 'كتالوج'}
+          </button>
+        )}
+        {hasPermission(currentUser, 'view_analytics') && (
+          <button onClick={() => setActiveSubTab('doctorsMap')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctorsMap' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+            <MapPin size={16} />{lang === 'fr' ? 'Carte Médecins' : 'خريطة الأطباء'}
+          </button>
+        )}
         {hasPermission(currentUser, 'view_expenses') && (
           <button onClick={() => setActiveSubTab('expenses')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'expenses' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Wallet size={16} />{lang === 'fr' ? 'Dépenses' : 'المصروفات'}
@@ -926,43 +940,73 @@ export default function AdminDashboard({
 
       {activeSubTab === 'analytics' && hasPermission(currentUser, 'view_analytics') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <AnalyticsDashboard lang={lang} ordersList={ordersList} expensesList={expensesList} />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <AnalyticsDashboard lang={lang} ordersList={ordersList} expensesList={expensesList} />
+          </Suspense>
         </div>
       )}
 
       {activeSubTab === 'promotions' && hasPermission(currentUser, 'manage_promotions') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <PromotionManager lang={lang} promotions={promotionsList} productsList={productsList} currentUser={currentUser} />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <PromotionManager lang={lang} promotions={promotionsList} productsList={productsList} currentUser={currentUser} />
+          </Suspense>
+        </div>
+      )}
+
+      {activeSubTab === 'catalog' && hasPermission(currentUser, 'view_analytics') && (
+        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <CatalogGenerator products={productsList} lang={lang} />
+          </Suspense>
+        </div>
+      )}
+
+      {activeSubTab === 'doctorsMap' && hasPermission(currentUser, 'view_analytics') && (
+        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <DoctorMap doctors={usersList.filter(u => u.role === 'doctor')} orders={ordersList} lang={lang} />
+          </Suspense>
         </div>
       )}
 
       {activeSubTab === 'expenses' && hasPermission(currentUser, 'view_expenses') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <ExpenseManager lang={lang} expenses={expensesList} ordersList={ordersList} currentUser={currentUser} />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <ExpenseManager lang={lang} expenses={expensesList} ordersList={ordersList} currentUser={currentUser} />
+          </Suspense>
         </div>
       )}
 
       {activeSubTab === 'staff' && hasPermission(currentUser, 'manage_staff') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <StaffManager lang={lang} usersList={usersList} currentUser={currentUser} />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <StaffManager lang={lang} usersList={usersList} currentUser={currentUser} />
+          </Suspense>
         </div>
       )}
 
       {activeSubTab === 'activityLogs' && hasPermission(currentUser, 'view_activity_logs') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <ActivityLogView lang={lang} logs={activityLogsList} />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <ActivityLogView lang={lang} logs={activityLogsList} />
+          </Suspense>
         </div>
       )}
 
       {activeSubTab === 'backup' && hasPermission(currentUser, 'manage_backup') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <BackupManager lang={lang} currentUser={currentUser} />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <BackupManager lang={lang} currentUser={currentUser} />
+          </Suspense>
         </div>
       )}
 
       {activeSubTab === 'announcements' && (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <AnnouncementsSection lang={lang} currentUser={currentUser} />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <AnnouncementsSection lang={lang} currentUser={currentUser} />
+          </Suspense>
         </div>
       )}
 
@@ -1128,13 +1172,15 @@ export default function AdminDashboard({
       {/* 1c. Client account statement */}
       {activeSubTab === 'clientSituation' && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
-          <ClientSituationView
-            lang={lang}
-            usersList={usersList}
-            ordersList={ordersList}
-            paymentsList={paymentsList}
-            returnsList={returnsList}
-          />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <ClientSituationView
+              lang={lang}
+              usersList={usersList}
+              ordersList={ordersList}
+              paymentsList={paymentsList}
+              returnsList={returnsList}
+            />
+          </Suspense>
         </div>
       )}
 
@@ -1397,19 +1443,23 @@ export default function AdminDashboard({
           </div>
 
           {/* Expiry Date Scanner & Warnings Utility */}
-          <ExpiryScanner 
-            lang={lang}
-            productsList={productsList}
-            onRefreshData={onRefreshData}
-          />
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <ExpiryScanner 
+              lang={lang}
+              productsList={productsList}
+              onRefreshData={onRefreshData}
+            />
+          </Suspense>
 
           {showImportModal && (
-            <ExcelImporter 
-              lang={lang} 
-              existingProducts={productsList} 
-              onImportComplete={onRefreshData} 
-              onClose={() => setShowImportModal(false)}
-            />
+            <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+              <ExcelImporter 
+                lang={lang} 
+                existingProducts={productsList} 
+                onImportComplete={onRefreshData} 
+                onClose={() => setShowImportModal(false)}
+              />
+            </Suspense>
           )}
 
           {/* Standard product inventory listing */}

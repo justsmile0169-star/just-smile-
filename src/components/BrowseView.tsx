@@ -59,73 +59,44 @@ export default function BrowseView({
 
   const loaderRef = useRef<HTMLDivElement>(null);
 
-  // Fetch sliders on mount or when currentUser changes
+  // Fetch sliders on mount or when currentUser changes - optimized to use single query
   useEffect(() => {
-    const fetchLatest = async () => {
+    const fetchSlidersData = async () => {
       try {
+        // Fetch more products in a single query to cover all slider needs
         const q = query(
           collection(db, 'products'),
           orderBy('createdAt', 'desc'),
-          limit(20)
+          limit(100)
         );
         const snap = await getDocs(q);
-        const items: Product[] = [];
+        const allProducts: Product[] = [];
         snap.forEach((d) => {
           const data = d.data() as Product;
-          if (!data.isDeleted) items.push({ ...data, id: d.id });
+          if (!data.isDeleted) allProducts.push({ ...data, id: d.id });
         });
-        setLatestProducts(items);
+
+        // Filter locally for different sliders
+        setLatestProducts(allProducts.slice(0, 20));
+        
+        if (currentUser && currentUser.role === 'doctor') {
+          const mostRequested = [...allProducts]
+            .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
+            .slice(0, 20);
+          setMostRequestedProducts(mostRequested);
+
+          const routine = allProducts
+            .filter(p => p.isRoutineClinic)
+            .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
+            .slice(0, 20);
+          setRoutineClinicProducts(routine);
+        }
       } catch (err) {
-        console.error("Error fetching latest products slider:", err);
+        console.error("Error fetching sliders data:", err);
       }
     };
 
-    const fetchMostRequested = async () => {
-      try {
-        const q = query(
-          collection(db, 'products'),
-          orderBy('salesCount', 'desc'),
-          limit(20)
-        );
-        const snap = await getDocs(q);
-        const items: Product[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Product;
-          if (!data.isDeleted) items.push({ ...data, id: d.id });
-        });
-        setMostRequestedProducts(items);
-      } catch (err) {
-        console.error("Error fetching most requested products slider:", err);
-      }
-    };
-
-    const fetchRoutine = async () => {
-      try {
-        const q = query(
-          collection(db, 'products'),
-          where('isRoutineClinic', '==', true),
-          limit(40)
-        );
-        const snap = await getDocs(q);
-        const items: Product[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Product;
-          if (!data.isDeleted) items.push({ ...data, id: d.id });
-        });
-        const sorted = items
-          .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
-          .slice(0, 20);
-        setRoutineClinicProducts(sorted);
-      } catch (err) {
-        console.error("Error fetching routine clinic products slider:", err);
-      }
-    };
-
-    fetchLatest();
-    if (currentUser && currentUser.role === 'doctor') {
-      fetchMostRequested();
-      fetchRoutine();
-    }
+    fetchSlidersData();
   }, [currentUser]);
 
   // Reset page and load first batch of catalog products when category changes

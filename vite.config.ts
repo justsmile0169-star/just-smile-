@@ -13,7 +13,34 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['logo.png'],
         workbox: {
-          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024 // 5 MB
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
+          runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'firestore-cache',
+                expiration: {
+                  maxEntries: 100,
+                  maxAgeSeconds: 60 * 60 * 24 // 24 hours
+                },
+                cacheableResponse: {
+                  statuses: [0, 200]
+                }
+              }
+            },
+            {
+              urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'image-cache',
+                expiration: {
+                  maxEntries: 200,
+                  maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
+                }
+              }
+            }
+          ]
         },
         manifest: {
           name: 'Just Smile - Dental B2B',

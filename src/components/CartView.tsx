@@ -41,6 +41,7 @@ export default function CartView({
   const [success, setSuccess] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'credit' | 'cash'>('cash');
   const [deliveryOption, setDeliveryOption] = useState<'to_office' | 'to_clinic'>('to_clinic');
+  const [scheduledDeliveryDate, setScheduledDeliveryDate] = useState<string>('');
 
   const isRtl = lang === 'ar';
 
@@ -157,6 +158,7 @@ export default function CartView({
         notes: notes.trim() || "",
         processedBy: currentUser?.uid,
         processedByName: currentUser?.name,
+        scheduledDeliveryDate: scheduledDeliveryDate || undefined,
         // Delivery fields
         deliveryType: hasFreeDelivery ? 'free' : deliveryOption,
         deliveryCost: deliveryCost,
@@ -533,6 +535,27 @@ export default function CartView({
                     className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs focus:outline-hidden focus:border-brand-cyan"
                     rows={2}
                   />
+                </div>
+              )}
+
+              {/* Scheduled Delivery Date */}
+              {user && !isBlockedFromOrdering && (
+                <div className="space-y-1">
+                  <label className="text-slate-500 font-bold text-xs">
+                    {lang === 'fr' ? 'Date de livraison souhaitée (optionnel)' : 'تاريخ التسليم المطلوب (اختياري)'}
+                  </label>
+                  <input
+                    type="date"
+                    value={scheduledDeliveryDate}
+                    onChange={(e) => setScheduledDeliveryDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs focus:outline-hidden focus:border-brand-cyan"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    {lang === 'fr' 
+                      ? 'Laissez vide pour livraison normale' 
+                      : 'اتركه فارغاً للتسليم العادي'}
+                  </p>
                 </div>
               )}
 

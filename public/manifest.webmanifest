@@ -1,0 +1,26 @@
+{
+  "name": "JUST SMILE - Dental Supply",
+  "short_name": "JUST SMILE",
+  "description": "Plateforme de commande de consommables et matériel dentaire pour les médecins en Algérie",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#06b6d4",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["medical", "shopping"],
+  "lang": "fr"
+}

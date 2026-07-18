@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Order, Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck } from 'lucide-react';
+import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAppDialog } from '../context/AppDialogContext';
 import { getWilayas, getCommunesByWilaya, WilayaOption, CommuneOption, isFreeDelivery } from '../utils/algeriaData';
+import DoctorAnalytics from './DoctorAnalytics';
 
 interface DoctorDashboardProps {
   user: UserProfile;
@@ -40,6 +41,7 @@ export default function DoctorDashboard({
 }: DoctorDashboardProps) {
   const isRtl = lang === 'ar';
   const { alert, confirm } = useAppDialog();
+  const [activeTab, setActiveTab] = useState<'orders' | 'analytics'>('orders');
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -262,6 +264,32 @@ export default function DoctorDashboard({
           </p>
         </div>
 
+        {/* Tab Navigation */}
+        <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              activeTab === 'orders'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <FileText size={16} />
+            {lang === 'fr' ? 'Commandes' : 'الطلبات'}
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              activeTab === 'analytics'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <BarChart3 size={16} />
+            {lang === 'fr' ? 'Analytiques' : 'التحليلات'}
+          </button>
+        </div>
+
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-3">
           {/* Edit Profile Button */}
@@ -391,15 +419,16 @@ export default function DoctorDashboard({
       {/* Main Section Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* Left 2 Columns: Orders List */}
+        {/* Left 2 Columns: Orders List or Analytics */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-3xl border border-slate-100 p-6 md:p-8 shadow-xs">
-            <div className="flex items-center gap-2 mb-6">
-              <ShoppingBag className="text-brand-cyan" size={22} />
-              <h3 className="text-lg font-extrabold text-slate-900">
-                {getTranslation(lang, 'orderHistory')}
-              </h3>
-            </div>
+          {activeTab === 'orders' ? (
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 md:p-8 shadow-xs">
+              <div className="flex items-center gap-2 mb-6">
+                <ShoppingBag className="text-brand-cyan" size={22} />
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  {getTranslation(lang, 'orderHistory')}
+                </h3>
+              </div>
 
             {orders.length === 0 ? (
               <div className="text-center py-12 space-y-3">
@@ -507,6 +536,9 @@ export default function DoctorDashboard({
               </div>
             )}
           </div>
+          ) : (
+            <DoctorAnalytics orders={orders} lang={lang} />
+          )}
         </div>
 
         {/* Right Column: Favorites & Recently viewed */}

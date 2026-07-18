@@ -86,6 +86,7 @@ export interface Order {
   notes?: string;
   processedBy?: string; // uid of staff member who processed this order
   processedByName?: string; // name of staff member who processed this order
+  scheduledDeliveryDate?: string; // Doctor-scheduled delivery date (optional)
   // ── Cancellation ───────────────────────────────────────────────────────────
   cancelledAt?: string;
   cancelledBy?: string;
