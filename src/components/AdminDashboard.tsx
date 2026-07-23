@@ -531,6 +531,34 @@ export default function AdminDashboard({
     setPBarcode(base + checkDigit);
   };
 
+  const handleQuickStockUpdate = async (product: Product, delta: number) => {
+    const newStock = Math.max(0, product.stock + delta);
+    try {
+      if (product.isVariable && product.variants && product.variants.length > 0) {
+        const updatedVariants = product.variants.map((v, i) =>
+          i === 0 ? { ...v, stock: Math.max(0, v.stock + delta) } : v
+        );
+        const computedStock = updatedVariants.reduce((sum, v) => sum + v.stock, 0);
+        await updateDoc(doc(db, 'products', product.id), {
+          stock: computedStock,
+          variants: updatedVariants
+        });
+      } else {
+        await updateDoc(doc(db, 'products', product.id), { stock: newStock });
+      }
+      alert(
+        lang === 'fr'
+          ? `Stock mis à jour pour "${product.name}": ${newStock}`
+          : `تم تحديث مخزون "${product.name}" إلى: ${newStock}`,
+        'success'
+      );
+      onRefreshData();
+    } catch (err: any) {
+      console.error(err);
+      alert('Erreur lors de la mise à jour du stock.', 'error');
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2064,8 +2092,33 @@ export default function AdminDashboard({
                         <td className="py-3 text-rose-500 font-bold">
                           {p.discountPercent && p.discountPercent > 0 ? `-${p.discountPercent}%` : '-'}
                         </td>
-                        <td className={`py-3 font-black ${isLow ? 'text-amber-600' : 'text-slate-800'}`}>
-                          {p.stock > 0 ? p.stock : '-'}
+                        <td className="py-3">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleQuickStockUpdate(p, -1)}
+                              className="w-6 h-6 rounded-md bg-slate-100 hover:bg-rose-100 hover:text-rose-600 text-slate-600 font-extrabold flex items-center justify-center text-xs transition-colors shrink-0 cursor-pointer"
+                              title={lang === 'fr' ? 'Diminuer stock (-1)' : 'إنقاص المخزون (-1)'}
+                            >
+                              -
+                            </button>
+                            <span className={`font-black text-xs px-1 ${isLow ? 'text-amber-600' : 'text-slate-800'}`}>
+                              {p.stock}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickStockUpdate(p, 1)}
+                              className="w-6 h-6 rounded-md bg-slate-100 hover:bg-emerald-100 hover:text-emerald-600 text-slate-600 font-extrabold flex items-center justify-center text-xs transition-colors shrink-0 cursor-pointer"
+                              title={lang === 'fr' ? 'Augmenter stock (+1)' : 'زيادة المخزون (+1)'}
+                            >
+                              +
+                            </button>
+                            {p.isVariable && (
+                              <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.2 rounded-md">
+                                {p.variants?.length || 0} variants
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 text-xs text-slate-500">{p.expiryDate || '-'}</td>
                         <td className="py-3 text-right">
