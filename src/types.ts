@@ -29,6 +29,22 @@ export interface UserProfile {
   isProfileComplete?: boolean; // check if Google Auth user has completed profile details
 }
 
+export interface ProductVariant {
+  id: string;
+  name: string; // e.g. "Size 4g - Color A1"
+  attributes: Record<string, string>; // e.g. { "Taille": "4g", "Couleur": "A1" }
+  price: number; // Specific price for this variant
+  stock: number; // Specific stock for this variant
+  barcode?: string;
+  image?: string;
+  sku?: string;
+}
+
+export interface ProductAttribute {
+  name: string; // e.g. "اللون / Couleur" or "الحجم / Taille"
+  options: string[]; // e.g. ["A1", "A2", "A3", "B2"]
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -46,6 +62,9 @@ export interface Product {
   salesCount?: number; // Total units sold
   isRoutineClinic?: boolean; // flag for routine clinic products
   createdAt?: string; // creation timestamp
+  isVariable?: boolean; // Variable Product flag
+  attributes?: ProductAttribute[]; // Attributes list for variable products
+  variants?: ProductVariant[]; // Variant combinations
 }
 
 export type OrderStatus = 'pending' | 'confirmed' | 'preparing' | 'shipped' | 'delivered' | 'cancelled';
@@ -54,6 +73,7 @@ export type PaymentStatus = 'unpaid' | 'partial' | 'paid';
 export interface CartItem {
   product: Product;
   quantity: number;
+  selectedVariant?: ProductVariant;
 }
 
 export type DeliveryType = 'free' | 'to_office' | 'to_clinic';
@@ -72,6 +92,9 @@ export interface Order {
     quantity: number;
     category: string;
     discountPercent?: number;
+    variantId?: string;
+    variantName?: string;
+    variantAttributes?: Record<string, string>;
   }[];
   totalBeforeDiscount: number;
   discountAmount: number; // Total combined discounts

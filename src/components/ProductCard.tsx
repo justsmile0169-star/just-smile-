@@ -102,12 +102,19 @@ export default function ProductCard({
 
       {/* Product Information */}
       <div className="p-4 md:p-5 flex-1 flex flex-col">
-        {/* Category Badge */}
-        {product.category && (
-          <span className="text-[10px] font-extrabold text-brand-cyan bg-brand-cyan/5 dark:bg-brand-cyan/10 px-2 py-0.5 rounded-md self-start uppercase tracking-wider mb-2">
-            {product.category}
-          </span>
-        )}
+        {/* Category Badge & Variable Product Badge */}
+        <div className="flex items-center gap-1.5 flex-wrap mb-2">
+          {product.category && (
+            <span className="text-[10px] font-extrabold text-brand-cyan bg-brand-cyan/5 dark:bg-brand-cyan/10 px-2 py-0.5 rounded-md uppercase tracking-wider">
+              {product.category}
+            </span>
+          )}
+          {product.isVariable && (
+            <span className="text-[10px] font-extrabold text-purple-600 bg-purple-50 dark:bg-purple-950/30 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800">
+              {lang === 'fr' ? `${product.variants?.length || 0} options` : `${product.variants?.length || 0} خيارات`}
+            </span>
+          )}
+        </div>
 
         {/* Product Name */}
         <h3
@@ -133,31 +140,52 @@ export default function ProductCard({
 
         {/* Price & Cart Actions */}
         <div className="flex items-center justify-between gap-2 mt-auto shrink-0 pt-2 border-t border-slate-100 dark:border-slate-800">
-          <div className="flex flex-wrap items-baseline gap-1.5">
-            {product.price > 0 && (
-              <span className="text-base md:text-lg font-black text-brand-dark dark:text-slate-100 animate-pulse-subtle">
-                {finalPrice > 0 ? formatPrice(finalPrice) : '-'}
+          <div className="flex flex-col">
+            {product.isVariable && (
+              <span className="text-[10px] text-slate-400 font-semibold">
+                {lang === 'fr' ? 'À partir de' : 'ابتداءً من'}
               </span>
             )}
-            {hasProductDiscount && product.discountPercent > 0 && product.price > 0 && (
-              <span className="text-xs md:text-sm text-slate-400 dark:text-slate-500 font-medium line-through">
-                {formatPrice(product.price)}
-              </span>
-            )}
+            <div className="flex flex-wrap items-baseline gap-1.5">
+              {product.price > 0 && (
+                <span className="text-base md:text-lg font-black text-brand-dark dark:text-slate-100 animate-pulse-subtle">
+                  {finalPrice > 0 ? formatPrice(finalPrice) : '-'}
+                </span>
+              )}
+              {hasProductDiscount && product.discountPercent > 0 && product.price > 0 && (
+                <span className="text-xs md:text-sm text-slate-400 dark:text-slate-500 font-medium line-through">
+                  {formatPrice(product.price)}
+                </span>
+              )}
+            </div>
           </div>
 
-          <button
-            onClick={() => onAddToCart(product)}
-            disabled={isOutOfStock}
-            className={`p-2.5 rounded-xl transition-all flex items-center justify-center cursor-pointer ${
-              isOutOfStock
-                ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
-                : 'bg-brand-cyan text-white hover:bg-brand-cyan/90 shadow-xs hover:shadow-md'
-            }`}
-            title={getTranslation(lang, 'addToCart')}
-          >
-            <ShoppingCart size={16} />
-          </button>
+          {product.isVariable ? (
+            <button
+              onClick={() => onViewDetails(product)}
+              disabled={isOutOfStock}
+              className={`px-3 py-2 text-xs font-extrabold rounded-xl transition-all flex items-center justify-center cursor-pointer ${
+                isOutOfStock
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
+                  : 'bg-purple-600 text-white hover:bg-purple-700 shadow-xs hover:shadow-md'
+              }`}
+            >
+              {lang === 'fr' ? 'Choisir' : 'اختر النوع'}
+            </button>
+          ) : (
+            <button
+              onClick={() => onAddToCart(product)}
+              disabled={isOutOfStock}
+              className={`p-2.5 rounded-xl transition-all flex items-center justify-center cursor-pointer ${
+                isOutOfStock
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
+                  : 'bg-brand-cyan text-white hover:bg-brand-cyan/90 shadow-xs hover:shadow-md'
+              }`}
+              title={getTranslation(lang, 'addToCart')}
+            >
+              <ShoppingCart size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocFromServer, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Order, Product, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage } from '../types';
+import { Order, Product, ProductVariant, ProductAttribute, OrderStatus, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage } from '../types';
 import { Language, getTranslation } from '../translations';
 import { getLogoUrl } from '../constants/brand';
 import { useAppDialog } from '../context/AppDialogContext';
@@ -14,7 +14,8 @@ import {
   Users, DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
-  History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin
+  History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin,
+  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw
 } from 'lucide-react';
 
 // Lazy load heavy admin sub-components
@@ -53,7 +54,7 @@ interface AdminDashboardProps {
 }
 
 type AdminSubTab =
-  | 'analytics' | 'users' | 'doctors' | 'clientSituation' | 'debts' | 'inventory'
+  | 'orders' | 'analytics' | 'users' | 'doctors' | 'clientSituation' | 'debts' | 'inventory'
   | 'promotions' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages' | 'announcements';
 
 export default function AdminDashboard({
@@ -180,14 +181,14 @@ export default function AdminDashboard({
           status: 'confirmed' as const
         };
         await updateDoc(orderRef, updateData);
-        
+
         alert(
-          lang === 'fr' 
-            ? `Colis créé sur Yalidine ! N° de suivi : ${result.trackingNumber}` 
+          lang === 'fr'
+            ? `Colis créé sur Yalidine ! N° de suivi : ${result.trackingNumber}`
             : `تم إنشاء الشحنة بنجاح في يالدين! رقم التتبع: ${result.trackingNumber}`,
           'success'
         );
-        
+
         await logActivity(
           currentUser,
           'yalidine_parcel_created',
@@ -220,12 +221,48 @@ export default function AdminDashboard({
     try {
       const orderRef = doc(db, 'orders', orderId);
       await updateDoc(orderRef, { status: newStatus });
+
+      const targetOrder = ordersList.find(o => o.id === orderId);
+      if (targetOrder) {
+        const statusArMap: Record<OrderStatus, string> = {
+          pending: 'قيد الانتظار',
+          confirmed: 'تم التأكيد',
+          preparing: 'قيد التجهيز',
+          shipped: 'تم الشحن',
+          delivered: 'تم التسليم',
+          cancelled: 'ملغى'
+        };
+        const statusFrMap: Record<OrderStatus, string> = {
+          pending: 'En attente',
+          confirmed: 'Confirmée',
+          preparing: 'En préparation',
+          shipped: 'Expédiée',
+          delivered: 'Livrée',
+          cancelled: 'Annulée'
+        };
+        await addDoc(collection(db, 'notifications'), {
+          userId: targetOrder.userId,
+          titleFr: `Statut de commande mis à jour`,
+          titleAr: `تحديث حالة الطلب`,
+          messageFr: `Votre commande #${orderId.slice(-6).toUpperCase()} est maintenant: ${statusFrMap[newStatus as OrderStatus] || newStatus}.`,
+          messageAr: `حالة طلبك رقم #${orderId.slice(-6).toUpperCase()} أصبحت الآن: ${statusArMap[newStatus as OrderStatus] || newStatus}.`,
+          type: 'order_update',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        }).catch(console.warn);
+      }
+
       alert(lang === 'fr' ? 'Statut mis à jour !' : 'تم تحديث حالة الطلب!', 'success');
-      
+
       setSelectedOrderForDetails(prev => prev && prev.id === orderId ? {
         ...prev,
         status: newStatus
       } : prev);
+      setSelectedOrderForDetail(prev => prev && prev.id === orderId ? {
+        ...prev,
+        status: newStatus
+      } : prev);
+      onRefreshData();
     } catch (err) {
       console.error(err);
       alert('Erreur lors de la mise à jour.', 'error');
@@ -272,8 +309,8 @@ export default function AdminDashboard({
 
       const deliveryTypeLabel =
         order.deliveryType === 'free' ? 'Gratuit (Djelfa)' :
-        order.deliveryType === 'to_office' ? 'Bureau de livraison' :
-        order.deliveryType === 'to_clinic' ? 'Clinique' : '';
+          order.deliveryType === 'to_office' ? 'Bureau de livraison' :
+            order.deliveryType === 'to_clinic' ? 'Clinique' : '';
 
       return [
         order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN',
@@ -380,6 +417,10 @@ export default function AdminDashboard({
     }
   };
 
+  // --- Orders SubTab State ---
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | OrderStatus>('all');
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<Order | null>(null);
+
   // --- 3. Product Inventory State ---
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -397,7 +438,7 @@ export default function AdminDashboard({
       (product.description && product.description.toLowerCase().includes(query))
     );
   });
-  
+
   // Product Form states
   const [pName, setPName] = useState('');
   const [pPrice, setPPrice] = useState(0);
@@ -411,6 +452,72 @@ export default function AdminDashboard({
   const [pImage, setPImage] = useState('');
   const [pBarcode, setPBarcode] = useState('');
   const [pIsRoutineClinic, setPIsRoutineClinic] = useState(false);
+
+  // Variable Product States inside Product Form
+  const [pIsVariable, setPIsVariable] = useState(false);
+  const [pAttributes, setPAttributes] = useState<ProductAttribute[]>([]);
+  const [pVariants, setPVariants] = useState<ProductVariant[]>([]);
+  const [newAttrName, setNewAttrName] = useState('');
+  const [newAttrOptions, setNewAttrOptions] = useState('');
+
+  const handleAddAttribute = () => {
+    if (!newAttrName.trim() || !newAttrOptions.trim()) return;
+    const options = newAttrOptions.split(',').map(s => s.trim()).filter(Boolean);
+    if (options.length === 0) return;
+    setPAttributes(prev => [...prev, { name: newAttrName.trim(), options }]);
+    setNewAttrName('');
+    setNewAttrOptions('');
+  };
+
+  const handleRemoveAttribute = (index: number) => {
+    setPAttributes(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleGenerateVariants = () => {
+    if (pAttributes.length === 0) {
+      alert(lang === 'fr' ? 'Veuillez ajouter au moins un attribut.' : 'يرجى إضافة خاصية واحدة على الأقل.', 'error');
+      return;
+    }
+
+    const cartesian = (args: ProductAttribute[]): Record<string, string>[] => {
+      let r: Record<string, string>[] = [{}];
+      for (const attr of args) {
+        const next: Record<string, string>[] = [];
+        for (const prevObj of r) {
+          for (const opt of attr.options) {
+            next.push({ ...prevObj, [attr.name]: opt });
+          }
+        }
+        r = next;
+      }
+      return r;
+    };
+
+    const combinations = cartesian(pAttributes);
+    const generated: ProductVariant[] = combinations.map((combo, idx) => {
+      const variantName = Object.values(combo).join(' - ');
+      return {
+        id: `var_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+        name: variantName,
+        attributes: combo,
+        price: pPrice > 0 ? pPrice : 0,
+        stock: pStock > 0 ? pStock : 10,
+        barcode: '',
+        image: pImage || ''
+      };
+    });
+
+    setPVariants(generated);
+    alert(lang === 'fr' ? `${generated.length} variants générés !` : `تم توليد ${generated.length} خيار بنجاح!`, 'success');
+  };
+
+  const handleUpdateVariant = (variantId: string, field: keyof ProductVariant, value: any) => {
+    setPVariants(prev => prev.map(v => v.id === variantId ? { ...v, [field]: value } : v));
+  };
+
+  const handleRemoveVariant = (variantId: string) => {
+    setPVariants(prev => prev.filter(v => v.id !== variantId));
+  };
 
   // Generate a random EAN-13 style barcode
   const generateBarcode = () => {
@@ -451,6 +558,9 @@ export default function AdminDashboard({
       setPImage(prod.image || '');
       setPBarcode(prod.barcode || '');
       setPIsRoutineClinic(prod.isRoutineClinic ?? false);
+      setPIsVariable(prod.isVariable ?? false);
+      setPAttributes(prod.attributes || []);
+      setPVariants(prod.variants || []);
     } else {
       setEditingProduct(null);
       setPName('');
@@ -464,10 +574,11 @@ export default function AdminDashboard({
       setPDiscount(0);
       setPImage('');
       setPIsRoutineClinic(false);
-      // Check for pre-filled barcode from scanner
+      setPIsVariable(false);
+      setPAttributes([]);
+      setPVariants([]);
       const scannedBarcode = localStorage.getItem('justsmile_new_product_barcode');
       setPBarcode(scannedBarcode || '');
-      // Clear the stored barcode after using it
       if (scannedBarcode) {
         localStorage.removeItem('justsmile_new_product_barcode');
       }
@@ -477,17 +588,25 @@ export default function AdminDashboard({
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pName || pPrice <= 0 || pStock < 0) {
+    if (!pName || (!pIsVariable && pPrice <= 0) || (!pIsVariable && pStock < 0)) {
       alert(lang === 'fr' ? 'Champs invalides.' : 'معلومات غير صالحة.', 'error');
       return;
     }
 
     setLoading(true);
     try {
+      const computedStock = pIsVariable
+        ? pVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0)
+        : Number(pStock);
+
+      const computedMinPrice = pIsVariable && pVariants.length > 0
+        ? Math.min(...pVariants.map(v => Number(v.price) || 0))
+        : Number(pPrice);
+
       const payload = cleanFirestoreData({
         name: pName.trim(),
-        price: Number(pPrice),
-        stock: Number(pStock),
+        price: computedMinPrice > 0 ? computedMinPrice : Number(pPrice),
+        stock: computedStock,
         description: pDesc.trim(),
         category: pCategory,
         technicalSheet: pTechSheet.trim() || undefined,
@@ -497,6 +616,9 @@ export default function AdminDashboard({
         image: pImage || editingProduct?.image || `https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300`,
         barcode: pBarcode.trim() || undefined,
         isRoutineClinic: pIsRoutineClinic,
+        isVariable: pIsVariable,
+        attributes: pIsVariable ? pAttributes : undefined,
+        variants: pIsVariable ? pVariants : undefined,
         ...(!editingProduct && { createdAt: new Date().toISOString() })
       });
 
@@ -595,7 +717,7 @@ export default function AdminDashboard({
 
   const handleDeleteMultipleProducts = async () => {
     if (selectedProducts.size === 0) return;
-    
+
     if (!(await confirm(
       lang === 'fr'
         ? `Supprimer ${selectedProducts.size} produit(s) ? Cette action est irréversible.`
@@ -683,8 +805,8 @@ export default function AdminDashboard({
         allowCreditPayment: !doctor.allowCreditPayment
       });
       alert(
-        lang === 'fr' 
-          ? `Mode de paiement mis à jour pour ${doctor.name}.` 
+        lang === 'fr'
+          ? `Mode de paiement mis à jour pour ${doctor.name}.`
           : `تم تحديث طريقة الدفع لـ ${doctor.name}.`,
         'success'
       );
@@ -769,9 +891,25 @@ export default function AdminDashboard({
 
   return (
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
-      
+
       {/* Sub Tabs Selection Navigation Bar */}
       <div className="flex border-b border-slate-100 bg-white p-2 rounded-2xl shadow-xs gap-1.5 overflow-x-auto shrink-0 scrollbar-hide">
+        <button
+          onClick={() => setActiveSubTab('orders')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'orders'
+              ? 'bg-brand-cyan text-white shadow-xs'
+              : 'text-slate-500 hover:bg-slate-50'
+            }`}
+        >
+          <ShoppingCart size={16} />
+          {lang === 'fr' ? 'Commandes' : 'إدارة الطلبات'}
+          {ordersList.filter(o => o.status === 'pending').length > 0 && (
+            <span className="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
+              {ordersList.filter(o => o.status === 'pending').length}
+            </span>
+          )}
+        </button>
+
         {hasPermission(currentUser, 'view_analytics') && (
           <button onClick={() => setActiveSubTab('analytics')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'analytics' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <BarChart3 size={16} />{lang === 'fr' ? 'Analytics' : 'التحليلات'}
@@ -779,11 +917,10 @@ export default function AdminDashboard({
         )}
         <button
           onClick={() => setActiveSubTab('users')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'users'
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'users'
               ? 'bg-brand-cyan text-white shadow-xs'
               : 'text-slate-500 hover:bg-slate-50'
-          }`}
+            }`}
         >
           <Users size={16} />
           {getTranslation(lang, 'pendingDoctors')} ({pendingDoctors.length})
@@ -791,11 +928,10 @@ export default function AdminDashboard({
 
         <button
           onClick={() => setActiveSubTab('doctors')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'doctors'
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctors'
               ? 'bg-brand-cyan text-white shadow-xs'
               : 'text-slate-500 hover:bg-slate-50'
-          }`}
+            }`}
         >
           <Stethoscope size={16} />
           {getTranslation(lang, 'registeredDoctors')} ({allDoctors.length})
@@ -804,11 +940,10 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'view_client_situation') && (
           <button
             onClick={() => setActiveSubTab('clientSituation')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-              activeSubTab === 'clientSituation'
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'clientSituation'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
-            }`}
+              }`}
           >
             <ClipboardList size={16} />
             {getTranslation(lang, 'clientSituation')}
@@ -817,11 +952,10 @@ export default function AdminDashboard({
 
         <button
           onClick={() => setActiveSubTab('debts')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'debts'
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'debts'
               ? 'bg-brand-cyan text-white shadow-xs'
               : 'text-slate-500 hover:bg-slate-50'
-          }`}
+            }`}
         >
           <DollarSign size={16} />
           {lang === 'fr' ? 'Suivi des Dettes' : 'متابعة الديون والمدفوعات'}
@@ -829,11 +963,10 @@ export default function AdminDashboard({
 
         <button
           onClick={() => setActiveSubTab('inventory')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-            activeSubTab === 'inventory'
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'inventory'
               ? 'bg-brand-cyan text-white shadow-xs'
               : 'text-slate-500 hover:bg-slate-50'
-          }`}
+            }`}
         >
           <Package size={16} />
           {getTranslation(lang, 'inventory')}
@@ -862,11 +995,10 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'view_doctors') && (
           <button
             onClick={() => setActiveSubTab('discounts')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-              activeSubTab === 'discounts'
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'discounts'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
-            }`}
+              }`}
           >
             <Percent size={16} />
             {getTranslation(lang, 'doctorDiscounts')}
@@ -891,11 +1023,10 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'manage_settings') && (
           <button
             onClick={() => setActiveSubTab('settings')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-              activeSubTab === 'settings'
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'settings'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
-            }`}
+              }`}
           >
             <Settings size={16} />
             {lang === 'fr' ? 'Paramètres' : 'إعدادات المتجر'}
@@ -905,11 +1036,10 @@ export default function AdminDashboard({
         {currentUser.role === 'admin' && (
           <button
             onClick={() => setActiveSubTab('messages')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-              activeSubTab === 'messages'
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'messages'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
-            }`}
+              }`}
           >
             <MessageSquare size={16} />
             {lang === 'fr' ? 'Messages' : 'الرسائل'}
@@ -924,11 +1054,10 @@ export default function AdminDashboard({
         {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier') && (
           <button
             onClick={() => setActiveSubTab('announcements')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${
-              activeSubTab === 'announcements'
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'announcements'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
-            }`}
+              }`}
           >
             <Megaphone size={16} />
             {lang === 'fr' ? 'Publicités / Annonces' : 'إعلانات الواجهة'}
@@ -937,6 +1066,398 @@ export default function AdminDashboard({
       </div>
 
       {/* --- CONTENT RENDER PANELS --- */}
+
+      {activeSubTab === 'orders' && (
+        <div className="space-y-6">
+          {/* Header & Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400 font-bold uppercase">{lang === 'fr' ? 'Total Commandes' : 'إجمالي الطلبات'}</p>
+                <h3 className="text-2xl font-black text-slate-900 mt-1">{ordersList.length}</h3>
+              </div>
+              <div className="p-3 bg-cyan-50 text-brand-cyan rounded-xl">
+                <ShoppingCart size={24} />
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-amber-100 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-xs text-amber-600 font-bold uppercase">{lang === 'fr' ? 'En attente' : 'طلبات قيد الانتظار'}</p>
+                <h3 className="text-2xl font-black text-amber-600 mt-1">
+                  {ordersList.filter(o => o.status === 'pending').length}
+                </h3>
+              </div>
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                <AlertTriangle size={24} />
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-emerald-100 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-xs text-emerald-600 font-bold uppercase">{lang === 'fr' ? 'Confirmées / Livrées' : 'طلبات مؤكدة / مسلّمة'}</p>
+                <h3 className="text-2xl font-black text-emerald-600 mt-1">
+                  {ordersList.filter(o => o.status === 'confirmed' || o.status === 'delivered').length}
+                </h3>
+              </div>
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                <Check size={24} />
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400 font-bold uppercase">{lang === 'fr' ? 'Chiffre d\'affaires' : 'إجمالي المبيعات'}</p>
+                <h3 className="text-xl font-black text-brand-dark mt-1">
+                  {formatPrice(ordersList.filter(o => o.status !== 'cancelled').reduce((sum, o) => sum + o.totalAfterDiscount, 0))}
+                </h3>
+              </div>
+              <div className="p-3 bg-purple-50 text-purple-600 rounded-xl">
+                <DollarSign size={24} />
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Bar */}
+          <div className="bg-white p-4 md:p-6 rounded-3xl border border-slate-100 shadow-xs space-y-4">
+            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+              {/* Search input */}
+              <div className="relative flex-1 w-full">
+                <Search size={18} className="absolute top-3.5 right-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Rechercher par N° commande, nom médecin, téléphone, clinique...' : 'ابحث برقم الطلب، اسم الطبيب، العيادة، رقم الهاتف...'}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pr-10 pl-4 text-sm focus:outline-hidden focus:border-brand-cyan"
+                />
+              </div>
+
+              {/* Status Filter Buttons */}
+              <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 scrollbar-hide shrink-0">
+                {(['all', 'pending', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'] as const).map((st) => {
+                  const labelMap: Record<string, { ar: string; fr: string }> = {
+                    all: { ar: 'الكل', fr: 'Tous' },
+                    pending: { ar: 'قيد الانتظار', fr: 'En attente' },
+                    confirmed: { ar: 'مؤكد', fr: 'Confirmée' },
+                    preparing: { ar: 'قيد التجهيز', fr: 'Préparation' },
+                    shipped: { ar: 'تم الشحن', fr: 'Expédiée' },
+                    delivered: { ar: 'تم التسليم', fr: 'Livrée' },
+                    cancelled: { ar: 'ملغى', fr: 'Annulée' }
+                  };
+                  const count = st === 'all' ? ordersList.length : ordersList.filter(o => o.status === st).length;
+                  const isAct = orderStatusFilter === st;
+
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setOrderStatusFilter(st)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                        isAct
+                          ? 'bg-brand-cyan text-white shadow-xs'
+                          : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      <span>{lang === 'fr' ? labelMap[st].fr : labelMap[st].ar}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isAct ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Orders List Table / Cards */}
+            {(() => {
+              const filtered = ordersList.filter((order) => {
+                const query = orderSearchQuery.trim().toLowerCase();
+                const matchesStatus = orderStatusFilter === 'all' || order.status === orderStatusFilter;
+                if (!query) return matchesStatus;
+
+                const searchTarget = `${order.id} ${order.doctorName} ${order.doctorClinic} ${order.doctorPhone} ${order.doctorWilayaName || ''}`.toLowerCase();
+                return matchesStatus && searchTarget.includes(query);
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    <ShoppingCart size={40} className="text-slate-300 mx-auto mb-3" />
+                    <p className="text-slate-500 font-bold text-sm">
+                      {lang === 'fr' ? 'Aucune commande trouvée' : 'لا توجد طلبات مطابقة للبحث'}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4 pt-2">
+                  {filtered.map((order) => {
+                    const statusBadgeColors: Record<OrderStatus, string> = {
+                      pending: 'bg-amber-100 text-amber-800 border-amber-200',
+                      confirmed: 'bg-blue-100 text-blue-800 border-blue-200',
+                      preparing: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+                      shipped: 'bg-purple-100 text-purple-800 border-purple-200',
+                      delivered: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                      cancelled: 'bg-rose-100 text-rose-800 border-rose-200'
+                    };
+
+                    const statusLabels: Record<OrderStatus, { ar: string; fr: string }> = {
+                      pending: { ar: 'قيد الانتظار', fr: 'En attente' },
+                      confirmed: { ar: 'تم التأكيد', fr: 'Confirmée' },
+                      preparing: { ar: 'قيد التجهيز', fr: 'En préparation' },
+                      shipped: { ar: 'تم الشحن', fr: 'Expédiée' },
+                      delivered: { ar: 'تم التسليم', fr: 'Livrée' },
+                      cancelled: { ar: 'ملغى', fr: 'Annulée' }
+                    };
+
+                    return (
+                      <div
+                        key={order.id}
+                        className={`bg-white p-5 rounded-2xl border transition-all ${
+                          order.status === 'pending'
+                            ? 'border-amber-200 shadow-md ring-1 ring-amber-100'
+                            : 'border-slate-200 hover:border-brand-cyan/30'
+                        }`}
+                      >
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                          {/* Doctor & Order Header Info */}
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded-md font-bold text-slate-700">
+                                #{order.id ? order.id.slice(-8).toUpperCase() : 'N/A'}
+                              </span>
+                              <h4 className="font-extrabold text-slate-900 text-base">{order.doctorName}</h4>
+                              <span className={`text-xs font-extrabold px-2.5 py-0.5 rounded-full border ${statusBadgeColors[order.status]}`}>
+                                {lang === 'fr' ? statusLabels[order.status].fr : statusLabels[order.status].ar}
+                              </span>
+                              {order.paymentMethod === 'credit' && (
+                                <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full border border-purple-200">
+                                  {lang === 'fr' ? 'Crédit (20j)' : 'دَين (20 يوم)'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
+                              <span>🏥 {order.doctorClinic}</span>
+                              <span>📞 {order.doctorPhone}</span>
+                              {order.doctorWilayaName && <span>📍 {order.doctorWilayaName} ({order.doctorCommuneName || ''})</span>}
+                              <span>🕒 {new Date(order.createdAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}</span>
+                            </div>
+                          </div>
+
+                          {/* Order Price summary */}
+                          <div className="flex items-center gap-3 shrink-0">
+                            <div className="text-right">
+                              <p className="text-xs text-slate-400 font-semibold">{lang === 'fr' ? 'Montant Net' : 'الصافي للإجمالي'}</p>
+                              <p className="text-lg font-black text-brand-dark">{formatPrice(order.totalAfterDiscount)}</p>
+                              {order.remainingBalance > 0 && (
+                                <p className="text-[11px] font-bold text-rose-500">
+                                  {lang === 'fr' ? `Reste: ${formatPrice(order.remainingBalance)}` : `المتبقي: ${formatPrice(order.remainingBalance)}`}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Order Items Preview */}
+                        <div className="py-3 border-b border-slate-100">
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                            {lang === 'fr' ? 'Articles' : 'المنتجات المطلوبة'} ({order.items.length}):
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {order.items.map((item, i) => (
+                              <div key={i} className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 text-xs flex items-center gap-2">
+                                <span className="font-bold text-slate-800">{item.name}</span>
+                                {item.variantName && (
+                                  <span className="bg-cyan-100 text-cyan-800 text-[10px] font-extrabold px-1.5 py-0.2 rounded-md">
+                                    {item.variantName}
+                                  </span>
+                                )}
+                                <span className="bg-brand-cyan/10 text-brand-cyan font-black px-1.5 py-0.2 rounded-md">
+                                  x{item.quantity}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Order Actions Footer */}
+                        <div className="pt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                          {/* Status Updater Select */}
+                          <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <label className="text-xs font-bold text-slate-500 whitespace-nowrap">
+                              {lang === 'fr' ? 'Changer statut:' : 'تغيير الحالة:'}
+                            </label>
+                            <select
+                              value={order.status}
+                              onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value as OrderStatus)}
+                              disabled={loading}
+                              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                            >
+                              <option value="pending">قيد الانتظار (En attente)</option>
+                              <option value="confirmed">تم التأكيد (Confirmée)</option>
+                              <option value="preparing">قيد التجهيز (En préparation)</option>
+                              <option value="shipped">تم الشحن (Expédiée)</option>
+                              <option value="delivered">تم التسليم (Livrée)</option>
+                              <option value="cancelled">ملغى (Annulée)</option>
+                            </select>
+                          </div>
+
+                          {/* Quick Action Buttons */}
+                          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                            <button
+                              onClick={() => setSelectedOrderForDetail(order)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1"
+                            >
+                              <Eye size={14} />
+                              {lang === 'fr' ? 'Détails' : 'التفاصيل'}
+                            </button>
+
+                            <button
+                              onClick={() => onPrintInvoice(order)}
+                              className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-bold transition-all flex items-center gap-1"
+                            >
+                              <Printer size={14} />
+                              {lang === 'fr' ? 'Facture' : 'طباعة الفاتورة'}
+                            </button>
+
+                            {order.remainingBalance > 0 && (
+                              <button
+                                onClick={() => setSelectedOrderForPayment(order)}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-all flex items-center gap-1"
+                              >
+                                <DollarSign size={14} />
+                                {lang === 'fr' ? 'Régler' : 'تسجيل دفعة'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Full Order Detail Modal */}
+          {selectedOrderForDetail && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[85vh]">
+                <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="font-extrabold text-slate-900 text-lg flex items-center gap-2">
+                    <ShoppingCart className="text-brand-cyan" size={20} />
+                    {lang === 'fr' ? `Détails de la commande #${selectedOrderForDetail.id.slice(-6).toUpperCase()}` : `تفاصيل الطلب رقم #${selectedOrderForDetail.id.slice(-6).toUpperCase()}`}
+                  </h3>
+                  <button
+                    onClick={() => setSelectedOrderForDetail(null)}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="p-6 overflow-y-auto space-y-6">
+                  {/* Doctor Info Card */}
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <p className="text-slate-400 font-bold uppercase">{lang === 'fr' ? 'Praticien' : 'اسم الطبيب والعيادة'}</p>
+                      <p className="font-extrabold text-slate-900 text-sm mt-0.5">{selectedOrderForDetail.doctorName}</p>
+                      <p className="text-slate-600 font-medium">{selectedOrderForDetail.doctorClinic}</p>
+                      <p className="text-slate-500 mt-1">📞 {selectedOrderForDetail.doctorPhone}</p>
+                    </div>
+
+                    <div>
+                      <p className="text-slate-400 font-bold uppercase">{lang === 'fr' ? 'Livraison & Paiement' : 'معلومات الشحن والسداد'}</p>
+                      <p className="text-slate-700 font-semibold mt-0.5">
+                        📍 {selectedOrderForDetail.doctorWilayaName || ''} {selectedOrderForDetail.doctorCommuneName ? `(${selectedOrderForDetail.doctorCommuneName})` : ''}
+                      </p>
+                      <p className="text-slate-700 font-semibold">
+                        💳 {selectedOrderForDetail.paymentMethod === 'credit' ? 'دَين مؤجل (20 يوم)' : 'دفع فوري عند الاستلام'}
+                      </p>
+                      <p className="text-slate-500 mt-1">
+                        📅 {new Date(selectedOrderForDetail.createdAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Items List Table */}
+                  <div className="space-y-3">
+                    <h4 className="font-extrabold text-slate-800 text-sm">{lang === 'fr' ? 'Liste des produits' : 'قائمة المنتجات والكميات'}</h4>
+                    <div className="border border-slate-100 rounded-2xl overflow-hidden divide-y divide-slate-100 text-xs">
+                      {selectedOrderForDetail.items.map((item, idx) => (
+                        <div key={idx} className="p-3 bg-white flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-bold text-slate-900">{item.name}</p>
+                            {item.variantName && (
+                              <p className="text-[11px] text-purple-600 font-semibold mt-0.5">
+                                {lang === 'fr' ? `Option: ${item.variantName}` : `النوع: ${item.variantName}`}
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="font-extrabold text-slate-800">{formatPrice(item.price)} x {item.quantity}</p>
+                            <p className="font-black text-brand-dark">{formatPrice(item.price * item.quantity)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Financial Summary */}
+                  <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 space-y-2 text-xs font-semibold text-slate-700">
+                    <div className="flex justify-between">
+                      <span>{lang === 'fr' ? 'Sous-total' : 'المجموع قبل التخفيض'}</span>
+                      <span>{formatPrice(selectedOrderForDetail.totalBeforeDiscount)}</span>
+                    </div>
+                    {selectedOrderForDetail.discountAmount > 0 && (
+                      <div className="flex justify-between text-rose-600 font-bold">
+                        <span>{lang === 'fr' ? 'Remises' : 'مجموع التخفيضات'}</span>
+                        <span>-{formatPrice(selectedOrderForDetail.discountAmount)}</span>
+                      </div>
+                    )}
+                    {selectedOrderForDetail.deliveryCost !== undefined && selectedOrderForDetail.deliveryCost > 0 && (
+                      <div className="flex justify-between">
+                        <span>{lang === 'fr' ? 'Frais de livraison' : 'سعر التوصيل'}</span>
+                        <span>+{formatPrice(selectedOrderForDetail.deliveryCost)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm font-black text-slate-900 border-t border-purple-100 pt-2">
+                      <span>{lang === 'fr' ? 'Net à payer' : 'إجمالي المظفي للطلب'}</span>
+                      <span>{formatPrice(selectedOrderForDetail.totalAfterDiscount)}</span>
+                    </div>
+                  </div>
+
+                  {selectedOrderForDetail.notes && (
+                    <div className="bg-amber-50 p-3.5 rounded-2xl border border-amber-100 text-xs">
+                      <p className="font-bold text-amber-800">{lang === 'fr' ? 'Notes du médecin:' : 'ملاحظات الطبيب:'}</p>
+                      <p className="text-amber-900 mt-1 whitespace-pre-wrap">{selectedOrderForDetail.notes}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      onPrintInvoice(selectedOrderForDetail);
+                    }}
+                    className="bg-brand-cyan text-white px-5 py-2.5 rounded-xl font-bold text-xs hover:bg-brand-cyan/90 transition-all flex items-center gap-1.5"
+                  >
+                    <Printer size={16} />
+                    {lang === 'fr' ? 'Imprimer la facture' : 'طباعة الفاتورة'}
+                  </button>
+                  <button
+                    onClick={() => setSelectedOrderForDetail(null)}
+                    className="bg-slate-200 text-slate-700 px-5 py-2.5 rounded-xl font-bold text-xs hover:bg-slate-300 transition-all"
+                  >
+                    {lang === 'fr' ? 'Fermer' : 'إغلاق'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {activeSubTab === 'analytics' && hasPermission(currentUser, 'view_analytics') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
@@ -1019,8 +1540,8 @@ export default function AdminDashboard({
               {getTranslation(lang, 'pendingDoctors')}
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              {lang === 'fr' 
-                ? 'Validez les inscriptions des cabinets dentaires pour leur autoriser l\'accès.' 
+              {lang === 'fr'
+                ? 'Validez les inscriptions des cabinets dentaires pour leur autoriser l\'accès.'
                 : 'قم بتفعيل حسابات العيادات الموثوقة للسماح لهم بالتصفح والطلب.'}
             </p>
           </div>
@@ -1131,13 +1652,12 @@ export default function AdminDashboard({
                         <td className="py-3 text-slate-500 text-xs">{docProfile.location}</td>
                         <td className="py-3">
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                              docProfile.status === 'approved'
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docProfile.status === 'approved'
                                 ? 'bg-emerald-50 text-emerald-600'
                                 : docProfile.status === 'pending'
                                   ? 'bg-amber-50 text-amber-600'
                                   : 'bg-rose-50 text-rose-600'
-                            }`}
+                              }`}
                           >
                             {getTranslation(lang, `status_${docProfile.status}` as any)}
                           </span>
@@ -1146,11 +1666,10 @@ export default function AdminDashboard({
                           <button
                             onClick={() => handleToggleDoctorCredit(docProfile)}
                             disabled={loading}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                              docProfile.allowCreditPayment !== false
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${docProfile.allowCreditPayment !== false
                                 ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                                 : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
-                            }`}
+                              }`}
                           >
                             {docProfile.allowCreditPayment !== false
                               ? (lang === 'fr' ? 'Activé' : 'مفعّل')
@@ -1211,8 +1730,8 @@ export default function AdminDashboard({
                 {lang === 'fr' ? 'Suivi du Crédit et des Règlements' : 'متابعة الديون والتحصيلات'}
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                {lang === 'fr' 
-                  ? 'Supervisez l\'état financier des praticiens et enregistrez les paiements partiels.' 
+                {lang === 'fr'
+                  ? 'Supervisez l\'état financier des praticiens et enregistrez les paiements partiels.'
                   : 'راقب المبالغ المتبقية على العيادات وسجل الدفعات المقبوضة.'}
               </p>
             </div>
@@ -1234,33 +1753,30 @@ export default function AdminDashboard({
                   <button
                     type="button"
                     onClick={() => setOrderPaymentFilter('all')}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                      orderPaymentFilter === 'all'
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${orderPaymentFilter === 'all'
                         ? 'bg-brand-cyan text-white shadow-2xs'
                         : 'text-slate-500 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     {lang === 'fr' ? 'Tous' : 'الكل'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setOrderPaymentFilter('unpaid')}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                      orderPaymentFilter === 'unpaid'
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${orderPaymentFilter === 'unpaid'
                         ? 'bg-brand-cyan text-white shadow-2xs'
                         : 'text-slate-500 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     {lang === 'fr' ? 'Crédits' : 'الديون'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setOrderPaymentFilter('paid')}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                      orderPaymentFilter === 'paid'
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${orderPaymentFilter === 'paid'
                         ? 'bg-brand-cyan text-white shadow-2xs'
                         : 'text-slate-500 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     {lang === 'fr' ? 'Payés' : 'المسددة'}
                   </button>
@@ -1281,8 +1797,8 @@ export default function AdminDashboard({
 
             {filteredOrders.length === 0 ? (
               <div className="text-center py-12 text-slate-400 font-semibold text-sm bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                {lang === 'fr' 
-                  ? 'Aucune commande ne correspond à vos filtres.' 
+                {lang === 'fr'
+                  ? 'Aucune commande ne correspond à vos filtres.'
                   : 'لم يتم العثور على أي طلبات تطابق خيارات البحث.'}
               </div>
             ) : (
@@ -1312,19 +1828,18 @@ export default function AdminDashboard({
                           <td className="py-4">
                             <p className="font-mono font-bold">#{order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN'}</p>
                             <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                              {order.paymentMethod === 'cash' 
+                              {order.paymentMethod === 'cash'
                                 ? (lang === 'fr' ? 'Comptant (COD)' : 'نقدي عند الاستلام')
                                 : (lang === 'fr' ? 'Crédit' : 'آجل (دين)')}
                             </p>
                           </td>
                           <td className="py-4">
-                            <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold tracking-wide uppercase ${
-                              order.status === 'delivered' 
-                                ? 'bg-emerald-50 text-emerald-600' 
-                                : order.status === 'cancelled' 
-                                  ? 'bg-rose-50 text-rose-600' 
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold tracking-wide uppercase ${order.status === 'delivered'
+                                ? 'bg-emerald-50 text-emerald-600'
+                                : order.status === 'cancelled'
+                                  ? 'bg-rose-50 text-rose-600'
                                   : 'bg-brand-cyan/10 text-brand-cyan'
-                            }`}>
+                              }`}>
                               {getTranslation(lang, `status_${order.status}` as any)}
                             </span>
                             {order.cancelledByName && (
@@ -1402,8 +1917,8 @@ export default function AdminDashboard({
                 {getTranslation(lang, 'lowStock')} ({lowStockProducts.length})
               </h4>
               <p className="text-xs text-amber-700 leading-relaxed">
-                {lang === 'fr' 
-                  ? 'Ces produits ont atteint ou dépassé le seuil minimum de stock.' 
+                {lang === 'fr'
+                  ? 'Ces produits ont atteint ou dépassé le seuil minimum de stock.'
                   : 'لقد قاربت هذه المواد على النفاد وهي تحت حد التنبيه.'}
               </p>
               {lowStockProducts.length > 0 && (
@@ -1425,8 +1940,8 @@ export default function AdminDashboard({
                 {getTranslation(lang, 'expiryAlerts')} ({expiringProducts.length})
               </h4>
               <p className="text-xs text-rose-700 leading-relaxed">
-                {lang === 'fr' 
-                  ? 'Consommables ou produits de désinfection arrivant à expiration sous 90 jours.' 
+                {lang === 'fr'
+                  ? 'Consommables ou produits de désinfection arrivant à expiration sous 90 jours.'
                   : 'مستلزمات ومواد تعقيم تنتهي صلاحيتها في غضون الـ 90 يومًا القادمة.'}
               </p>
               {expiringProducts.length > 0 && (
@@ -1444,7 +1959,7 @@ export default function AdminDashboard({
 
           {/* Expiry Date Scanner & Warnings Utility */}
           <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
-            <ExpiryScanner 
+            <ExpiryScanner
               lang={lang}
               productsList={productsList}
               onRefreshData={onRefreshData}
@@ -1453,10 +1968,10 @@ export default function AdminDashboard({
 
           {showImportModal && (
             <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
-              <ExcelImporter 
-                lang={lang} 
-                existingProducts={productsList} 
-                onImportComplete={onRefreshData} 
+              <ExcelImporter
+                lang={lang}
+                existingProducts={productsList}
+                onImportComplete={onRefreshData}
                 onClose={() => setShowImportModal(false)}
               />
             </Suspense>
@@ -1598,8 +2113,8 @@ export default function AdminDashboard({
               {getTranslation(lang, 'doctorDiscounts')}
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              {lang === 'fr' 
-                ? 'Attribuez des remises fidélité uniques applicables sur l\'ensemble des commandes de certains médecins.' 
+              {lang === 'fr'
+                ? 'Attribuez des remises fidélité uniques applicables sur l\'ensemble des commandes de certains médecins.'
                 : 'حدد نسب تخفيض دائمة لبعض الأطباء تطبق تلقائياً على فواتيرهم.'}
             </p>
           </div>
@@ -1775,14 +2290,12 @@ export default function AdminDashboard({
                 <button
                   type="button"
                   onClick={() => setYalidineConfig((prev: any) => ({ ...prev, enabled: !prev.enabled }))}
-                  className={`w-11 h-6 rounded-full transition-all relative ${
-                    yalidineConfig.enabled ? 'bg-brand-cyan' : 'bg-slate-200'
-                  }`}
+                  className={`w-11 h-6 rounded-full transition-all relative ${yalidineConfig.enabled ? 'bg-brand-cyan' : 'bg-slate-200'
+                    }`}
                 >
                   <div
-                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
-                      yalidineConfig.enabled ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
-                    }`}
+                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${yalidineConfig.enabled ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
+                      }`}
                   />
                 </button>
               </div>
@@ -1799,14 +2312,12 @@ export default function AdminDashboard({
                 <button
                   type="button"
                   onClick={() => setYalidineConfig((prev: any) => ({ ...prev, isSandbox: !prev.isSandbox }))}
-                  className={`w-11 h-6 rounded-full transition-all relative ${
-                    yalidineConfig.isSandbox ? 'bg-amber-500' : 'bg-slate-200'
-                  }`}
+                  className={`w-11 h-6 rounded-full transition-all relative ${yalidineConfig.isSandbox ? 'bg-amber-500' : 'bg-slate-200'
+                    }`}
                 >
                   <div
-                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
-                      yalidineConfig.isSandbox ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
-                    }`}
+                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${yalidineConfig.isSandbox ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
+                      }`}
                   />
                 </button>
               </div>
@@ -1892,8 +2403,8 @@ export default function AdminDashboard({
 
       {selectedOrderForPayment && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <form 
-            onSubmit={handleRegisterPayment} 
+          <form
+            onSubmit={handleRegisterPayment}
             className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden flex flex-col"
           >
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
@@ -1970,13 +2481,12 @@ export default function AdminDashboard({
                 <span className="font-extrabold text-slate-800 text-base">
                   {lang === 'fr' ? `Détails Commande #${selectedOrderForDetails.id ? selectedOrderForDetails.id.slice(-6).toUpperCase() : 'UNKNOWN'}` : `تفاصيل الطلب #${selectedOrderForDetails.id ? selectedOrderForDetails.id.slice(-6).toUpperCase() : 'UNKNOWN'}`}
                 </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase ${
-                  selectedOrderForDetails.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
-                  selectedOrderForDetails.status === 'cancelled' ? 'bg-rose-100 text-rose-800' :
-                  selectedOrderForDetails.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
-                  selectedOrderForDetails.status === 'preparing' ? 'bg-amber-100 text-amber-800' :
-                  'bg-slate-100 text-slate-800'
-                }`}>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase ${selectedOrderForDetails.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
+                    selectedOrderForDetails.status === 'cancelled' ? 'bg-rose-100 text-rose-800' :
+                      selectedOrderForDetails.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
+                        selectedOrderForDetails.status === 'preparing' ? 'bg-amber-100 text-amber-800' :
+                          'bg-slate-100 text-slate-800'
+                  }`}>
                   {selectedOrderForDetails.status}
                 </span>
               </div>
@@ -1992,7 +2502,7 @@ export default function AdminDashboard({
             {/* Content */}
             <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
+
                 {/* Left side: Items & Financial Summary */}
                 <div className="lg:col-span-2 space-y-4">
                   <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
@@ -2065,8 +2575,8 @@ export default function AdminDashboard({
                         <p className="text-slate-800">
                           <strong className="text-slate-500">{lang === 'fr' ? 'Type Livraison :' : 'نوع التوصيل:'}</strong>{' '}
                           {selectedOrderForDetails.deliveryType === 'free' ? (lang === 'fr' ? 'Gratuit (Djelfa)' : 'مجاني (الجلفة)') :
-                           selectedOrderForDetails.deliveryType === 'to_office' ? (lang === 'fr' ? 'Bureau de livraison' : 'مكتب شركة الشحن') :
-                           (lang === 'fr' ? 'Clinique' : 'العيادة')}
+                            selectedOrderForDetails.deliveryType === 'to_office' ? (lang === 'fr' ? 'Bureau de livraison' : 'مكتب شركة الشحن') :
+                              (lang === 'fr' ? 'Clinique' : 'العيادة')}
                         </p>
                       )}
                       {selectedOrderForDetails.notes && (
@@ -2102,7 +2612,7 @@ export default function AdminDashboard({
                       <Truck size={14} className="text-brand-cyan" />
                       Yalidine Express
                     </h4>
-                    
+
                     {!yalidineConfig.enabled ? (
                       <p className="text-[10px] text-slate-400 italic">
                         {lang === 'fr' ? 'L\'intégration Yalidine est désactivée dans les réglages.' : 'ربط شركة يالدين معطل في الإعدادات.'}
@@ -2179,8 +2689,8 @@ export default function AdminDashboard({
       {/* Product Add/Edit Overlay Modal */}
       {showProductForm && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <form 
-            onSubmit={handleSaveProduct} 
+          <form
+            onSubmit={handleSaveProduct}
             className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-8"
           >
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
@@ -2197,6 +2707,146 @@ export default function AdminDashboard({
             </div>
 
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto text-sm font-medium">
+              {/* Product Type Toggle: Simple vs Variable */}
+              <div className="p-4 bg-purple-50/60 rounded-2xl border border-purple-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-extrabold text-purple-900">
+                      {lang === 'fr' ? 'Type de produit : Variable (Options)' : 'نظام المنتجات المتغيرة (Variable Product)'}
+                    </p>
+                    <p className="text-[11px] text-purple-700">
+                      {lang === 'fr'
+                        ? 'Permet d\'ajouter des variantes (Tailles, Couleurs) avec prix et stock par variante.'
+                        : 'إضافة خيارات وأحجام وألوان متعددة للمنتج لكل منها سعر ومخزون خاص.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPIsVariable(prev => !prev)}
+                    className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${pIsVariable ? 'bg-purple-600' : 'bg-slate-200'}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${pIsVariable ? 'right-1' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                {pIsVariable && (
+                  <div className="space-y-4 pt-2 border-t border-purple-200">
+                    {/* Add Attribute UI */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-purple-900 block">
+                        {lang === 'fr' ? '1. Ajouter un attribut (ex: Couleur, Taille)' : '1. إضافة خاصية جديدة (مثال: اللون، الحجم)'}
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder={lang === 'fr' ? 'Nom (ex: Couleur)' : 'اسم الخاصية (مثال: اللون)'}
+                          value={newAttrName}
+                          onChange={(e) => setNewAttrName(e.target.value)}
+                          className="bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-hidden focus:border-purple-500"
+                        />
+                        <input
+                          type="text"
+                          placeholder={lang === 'fr' ? 'Options séparées par virgules (ex: A1, A2, A3)' : 'الخيارات تفصل بفاصلة (مثال: A1, A2, A3)'}
+                          value={newAttrOptions}
+                          onChange={(e) => setNewAttrOptions(e.target.value)}
+                          className="bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-hidden focus:border-purple-500"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddAttribute}
+                        className="w-full bg-purple-600 text-white font-bold text-xs py-2 rounded-xl hover:bg-purple-700 transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Plus size={14} />
+                        {lang === 'fr' ? 'Ajouter cet attribut' : 'إضافة هذه الخاصية'}
+                      </button>
+                    </div>
+
+                    {/* Attributes List */}
+                    {pAttributes.length > 0 && (
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-700 block">
+                          {lang === 'fr' ? 'Attributs créés :' : 'الخصائص المضافة:'}
+                        </label>
+                        <div className="space-y-1.5">
+                          {pAttributes.map((attr, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-purple-200 text-xs">
+                              <div>
+                                <span className="font-extrabold text-purple-900">{attr.name}: </span>
+                                <span className="text-slate-600 font-semibold">{attr.options.join(', ')}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveAttribute(idx)}
+                                className="text-rose-500 hover:bg-rose-50 p-1 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleGenerateVariants}
+                          className="w-full bg-emerald-600 text-white font-black text-xs py-2.5 rounded-xl hover:bg-emerald-700 transition-all flex items-center justify-center gap-1.5 shadow-xs mt-2"
+                        >
+                          <RefreshCw size={14} />
+                          {lang === 'fr' ? 'Générer les combinaisons de variants' : 'توليد كافة خيارات التشكيل (Variants)'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Variants Matrix Table */}
+                    {pVariants.length > 0 && (
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-700 block">
+                          {lang === 'fr' ? `Variantes générées (${pVariants.length}) :` : `قائمة الخيارات والتعديل عليها (${pVariants.length}):`}
+                        </label>
+                        <div className="max-h-60 overflow-y-auto space-y-2 border border-purple-200 rounded-2xl p-2 bg-white">
+                          {pVariants.map((v) => (
+                            <div key={v.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="font-extrabold text-slate-800">{v.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveVariant(v.id)}
+                                  className="text-rose-500 hover:text-rose-700"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Prix (DA)' : 'السعر (دج)'}</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={v.price}
+                                    onChange={(e) => handleUpdateVariant(v.id, 'price', Number(e.target.value))}
+                                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Stock' : 'المخزون'}</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={v.stock}
+                                    onChange={(e) => handleUpdateVariant(v.id, 'stock', Number(e.target.value))}
+                                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-1">
                 <label className="text-slate-500 font-bold text-xs">{lang === 'fr' ? 'Nom du produit' : 'اسم المنتج'}</label>
                 <input
@@ -2297,12 +2947,12 @@ export default function AdminDashboard({
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-brand-cyan/10 file:text-brand-cyan file:font-bold" />
                 </div>
-                <input 
-                  type="url" 
-                  value={pImage && !pImage.startsWith('data:') ? pImage : ''} 
-                  onChange={(e) => setPImage(e.target.value)} 
-                  placeholder={lang === 'fr' ? 'Ou URL de l\'image' : 'أو رابط الصورة'} 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-hidden focus:border-brand-cyan mt-1" 
+                <input
+                  type="url"
+                  value={pImage && !pImage.startsWith('data:') ? pImage : ''}
+                  onChange={(e) => setPImage(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Ou URL de l\'image' : 'أو رابط الصورة'}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-hidden focus:border-brand-cyan mt-1"
                 />
               </div>
 
@@ -2323,7 +2973,7 @@ export default function AdminDashboard({
                     title={lang === 'fr' ? 'Générer un code-barres automatique' : 'توليد باركود تلقائي'}
                     className="shrink-0 flex items-center gap-1.5 bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30 font-bold text-xs px-3 py-2 rounded-xl transition-all"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14"/><path d="M8 5v14"/><path d="M12 5v14"/><path d="M17 5v14"/><path d="M21 5v14"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14" /><path d="M8 5v14" /><path d="M12 5v14" /><path d="M17 5v14" /><path d="M21 5v14" /></svg>
                     {lang === 'fr' ? 'Générer' : 'توليد'}
                   </button>
                   <button
@@ -2368,14 +3018,12 @@ export default function AdminDashboard({
                 <button
                   type="button"
                   onClick={() => setPIsRoutineClinic(prev => !prev)}
-                  className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${
-                    pIsRoutineClinic ? 'bg-brand-cyan' : 'bg-slate-200'
-                  }`}
+                  className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${pIsRoutineClinic ? 'bg-brand-cyan' : 'bg-slate-200'
+                    }`}
                 >
                   <div
-                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
-                      pIsRoutineClinic ? 'right-1' : 'left-1'
-                    }`}
+                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${pIsRoutineClinic ? 'right-1' : 'left-1'
+                      }`}
                   />
                 </button>
               </div>
@@ -2450,11 +3098,10 @@ export default function AdminDashboard({
                 .map((message) => (
                   <div
                     key={message.id}
-                    className={`p-4 rounded-2xl border transition-all ${
-                      !message.isRead
+                    className={`p-4 rounded-2xl border transition-all ${!message.isRead
                         ? 'bg-brand-cyan/5 border-brand-cyan/20'
                         : 'bg-slate-50 border-slate-100'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-4 mb-3">
                       <div className="flex-1">

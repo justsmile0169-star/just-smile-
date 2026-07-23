@@ -1,12 +1,12 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
-import { 
-  collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc, 
+import {
+  collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc,
   writeBatch, addDoc, updateDoc, deleteDoc, getCountFromServer
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import {
-  UserProfile, Product, CartItem, Order, AppNotification, ShopInfo, Payment, ProductReturn,
+  UserProfile, Product, ProductVariant, CartItem, Order, AppNotification, ShopInfo, Payment, ProductReturn,
   Promotion, Expense, ActivityLog, AdminMessage
 } from './types';
 import { canAccessAdmin } from './utils/permissions';
@@ -50,7 +50,7 @@ export default function App() {
     }
     localStorage.setItem('justsmile_theme', theme);
   }, [theme]);
-  
+
   // Real-time synced collections
   const [products, setProducts] = useState<Product[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -472,9 +472,9 @@ export default function App() {
       return;
     }
 
-    let unsubscribeOrders = () => {};
-    let unsubscribeNotifications = () => {};
-    let unsubscribeFavorites = () => {};
+    let unsubscribeOrders = () => { };
+    let unsubscribeNotifications = () => { };
+    let unsubscribeFavorites = () => { };
 
     if (currentUser.role === 'doctor') {
       // Sync doctor orders
@@ -525,13 +525,61 @@ export default function App() {
         console.error("Error syncing users list for admin:", err);
       });
 
-      // Sync admin all orders list
+      // Sync admin all orders list with real-time instant notification chime
+      let isInitialLoad = true;
       const allOrdersQuery = collection(db, 'orders');
       unsubscribeOrders = onSnapshot(allOrdersQuery, (snapshot) => {
         const items: Order[] = [];
         snapshot.forEach((docSnap) => {
           items.push({ ...(docSnap.data() as Order), id: docSnap.id });
         });
+
+        if (!isInitialLoad) {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const newOrd = change.doc.data() as Order;
+              try {
+                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                if (AudioContext) {
+                  const ctx = new AudioContext();
+                  const now = ctx.currentTime;
+                  const osc1 = ctx.createOscillator();
+                  const gain1 = ctx.createGain();
+                  osc1.type = 'sine';
+                  osc1.frequency.setValueAtTime(659.25, now);
+                  gain1.gain.setValueAtTime(0.3, now);
+                  gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                  osc1.connect(gain1);
+                  gain1.connect(ctx.destination);
+                  osc1.start(now);
+                  osc1.stop(now + 0.3);
+
+                  const osc2 = ctx.createOscillator();
+                  const gain2 = ctx.createGain();
+                  osc2.type = 'sine';
+                  osc2.frequency.setValueAtTime(987.77, now + 0.15);
+                  gain2.gain.setValueAtTime(0.4, now + 0.15);
+                  gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+                  osc2.connect(gain2);
+                  gain2.connect(ctx.destination);
+                  osc2.start(now + 0.15);
+                  osc2.stop(now + 0.55);
+                }
+              } catch (e) {
+                console.warn(e);
+              }
+
+              showToast(
+                lang === 'fr'
+                  ? `🚨 Nouvelle commande reçue de Dr. ${newOrd.doctorName || ''} !`
+                  : `🚨 طلب جديد وصول الآن من د. ${newOrd.doctorName || ''}!`,
+                'info'
+              );
+            }
+          });
+        }
+        isInitialLoad = false;
+
         setOrdersList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
       }, (err) => {
         console.error("Error syncing all orders for admin:", err);
@@ -585,7 +633,7 @@ export default function App() {
       });
 
       // Sync admin messages (only for admin role)
-      let unsubscribeMessages = () => {};
+      let unsubscribeMessages = () => { };
       if (currentUser.role === 'admin') {
         const messagesQuery = collection(db, 'admin_messages');
         unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
@@ -634,22 +682,29 @@ export default function App() {
   }, [currentUser]);
 
   // --- 5. Cart Handlers ---
-  const handleAddToCart = (product: Product) => {
-    const existing = cart.find((item) => item.product.id === product.id);
+  const handleAddToCart = (product: Product, selectedVariant?: ProductVariant) => {
+    const maxStock = selectedVariant ? selectedVariant.stock : product.stock;
+    const existing = cart.find((item) =>
+      item.product.id === product.id &&
+      (selectedVariant ? item.selectedVariant?.id === selectedVariant.id : !item.selectedVariant)
+    );
     if (existing) {
-      if (existing.quantity >= product.stock) {
+      if (existing.quantity >= maxStock) {
         showAlert(lang === 'fr' ? 'Stock insuffisant.' : 'الكمية المطلوبة تتجاوز المخزون المتوفر.', 'error');
         return;
       }
       const updated = cart.map((item) =>
-        item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        item.product.id === product.id && (selectedVariant ? item.selectedVariant?.id === selectedVariant.id : !item.selectedVariant)
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
       );
       saveCart(updated);
     } else {
-      saveCart([...cart, { product, quantity: 1 }]);
+      saveCart([...cart, { product, quantity: 1, selectedVariant }]);
     }
 
-    showToast(getTranslation(lang, 'cartAdded') + ` : ${product.name}`, 'success');
+    const itemName = selectedVariant ? `${product.name} (${selectedVariant.name})` : product.name;
+    showToast(getTranslation(lang, 'cartAdded') + ` : ${itemName}`, 'success');
   };
 
   const handleUpdateQuantity = (productId: string, qty: number) => {
@@ -676,7 +731,7 @@ export default function App() {
   const handleToggleFavorite = async (product: Product) => {
     if (!currentUser) return;
     const favDocId = `${currentUser.uid}_${product.id}`;
-    
+
     try {
       if (favorites.includes(product.id)) {
         await deleteDoc(doc(db, 'favorites', favDocId));
@@ -741,16 +796,16 @@ export default function App() {
     if (addedCount > 0) {
       saveCart(newCartItems);
       showToast(
-        lang === 'fr' 
-          ? 'Articles de la commande ajoutés à votre panier !' 
+        lang === 'fr'
+          ? 'Articles de la commande ajoutés à votre panier !'
           : 'تم إضافة مواد الفاتورة إلى سلتك بنجاح!',
         'success'
       );
       setActiveTab('cart');
     } else {
       showAlert(
-        lang === 'fr' 
-          ? 'Aucun article disponible pour la re-commande.' 
+        lang === 'fr'
+          ? 'Aucun article disponible pour la re-commande.'
           : 'عذراً، المواد المطلوبة غير متوفرة حالياً في المخزون.',
         'info'
       );
@@ -814,7 +869,7 @@ export default function App() {
         // Create an Admin user inside firebase profile if not exists, and sign in
         const demoAdminEmail = 'admin@justsmile.com';
         const demoPass = 'admin123';
-        
+
         try {
           await signInWithEmailAndPassword(auth, demoAdminEmail, demoPass);
         } catch (e) {
@@ -848,282 +903,281 @@ export default function App() {
 
   return (
     <AppDialogProvider lang={lang}>
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300" dir={isRtl ? 'rtl' : 'ltr'}>
-      
-      {/* Header component */}
-      <Header
-        lang={lang}
-        onLanguageChange={setLang}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
-        favoritesCount={favorites.length}
-        unreadNotificationsCount={unreadNotifsCount}
-        user={currentUser}
-        onLogout={handleLogout}
-        theme={theme}
-        onToggleTheme={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
-        logoUrl={shopInfo.logoUrl}
-        companyName={shopInfo.companyName}
-      />
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300" dir={isRtl ? 'rtl' : 'ltr'}>
 
-      {/* Main Container Content */}
-      <main className="flex-1 w-full mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-10 max-w-7xl">
-        {loadingUser ? (
-          <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-3">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-cyan"></div>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
-              {lang === 'fr' ? 'Chargement de JUST SMILE...' : 'جاري التحميل...'}
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Render appropriate views based on active tab state */}
-            {activeTab === 'browse' && (
-              <BrowseView
-                products={products}
-                favorites={favorites}
-                lang={lang}
-                onAddToCart={handleAddToCart}
-                onToggleFavorite={handleToggleFavorite}
-                onViewProduct={handleViewProductDetails}
-                user={currentUser}
-                currentUser={currentUser}
-                selectedCategory={selectedCategory}
-                onSelectCategory={setSelectedCategory}
-                onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
-              />
-            )}
+        {/* Header component */}
+        <Header
+          lang={lang}
+          onLanguageChange={setLang}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
+          favoritesCount={favorites.length}
+          unreadNotificationsCount={unreadNotifsCount}
+          user={currentUser}
+          onLogout={handleLogout}
+          theme={theme}
+          onToggleTheme={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
+          logoUrl={shopInfo.logoUrl}
+          companyName={shopInfo.companyName}
+        />
 
-            {activeTab === 'cart' && (
-              <CartView
-                cart={cart}
-                user={currentUser}
-                currentUser={currentUser}
-                userOrders={userOrders}
-                lang={lang}
-                promotions={promotionsList}
-                onUpdateQuantity={handleUpdateQuantity}
-                onRemoveItem={handleRemoveItem}
-                onClearCart={handleClearCart}
-                onCheckoutSuccess={() => setActiveTab('dashboard')}
-                setActiveTab={setActiveTab}
-              />
-            )}
+        {/* Main Container Content */}
+        <main className="flex-1 w-full mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-10 max-w-7xl">
+          {loadingUser ? (
+            <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-3">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-cyan"></div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                {lang === 'fr' ? 'Chargement de JUST SMILE...' : 'جاري التحميل...'}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Render appropriate views based on active tab state */}
+              {activeTab === 'browse' && (
+                <BrowseView
+                  products={products}
+                  favorites={favorites}
+                  lang={lang}
+                  onAddToCart={handleAddToCart}
+                  onToggleFavorite={handleToggleFavorite}
+                  onViewProduct={handleViewProductDetails}
+                  user={currentUser}
+                  currentUser={currentUser}
+                  selectedCategory={selectedCategory}
+                  onSelectCategory={setSelectedCategory}
+                  onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                />
+              )}
 
-            {activeTab === 'auth' && (
-              <AuthView
-                lang={lang}
-                currentUser={currentUser}
-                onAuthSuccess={(profile) => {
-                  setCurrentUser(profile);
-                  if (profile.role !== 'doctor') {
-                    setActiveTab('admin');
-                  } else {
+              {activeTab === 'cart' && (
+                <CartView
+                  cart={cart}
+                  user={currentUser}
+                  currentUser={currentUser}
+                  userOrders={userOrders}
+                  lang={lang}
+                  promotions={promotionsList}
+                  onUpdateQuantity={handleUpdateQuantity}
+                  onRemoveItem={handleRemoveItem}
+                  onClearCart={handleClearCart}
+                  onCheckoutSuccess={() => setActiveTab('dashboard')}
+                  setActiveTab={setActiveTab}
+                />
+              )}
+
+              {activeTab === 'auth' && (
+                <AuthView
+                  lang={lang}
+                  currentUser={currentUser}
+                  onAuthSuccess={(profile) => {
+                    setCurrentUser(profile);
+                    if (profile.role !== 'doctor') {
+                      setActiveTab('admin');
+                    } else {
+                      setActiveTab('browse');
+                    }
+                  }}
+                />
+              )}
+
+              {activeTab === 'dashboard' && currentUser && currentUser.role === 'doctor' && (
+                <DoctorDashboard
+                  user={currentUser}
+                  orders={userOrders}
+                  allProducts={products}
+                  favorites={favorites}
+                  recentlyViewed={recentlyViewed}
+                  lang={lang}
+                  categoryCounts={categoryCounts}
+                  onAddToCart={handleAddToCart}
+                  onToggleFavorite={handleToggleFavorite}
+                  onViewProduct={handleViewProductDetails}
+                  onQuickReorder={handleQuickReorder}
+                  onPrintInvoice={setSelectedInvoiceOrder}
+                  onSelectCategory={(category) => {
+                    setSelectedCategory(category);
                     setActiveTab('browse');
-                  }
-                }}
-              />
-            )}
+                  }}
+                />
+              )}
 
-            {activeTab === 'dashboard' && currentUser && currentUser.role === 'doctor' && (
-              <DoctorDashboard
-                user={currentUser}
-                orders={userOrders}
-                allProducts={products}
-                favorites={favorites}
-                recentlyViewed={recentlyViewed}
-                lang={lang}
-                categoryCounts={categoryCounts}
-                onAddToCart={handleAddToCart}
-                onToggleFavorite={handleToggleFavorite}
-                onViewProduct={handleViewProductDetails}
-                onQuickReorder={handleQuickReorder}
-                onPrintInvoice={setSelectedInvoiceOrder}
-                onSelectCategory={(category) => {
-                  setSelectedCategory(category);
-                  setActiveTab('browse');
-                }}
-              />
-            )}
+              {activeTab === 'admin' && currentUser && canAccessAdmin(currentUser) && (
+                <AdminDashboard
+                  lang={lang}
+                  currentUser={currentUser}
+                  usersList={usersList}
+                  ordersList={ordersList}
+                  paymentsList={paymentsList}
+                  returnsList={returnsList}
+                  promotionsList={promotionsList}
+                  expensesList={expensesList}
+                  activityLogsList={activityLogsList}
+                  productsList={products}
+                  adminMessagesList={adminMessagesList}
+                  shopInfo={shopInfo}
+                  onShopInfoChange={setShopInfo}
+                  onRefreshData={() => { }}
+                  onPrintInvoice={setSelectedInvoiceOrder}
+                  onPrintBarcode={(product) => {
+                    setProductToPrint(product);
+                    setShowBarcodePrint(true);
+                  }}
+                />
+              )}
 
-            {activeTab === 'admin' && currentUser && canAccessAdmin(currentUser) && (
-              <AdminDashboard
-                lang={lang}
-                currentUser={currentUser}
-                usersList={usersList}
-                ordersList={ordersList}
-                paymentsList={paymentsList}
-                returnsList={returnsList}
-                promotionsList={promotionsList}
-                expensesList={expensesList}
-                activityLogsList={activityLogsList}
-                productsList={products}
-                adminMessagesList={adminMessagesList}
-                shopInfo={shopInfo}
-                onShopInfoChange={setShopInfo}
-                onRefreshData={() => {}}
-                onPrintInvoice={setSelectedInvoiceOrder}
-                onPrintBarcode={(product) => {
-                  setProductToPrint(product);
-                  setShowBarcodePrint(true);
-                }}
-              />
-            )}
-
-            {/* 5. Favorites List (Fallback tab display) */}
-            {activeTab === 'favorites' && currentUser && (
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 border-b border-slate-100 pb-4">
-                  <Heart size={24} className="text-red-500" fill="currentColor" />
-                  <h2 className="text-2xl font-black text-slate-900">
-                    {getTranslation(lang, 'favorites')} ({favoriteProducts.length})
-                  </h2>
-                </div>
-
-                {favoriteProducts.length === 0 ? (
-                  <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-4">
-                    <Heart className="mx-auto text-slate-300" size={48} />
-                    <h3 className="font-bold text-slate-700 text-sm">{lang === 'fr' ? 'Aucun favori enregistré.' : 'لم تقم بحفظ أي منتجات في المفضلة بعد.'}</h3>
-                    <button
-                      onClick={() => setActiveTab('browse')}
-                      className="bg-brand-cyan text-white font-extrabold text-xs md:text-sm px-6 py-2.5 rounded-xl hover:bg-brand-cyan/90 transition-colors"
-                    >
-                      {getTranslation(lang, 'browse')}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {favoriteProducts.map((p) => (
-                      <ProductCard
-                        key={p.id}
-                        product={p}
-                        lang={lang}
-                        onAddToCart={handleAddToCart}
-                        isFavorite={true}
-                        onToggleFavorite={handleToggleFavorite}
-                        onViewDetails={handleViewProductDetails}
-                        user={currentUser}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 6. Notifications List */}
-            {activeTab === 'notifications' && currentUser && (
-              <div className="space-y-6 max-w-2xl mx-auto">
-                <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                  <div className="flex items-center gap-2">
-                    <Bell size={24} className="text-brand-cyan" />
+              {/* 5. Favorites List (Fallback tab display) */}
+              {activeTab === 'favorites' && currentUser && (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-4">
+                    <Heart size={24} className="text-red-500" fill="currentColor" />
                     <h2 className="text-2xl font-black text-slate-900">
-                      {getTranslation(lang, 'notifications')}
+                      {getTranslation(lang, 'favorites')} ({favoriteProducts.length})
                     </h2>
                   </div>
-                  {unreadNotifsCount > 0 && (
-                    <button
-                      onClick={handleMarkAllRead}
-                      className="text-xs font-bold text-brand-cyan hover:text-brand-dark transition-colors"
-                    >
-                      {getTranslation(lang, 'markAllRead')}
-                    </button>
+
+                  {favoriteProducts.length === 0 ? (
+                    <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-4">
+                      <Heart className="mx-auto text-slate-300" size={48} />
+                      <h3 className="font-bold text-slate-700 text-sm">{lang === 'fr' ? 'Aucun favori enregistré.' : 'لم تقم بحفظ أي منتجات في المفضلة بعد.'}</h3>
+                      <button
+                        onClick={() => setActiveTab('browse')}
+                        className="bg-brand-cyan text-white font-extrabold text-xs md:text-sm px-6 py-2.5 rounded-xl hover:bg-brand-cyan/90 transition-colors"
+                      >
+                        {getTranslation(lang, 'browse')}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                      {favoriteProducts.map((p) => (
+                        <ProductCard
+                          key={p.id}
+                          product={p}
+                          lang={lang}
+                          onAddToCart={handleAddToCart}
+                          isFavorite={true}
+                          onToggleFavorite={handleToggleFavorite}
+                          onViewDetails={handleViewProductDetails}
+                          user={currentUser}
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
+              )}
 
-                {notifications.length === 0 ? (
-                  <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-2">
-                    <Bell className="mx-auto text-slate-300" size={40} />
-                    <h4 className="font-bold text-slate-700 text-sm">{getTranslation(lang, 'noNotifications')}</h4>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {notifications.map((notif) => (
-                      <div 
-                        key={notif.id} 
-                        className={`p-5 rounded-2xl border transition-all flex items-start gap-3.5 relative ${
-                          notif.isRead 
-                            ? 'bg-white border-slate-100' 
-                            : 'bg-brand-cyan/5 border-brand-cyan/20 shadow-xs'
-                        }`}
+              {/* 6. Notifications List */}
+              {activeTab === 'notifications' && currentUser && (
+                <div className="space-y-6 max-w-2xl mx-auto">
+                  <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-2">
+                      <Bell size={24} className="text-brand-cyan" />
+                      <h2 className="text-2xl font-black text-slate-900">
+                        {getTranslation(lang, 'notifications')}
+                      </h2>
+                    </div>
+                    {unreadNotifsCount > 0 && (
+                      <button
+                        onClick={handleMarkAllRead}
+                        className="text-xs font-bold text-brand-cyan hover:text-brand-dark transition-colors"
                       >
-                        {!notif.isRead && (
-                          <span className={`absolute top-5 ${isRtl ? 'left-5' : 'right-5'} w-2.5 h-2.5 bg-brand-cyan rounded-full`} />
-                        )}
-                        <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 text-slate-500 shrink-0">
-                          <Bell size={16} />
-                        </div>
-                        <div className="space-y-1 pr-4">
-                          <h4 className="font-bold text-slate-900 text-sm">
-                            {isRtl ? notif.titleAr : notif.titleFr}
-                          </h4>
-                          <p className="text-xs text-slate-500 leading-relaxed">
-                            {isRtl ? notif.messageAr : notif.messageFr}
-                          </p>
-                          <p className="text-[10px] text-slate-400 font-medium">
-                            {new Date(notif.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')} {new Date(notif.createdAt).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'ar-DZ', { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+                        {getTranslation(lang, 'markAllRead')}
+                      </button>
+                    )}
                   </div>
-                )}
-              </div>
-            )}
-          </>
+
+                  {notifications.length === 0 ? (
+                    <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-2">
+                      <Bell className="mx-auto text-slate-300" size={40} />
+                      <h4 className="font-bold text-slate-700 text-sm">{getTranslation(lang, 'noNotifications')}</h4>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {notifications.map((notif) => (
+                        <div
+                          key={notif.id}
+                          className={`p-5 rounded-2xl border transition-all flex items-start gap-3.5 relative ${notif.isRead
+                              ? 'bg-white border-slate-100'
+                              : 'bg-brand-cyan/5 border-brand-cyan/20 shadow-xs'
+                            }`}
+                        >
+                          {!notif.isRead && (
+                            <span className={`absolute top-5 ${isRtl ? 'left-5' : 'right-5'} w-2.5 h-2.5 bg-brand-cyan rounded-full`} />
+                          )}
+                          <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 text-slate-500 shrink-0">
+                            <Bell size={16} />
+                          </div>
+                          <div className="space-y-1 pr-4">
+                            <h4 className="font-bold text-slate-900 text-sm">
+                              {isRtl ? notif.titleAr : notif.titleFr}
+                            </h4>
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              {isRtl ? notif.messageAr : notif.messageFr}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-medium">
+                              {new Date(notif.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')} {new Date(notif.createdAt).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'ar-DZ', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </main>
+
+        <Footer lang={lang} shopInfo={shopInfo} />
+
+        {/* --- OVERLAYS --- */}
+
+        {showBarcodeScanner && (
+          <BarcodeScanner
+            lang={lang}
+            products={products}
+            user={currentUser}
+            onAddToCart={handleScannerAddToCart}
+            onPrintBarcode={handleScannerPrintBarcode}
+            onCreateProduct={handleScannerCreateProduct}
+            onClose={() => setShowBarcodeScanner(false)}
+          />
         )}
-      </main>
 
-      <Footer lang={lang} shopInfo={shopInfo} />
+        {/* Product Detail Modal */}
+        {selectedDetailProduct && (
+          <ProductDetailModal
+            product={selectedDetailProduct}
+            lang={lang}
+            onClose={() => setSelectedDetailProduct(null)}
+            onAddToCart={handleAddToCart}
+          />
+        )}
 
-      {/* --- OVERLAYS --- */}
+        {/* Barcode Print View */}
+        {showBarcodePrint && productToPrint && (
+          <BarcodePrintView
+            product={productToPrint}
+            lang={lang}
+            onClose={() => {
+              setShowBarcodePrint(false);
+              setProductToPrint(null);
+            }}
+          />
+        )}
 
-      {showBarcodeScanner && (
-        <BarcodeScanner
-          lang={lang}
-          products={products}
-          user={currentUser}
-          onAddToCart={handleScannerAddToCart}
-          onPrintBarcode={handleScannerPrintBarcode}
-          onCreateProduct={handleScannerCreateProduct}
-          onClose={() => setShowBarcodeScanner(false)}
-        />
-      )}
+        {/* Invoice Printable PDF View */}
+        {selectedInvoiceOrder && (
+          <InvoicePrintView
+            order={selectedInvoiceOrder}
+            doctor={currentUser}
+            lang={lang}
+            shopInfo={shopInfo}
+            onClose={() => setSelectedInvoiceOrder(null)}
+          />
+        )}
 
-      {/* Product Detail Modal */}
-      {selectedDetailProduct && (
-        <ProductDetailModal
-          product={selectedDetailProduct}
-          lang={lang}
-          onClose={() => setSelectedDetailProduct(null)}
-          onAddToCart={handleAddToCart}
-        />
-      )}
-
-      {/* Barcode Print View */}
-      {showBarcodePrint && productToPrint && (
-        <BarcodePrintView
-          product={productToPrint}
-          lang={lang}
-          onClose={() => {
-            setShowBarcodePrint(false);
-            setProductToPrint(null);
-          }}
-        />
-      )}
-
-      {/* Invoice Printable PDF View */}
-      {selectedInvoiceOrder && (
-        <InvoicePrintView
-          order={selectedInvoiceOrder}
-          doctor={currentUser}
-          lang={lang}
-          shopInfo={shopInfo}
-          onClose={() => setSelectedInvoiceOrder(null)}
-        />
-      )}
-
-    </div>
+      </div>
     </AppDialogProvider>
   );
 }

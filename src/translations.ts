@@ -27,7 +27,7 @@ export const translations = {
     notifications: 'Notifications',
     pendingApproval: 'Votre compte est en cours de révision. Vous pourrez vous connecter dès son activation par l\'administration. Merci pour votre compréhension 😊.',
     rejectedApproval: 'Votre compte a été refusé. Veuillez contacter le support.',
-    
+
     // Auth fields
     name: 'Nom complet',
     phone: 'Numéro de téléphone',
@@ -145,7 +145,7 @@ export const translations = {
     notifications: 'الإشعارات',
     pendingApproval: 'حسابك قيد المراجعة ، ستتمكن من تسجيل الدخول فور تفعيله من طرف الإدارة ، شكرا على تفهمك 😊 .',
     rejectedApproval: 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.',
-    
+
     // Auth fields
     name: 'الاسم الكامل',
     phone: 'رقم الهاتف',

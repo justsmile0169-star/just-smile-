@@ -329,6 +329,11 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
                       </td>
                       <td style={{ padding: '5px 7px', fontWeight: 600, color: C.text, borderRight: `1px solid ${C.border}` }}>
                         {item.name}
+                        {item.variantName && (
+                          <div style={{ fontSize: '6.5pt', color: '#6B21A8', fontWeight: 700, marginTop: '1px' }}>
+                            Option: {item.variantName}
+                          </div>
+                        )}
                         {item.category && <div style={{ fontSize: '6.5pt', color: '#94A3B8', fontWeight: 500, marginTop: '1px' }}>{item.category}</div>}
                       </td>
                       <td style={{ padding: '5px 7px', textAlign: 'center', fontWeight: 700, borderRight: `1px solid ${C.border}` }}>{item.quantity}</td>

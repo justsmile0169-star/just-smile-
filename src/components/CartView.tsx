@@ -52,10 +52,11 @@ export default function CartView({
   // --- Calculate Totals & Discounts ---
   const totals = cart.reduce(
     (acc, item) => {
-      // 1. Calculate base product price and apply product discount if exists
+      // 1. Calculate base product price (or variant price) and apply product discount if exists
       const pDiscount = item.product.discountPercent || 0;
-      const baseProductTotal = item.product.price * item.quantity;
-      const finalProductPrice = Math.round(item.product.price * (1 - pDiscount / 100));
+      const unitBasePrice = item.selectedVariant ? item.selectedVariant.price : item.product.price;
+      const baseProductTotal = unitBasePrice * item.quantity;
+      const finalProductPrice = Math.round(unitBasePrice * (1 - pDiscount / 100));
       const finalProductTotal = finalProductPrice * item.quantity;
 
       acc.grossTotal += baseProductTotal;
@@ -136,14 +137,21 @@ export default function CartView({
         doctorName: user.name,
         doctorClinic: user.clinicName,
         doctorPhone: user.phone,
-        items: cart.map((item) => ({
-          productId: item.product.id,
-          name: item.product.name,
-          price: item.product.discountPercent ? Math.round(item.product.price * (1 - item.product.discountPercent / 100)) : item.product.price,
-          quantity: item.quantity,
-          category: item.product.category,
-          discountPercent: item.product.discountPercent || 0
-        })),
+        items: cart.map((item) => {
+          const unitBasePrice = item.selectedVariant ? item.selectedVariant.price : item.product.price;
+          const finalPrice = item.product.discountPercent ? Math.round(unitBasePrice * (1 - item.product.discountPercent / 100)) : unitBasePrice;
+          return {
+            productId: item.product.id,
+            name: item.product.name,
+            price: finalPrice,
+            quantity: item.quantity,
+            category: item.product.category,
+            discountPercent: item.product.discountPercent || 0,
+            variantId: item.selectedVariant?.id,
+            variantName: item.selectedVariant?.name,
+            variantAttributes: item.selectedVariant?.attributes,
+          };
+        }),
         totalBeforeDiscount: totals.grossTotal,
         discountAmount: totalDiscount,
         totalAfterDiscount: netTotalToPay,
@@ -184,10 +192,22 @@ export default function CartView({
         const prodRef = doc(db, 'products', item.product.id);
         const newStock = Math.max(0, item.product.stock - item.quantity);
         const newSalesCount = (item.product.salesCount || 0) + item.quantity;
-        batch.update(prodRef, { 
-          stock: newStock,
-          salesCount: newSalesCount
-        });
+        
+        if (item.product.isVariable && item.selectedVariant && item.product.variants) {
+          const updatedVariants = item.product.variants.map((v) =>
+            v.id === item.selectedVariant!.id ? { ...v, stock: Math.max(0, v.stock - item.quantity) } : v
+          );
+          batch.update(prodRef, {
+            stock: newStock,
+            salesCount: newSalesCount,
+            variants: updatedVariants
+          });
+        } else {
+          batch.update(prodRef, { 
+            stock: newStock,
+            salesCount: newSalesCount
+          });
+        }
 
         const threshold = item.product.lowStockAlert ?? 5;
         if (newStock <= threshold && item.product.stock > threshold) {
@@ -299,23 +319,32 @@ export default function CartView({
           {/* Left Columns: Items list */}
           <div className="lg:col-span-2 space-y-4">
             <div className="bg-white rounded-3xl border border-slate-100 p-6 md:p-8 shadow-xs divide-y divide-slate-100">
-              {cart.map((item) => {
+              {cart.map((item, index) => {
                 const discount = item.product.discountPercent || 0;
-                const priceBefore = item.product.price;
+                const unitBase = item.selectedVariant ? item.selectedVariant.price : item.product.price;
+                const priceBefore = unitBase;
                 const priceAfter = discount > 0 ? Math.round(priceBefore * (1 - discount / 100)) : priceBefore;
+                const itemKey = item.selectedVariant ? `${item.product.id}_${item.selectedVariant.id}_${index}` : `${item.product.id}_${index}`;
 
                 return (
-                  <div key={item.product.id} className="flex items-start gap-4 py-5 first:pt-0 last:pb-0">
+                  <div key={itemKey} className="flex items-start gap-4 py-5 first:pt-0 last:pb-0">
                     <img
-                      src={item.product.image && String(item.product.image) !== '0' ? item.product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
+                      src={item.selectedVariant?.image || (item.product.image && String(item.product.image) !== '0' ? item.product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300')}
                       alt={item.product.name}
                       className="w-16 h-16 md:w-20 md:h-20 object-cover rounded-2xl bg-slate-150 border border-slate-50 shrink-0"
                     />
 
                     <div className="flex-1 min-w-0 space-y-1">
-                      <span className="text-[10px] bg-brand-cyan/5 text-brand-cyan px-2 py-0.5 rounded-md font-bold uppercase">
-                        {item.product.category}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] bg-brand-cyan/5 text-brand-cyan px-2 py-0.5 rounded-md font-bold uppercase">
+                          {item.product.category}
+                        </span>
+                        {item.selectedVariant && (
+                          <span className="text-[11px] bg-cyan-100 text-cyan-800 font-bold px-2 py-0.5 rounded-md border border-cyan-200">
+                            {item.selectedVariant.name}
+                          </span>
+                        )}
+                      </div>
                       <h4 className="font-bold text-slate-800 text-sm md:text-base truncate">{item.product.name}</h4>
                       
                       <div className="flex items-center gap-2">
