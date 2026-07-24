@@ -515,6 +515,12 @@ export default function AdminDashboard({
     setPVariants(prev => prev.map(v => v.id === variantId ? { ...v, [field]: value } : v));
   };
 
+  const handleVariantNumericBlur = (variantId: string, field: 'stock' | 'price', raw: string) => {
+    const parsed = parseFloat(raw);
+    const safeValue = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+    handleUpdateVariant(variantId, field, safeValue);
+  };
+
   const handleRemoveVariant = (variantId: string) => {
     setPVariants(prev => prev.filter(v => v.id !== variantId));
   };
@@ -623,12 +629,26 @@ export default function AdminDashboard({
 
     setLoading(true);
     try {
+      // Prepare clean variants and calculate total stock
+      let finalVariants = pVariants;
+      const initialVariantSum = pVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
+      // If user entered a main stock > 0 but variants sum is 0, assign stock to variants
+      if (pIsVariable && pVariants.length > 0 && initialVariantSum === 0 && Number(pStock) > 0) {
+        const stockPerVar = Math.max(1, Math.floor(Number(pStock) / pVariants.length));
+        finalVariants = pVariants.map((v) => ({ ...v, stock: stockPerVar }));
+      }
+
+      const finalVariantSum = finalVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
       const computedStock = pIsVariable
-        ? pVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0)
+        ? (finalVariants.length > 0
+            ? (finalVariantSum > 0 ? finalVariantSum : Number(pStock))
+            : Number(pStock))
         : Number(pStock);
 
-      const computedMinPrice = pIsVariable && pVariants.length > 0
-        ? Math.min(...pVariants.map(v => Number(v.price) || 0))
+      const computedMinPrice = pIsVariable && finalVariants.length > 0
+        ? Math.min(...finalVariants.map(v => Number(v.price) || 0))
         : Number(pPrice);
 
       const payload = cleanFirestoreData({
@@ -646,7 +666,7 @@ export default function AdminDashboard({
         isRoutineClinic: pIsRoutineClinic,
         isVariable: pIsVariable,
         attributes: pIsVariable ? pAttributes : undefined,
-        variants: pIsVariable ? pVariants : undefined,
+        variants: pIsVariable ? finalVariants : undefined,
         ...(!editingProduct && { createdAt: new Date().toISOString() })
       });
 
@@ -2871,22 +2891,22 @@ export default function AdminDashboard({
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <div>
-                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Prix (DA)' : 'السعر (دج)'}</label>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Prix (DA)' : '\u0627\u0644\u0633\u0639\u0631 (\u062f\u062c)'}</label>
                                   <input
                                     type="number"
                                     min="0"
-                                    value={v.price}
-                                    onChange={(e) => handleUpdateVariant(v.id, 'price', Number(e.target.value))}
+                                    value={v.price ?? 0}
+                                    onChange={(e) => handleUpdateVariant(v.id, 'price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
                                     className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold"
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Stock' : 'المخزون'}</label>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Stock' : '\u0627\u0644\u0645\u062e\u0632\u0648\u0646'}</label>
                                   <input
                                     type="number"
                                     min="0"
-                                    value={v.stock}
-                                    onChange={(e) => handleUpdateVariant(v.id, 'stock', Number(e.target.value))}
+                                    value={v.stock ?? 0}
+                                    onChange={(e) => handleUpdateVariant(v.id, 'stock', e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0)}
                                     className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold"
                                   />
                                 </div>

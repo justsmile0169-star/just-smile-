@@ -1,18 +1,21 @@
-import React, { useState } from 'react';
-import { CartItem, UserProfile, Order, Product, Promotion, DeliveryType } from '../types';
+import React, { useState, useEffect } from 'react';
+import { CartItem, UserProfile, Order, Product, Promotion } from '../types';
 import { calculatePromotionDiscount } from '../utils/promotionEngine';
 import { Language, getTranslation } from '../translations';
 import { db } from '../firebase';
-import { collection, addDoc, doc, updateDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
-import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, CheckCircle, Clock, Truck } from 'lucide-react';
+import { collection, addDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, CheckCircle, Truck, User, Phone, MapPin, ChevronDown, LogIn, Sparkles } from 'lucide-react';
 import { useAppDialog } from '../context/AppDialogContext';
-import { isFreeDelivery, getDeliveryPricing } from '../utils/algeriaData';
+import {
+  isFreeDelivery, getDeliveryPricing, getWilayas, getCommunesByWilaya,
+  WilayaOption, CommuneOption
+} from '../utils/algeriaData';
 
 interface CartViewProps {
   cart: CartItem[];
   user: UserProfile | null;
   currentUser: UserProfile | null;
-  userOrders: Order[]; // To check blocking debt rules
+  userOrders: Order[];
   lang: Language;
   promotions?: Promotion[];
   onUpdateQuantity: (productId: string, qty: number) => void;
@@ -43,7 +46,38 @@ export default function CartView({
   const [deliveryOption, setDeliveryOption] = useState<'to_office' | 'to_clinic'>('to_clinic');
   const [scheduledDeliveryDate, setScheduledDeliveryDate] = useState<string>('');
 
+  // ── Guest Checkout Fields ───────────────────────────────────────────────────
+  const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [wilayas, setWilayas] = useState<WilayaOption[]>([]);
+  const [communes, setCommunes] = useState<CommuneOption[]>([]);
+  const [selectedWilaya, setSelectedWilaya] = useState<WilayaOption | null>(null);
+  const [selectedCommune, setSelectedCommune] = useState<CommuneOption | null>(null);
+  const [loadingWilayas, setLoadingWilayas] = useState(false);
+
   const isRtl = lang === 'ar';
+
+  // Load wilayas if user is guest
+  useEffect(() => {
+    if (!user && wilayas.length === 0) {
+      setLoadingWilayas(true);
+      getWilayas()
+        .then(setWilayas)
+        .finally(() => setLoadingWilayas(false));
+    }
+  }, [user, wilayas.length]);
+
+  // When guest changes wilaya -> update communes
+  const handleWilayaChange = async (code: string) => {
+    const w = wilayas.find((item) => item.code === code) ?? null;
+    setSelectedWilaya(w);
+    setSelectedCommune(null);
+    setCommunes([]);
+    if (w) {
+      const list = await getCommunesByWilaya(w.code);
+      setCommunes(list);
+    }
+  };
 
   const formatPrice = (num: number) => {
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
@@ -52,7 +86,6 @@ export default function CartView({
   // --- Calculate Totals & Discounts ---
   const totals = cart.reduce(
     (acc, item) => {
-      // 1. Calculate base product price (or variant price) and apply product discount if exists
       const pDiscount = item.product.discountPercent || 0;
       const unitBasePrice = item.selectedVariant ? item.selectedVariant.price : item.product.price;
       const baseProductTotal = unitBasePrice * item.quantity;
@@ -75,82 +108,101 @@ export default function CartView({
 
   const promoResult = calculatePromotionDiscount(cart, promotions);
   const totalDiscount = totals.productDiscounts + doctorDiscountAmount + promoResult.promotionDiscount;
-  
+
   // --- Delivery cost calculations ---
-  const userWilayaCode = user?.wilayaCode || '';
-  const userCommuneNameAscii = user?.communeNameAscii || '';
-  
-  const hasFreeDelivery = userWilayaCode && userCommuneNameAscii 
-    ? isFreeDelivery(userWilayaCode, userCommuneNameAscii) 
+  const activeWilayaCode = user ? (user.wilayaCode || '') : (selectedWilaya?.code || '');
+  const activeCommuneNameAscii = user ? (user.communeNameAscii || '') : (selectedCommune?.nameAscii || '');
+
+  const hasFreeDelivery = activeWilayaCode && activeCommuneNameAscii
+    ? isFreeDelivery(activeWilayaCode, activeCommuneNameAscii)
     : false;
 
-  const deliveryPricing = userWilayaCode ? getDeliveryPricing(userWilayaCode) : { toOffice: 450, toClinic: 700 };
+  const deliveryPricing = activeWilayaCode ? getDeliveryPricing(activeWilayaCode) : { toOffice: 450, toClinic: 700 };
   const deliveryCost = hasFreeDelivery ? 0 : (deliveryOption === 'to_office' ? deliveryPricing.toOffice : deliveryPricing.toClinic);
 
   const netTotalToPay = totals.grossTotal - totalDiscount + deliveryCost;
 
-  // --- Blocking Rule Check ---
-  // Overdue means: order remaining balance > 0 and current time > order creation + 20 days. Cash on delivery is not counted.
+  // --- Blocking Rule Check for Logged in User ---
   const overdueOrders = userOrders.filter((order) => {
     if (order.remainingBalance <= 0) return false;
-    if (order.paymentMethod === 'cash') return false; // cash on delivery is not on credit
+    if (order.paymentMethod === 'cash') return false;
     const deadline = new Date(order.deadlineDate);
     const today = new Date();
     return today > deadline;
   });
 
-  const isBlockedFromOrdering = overdueOrders.length > 0;
+  const isBlockedFromOrdering = user ? overdueOrders.length > 0 : false;
 
   // Handle Checkout submission
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) {
-      alert(lang === 'fr' ? 'Veuillez vous connecter pour commander.' : 'يرجى تسجيل الدخول للقيام بالطلب.', 'info');
-      setActiveTab('auth');
+
+    if (cart.length === 0) return;
+
+    if (user && user.role !== 'doctor') {
+      alert(lang === 'fr' ? 'Réservé aux أطباء والعملاء فقط.' : 'هذا الحساب غير مخول للطلب.', 'error');
       return;
     }
 
-    if (user.role !== 'doctor') {
-      alert(lang === 'fr' ? 'Réservé aux praticiens uniquement.' : 'هذا الحساب غير مخول للطلب (خاص بالأطباء فقط).', 'error');
-      return;
-    }
-
-    if (isBlockedFromOrdering) {
+    if (user && isBlockedFromOrdering) {
       alert(getTranslation(lang, 'orderBlockedDebt'), 'error');
       return;
     }
 
-    if (cart.length === 0) return;
+    // Validation for Guest Checkout
+    if (!user) {
+      if (!guestName.trim()) {
+        alert(lang === 'fr' ? 'Veuillez saisir votre Nom et Prénom.' : 'يرجى إدخال الإسم واللقب.', 'error');
+        return;
+      }
+      if (!guestPhone.trim()) {
+        alert(lang === 'fr' ? 'Veuillez saisir votre numéro de téléphone.' : 'يرجى إدخال رقم الهاتف.', 'error');
+        return;
+      }
+      if (!selectedWilaya || !selectedCommune) {
+        alert(lang === 'fr' ? 'Veuillez sélectionner la Wilaya et la Commune.' : 'يرجى اختيار الولاية والبلدية والتوصيل.', 'error');
+        return;
+      }
+    }
 
     setLoading(true);
 
     try {
       const orderDate = new Date();
       const deadlineDate = new Date();
-      deadlineDate.setDate(orderDate.getDate() + 20); // 20 days deadline payment
+      deadlineDate.setDate(orderDate.getDate() + 20);
 
       const orderRef = collection(db, 'orders');
 
-      // Create new Order object
+      const userId = user ? user.uid : `guest_${Date.now()}`;
+      const doctorName = user ? user.name : guestName.trim();
+      const doctorClinic = user ? user.clinicName : (notes.trim() || selectedCommune?.nameAr || 'زبون زائر');
+      const doctorPhone = user ? user.phone : guestPhone.trim();
+      const wilayaCode = user ? (user.wilayaCode || '') : (selectedWilaya?.code || '');
+      const wilayaName = user ? (user.wilayaName || '') : (selectedWilaya?.nameAr || '');
+      const communeName = user ? (user.communeName || '') : (selectedCommune?.nameAr || '');
+
       const newOrder: Omit<Order, 'id'> = {
-        userId: user.uid,
-        doctorName: user.name,
-        doctorClinic: user.clinicName,
-        doctorPhone: user.phone,
+        userId,
+        doctorName,
+        doctorClinic,
+        doctorPhone,
         items: cart.map((item) => {
           const unitBasePrice = item.selectedVariant ? item.selectedVariant.price : item.product.price;
           const finalPrice = item.product.discountPercent ? Math.round(unitBasePrice * (1 - item.product.discountPercent / 100)) : unitBasePrice;
-          return {
+          // Build item object — omit undefined fields (Firestore rejects them)
+          const orderItem: any = {
             productId: item.product.id,
             name: item.product.name,
             price: finalPrice,
             quantity: item.quantity,
             category: item.product.category,
             discountPercent: item.product.discountPercent || 0,
-            variantId: item.selectedVariant?.id,
-            variantName: item.selectedVariant?.name,
-            variantAttributes: item.selectedVariant?.attributes,
           };
+          if (item.selectedVariant?.id) orderItem.variantId = item.selectedVariant.id;
+          if (item.selectedVariant?.name) orderItem.variantName = item.selectedVariant.name;
+          if (item.selectedVariant?.attributes) orderItem.variantAttributes = item.selectedVariant.attributes;
+          return orderItem;
         }),
         totalBeforeDiscount: totals.grossTotal,
         discountAmount: totalDiscount,
@@ -162,104 +214,96 @@ export default function CartView({
         createdAt: orderDate.toISOString(),
         deadlineDate: deadlineDate.toISOString(),
         paymentMethod: paymentMethod,
-        commercialName: user.commercialName || 'Directe',
+        commercialName: user?.commercialName || 'Directe',
         notes: notes.trim() || "",
-        processedBy: currentUser?.uid,
-        processedByName: currentUser?.name,
-        scheduledDeliveryDate: scheduledDeliveryDate || undefined,
+        // Optional fields: only include when defined (Firestore rejects undefined)
+        ...(currentUser?.uid ? { processedBy: currentUser.uid } : {}),
+        ...(currentUser?.name ? { processedByName: currentUser.name } : {}),
+        ...(scheduledDeliveryDate ? { scheduledDeliveryDate } : {}),
         // Delivery fields
         deliveryType: hasFreeDelivery ? 'free' : deliveryOption,
         deliveryCost: deliveryCost,
-        doctorWilayaCode: user.wilayaCode || '',
-        doctorWilayaName: user.wilayaName || '',
-        doctorCommuneName: user.communeName || '',
+        doctorWilayaCode: wilayaCode,
+        doctorWilayaName: wilayaName,
+        doctorCommuneName: communeName,
       };
 
-      // 1. Write the order
-      console.log('Creating order with data:', newOrder);
+      console.log('Creating order document:', newOrder);
       const orderDoc = await addDoc(orderRef, newOrder);
-      console.log('Order created with ID:', orderDoc.id);
       if (!orderDoc.id) {
         throw new Error('Failed to create order document');
       }
-      await updateDoc(doc(db, 'orders', orderDoc.id), { id: orderDoc.id });
-      console.log('Order ID updated successfully');
+      await updateDoc(doc(db, 'orders', orderDoc.id), { id: orderDoc.id }).catch(console.error);
 
-      // 2. Decrement inventory stock and increment salesCount inside transaction/batch
-      const batch = writeBatch(db);
-      const lowStockAlertsToCreate: { product: Product; newStock: number }[] = [];
-      cart.forEach((item) => {
-        const prodRef = doc(db, 'products', item.product.id);
-        const newStock = Math.max(0, item.product.stock - item.quantity);
-        const newSalesCount = (item.product.salesCount || 0) + item.quantity;
-        
-        if (item.product.isVariable && item.selectedVariant && item.product.variants) {
-          const updatedVariants = item.product.variants.map((v) =>
-            v.id === item.selectedVariant!.id ? { ...v, stock: Math.max(0, v.stock - item.quantity) } : v
-          );
-          batch.update(prodRef, {
-            stock: newStock,
-            salesCount: newSalesCount,
-            variants: updatedVariants
-          });
-        } else {
-          batch.update(prodRef, { 
-            stock: newStock,
-            salesCount: newSalesCount
-          });
+      // Decrement inventory stock & update salesCount
+      try {
+        const batch = writeBatch(db);
+        const lowStockAlertsToCreate: { product: Product; newStock: number }[] = [];
+        cart.forEach((item) => {
+          const prodRef = doc(db, 'products', item.product.id);
+          const newStock = Math.max(0, item.product.stock - item.quantity);
+          const newSalesCount = (item.product.salesCount || 0) + item.quantity;
+
+          if (item.product.isVariable && item.selectedVariant && item.product.variants) {
+            const updatedVariants = item.product.variants.map((v) =>
+              v.id === item.selectedVariant!.id ? { ...v, stock: Math.max(0, v.stock - item.quantity) } : v
+            );
+            batch.update(prodRef, {
+              stock: newStock,
+              salesCount: newSalesCount,
+              variants: updatedVariants
+            });
+          } else {
+            batch.update(prodRef, {
+              stock: newStock,
+              salesCount: newSalesCount
+            });
+          }
+
+          const threshold = item.product.lowStockAlert ?? 5;
+          if (newStock <= threshold && item.product.stock > threshold) {
+            lowStockAlertsToCreate.push({
+              product: item.product,
+              newStock
+            });
+          }
+        });
+        await batch.commit();
+
+        for (const alertInfo of lowStockAlertsToCreate) {
+          const threshold = alertInfo.product.lowStockAlert ?? 5;
+          await addDoc(collection(db, 'notifications'), {
+            userId: 'admin',
+            titleFr: 'Alerte Stock Bas !',
+            titleAr: 'تنبيـه انخفاض المخزون!',
+            messageFr: `Le produit "${alertInfo.product.name}" est tombé sous son seuil d'alerte. Stock actuel : ${alertInfo.newStock} (Seuil : ${threshold}).`,
+            messageAr: `المنتج "${alertInfo.product.name}" انخفض تحت حد التنبيه. المخزون الحالي: ${alertInfo.newStock} (الحد: ${threshold}).`,
+            type: 'system',
+            isRead: false,
+            createdAt: new Date().toISOString()
+          }).catch(console.error);
         }
+      } catch (stockErr) {
+        console.warn('Inventory update error:', stockErr);
+      }
 
-        const threshold = item.product.lowStockAlert ?? 5;
-        if (newStock <= threshold && item.product.stock > threshold) {
-          lowStockAlertsToCreate.push({
-            product: item.product,
-            newStock
-          });
-        }
-      });
-      await batch.commit();
-
-      // Create low stock notifications for admin
-      for (const alertInfo of lowStockAlertsToCreate) {
-        const threshold = alertInfo.product.lowStockAlert ?? 5;
+      if (user) {
         await addDoc(collection(db, 'notifications'), {
-          userId: 'admin',
-          titleFr: 'Alerte Stock Bas !',
-          titleAr: 'تنبيـه انخفاض المخزون!',
-          messageFr: `Le produit "${alertInfo.product.name}" est tombé sous son seuil d'alerte. Stock actuel : ${alertInfo.newStock} (Seuil : ${threshold}).`,
-          messageAr: `المنتج "${alertInfo.product.name}" انخفض تحت حد التنبيه. المخزون الحالي: ${alertInfo.newStock} (الحد: ${threshold}).`,
-          type: 'system',
+          userId: user.uid,
+          titleFr: 'Commande enregistrée !',
+          titleAr: 'تم تسجيل طلبك!',
+          messageFr: `Votre commande d'un montant net de ${formatPrice(netTotalToPay)} a été reçue.`,
+          messageAr: `تم استلام طلبك بنجاح بقيمة ${formatPrice(netTotalToPay)}.`,
+          type: 'order_update',
           isRead: false,
           createdAt: new Date().toISOString()
-        });
+        }).catch(console.error);
       }
 
-      // 3. Create success in-app notification
-      await addDoc(collection(db, 'notifications'), {
-        userId: user.uid,
-        titleFr: 'Commande enregistrée !',
-        titleAr: 'تم تسجيل طلبك!',
-        messageFr: paymentMethod === 'credit'
-          ? `Votre commande #${orderDoc.id.slice(-6).toUpperCase()} d'un montant net de ${formatPrice(netTotalToPay)} a été reçue. Échéance de paiement : ${deadlineDate.toLocaleDateString('fr-FR')}.`
-          : `Votre commande #${orderDoc.id.slice(-6).toUpperCase()} d'un montant net de ${formatPrice(netTotalToPay)} a été reçue. Mode : Paiement comptant à la livraison.`,
-        messageAr: paymentMethod === 'credit'
-          ? `تم استلام طلبك رقم #${orderDoc.id.slice(-6).toUpperCase()} بقيمة ${formatPrice(netTotalToPay)}. يرجى السداد قبل تاريخ: ${deadlineDate.toLocaleDateString('ar-DZ')}.`
-          : `تم استلام طلبك رقم #${orderDoc.id.slice(-6).toUpperCase()} بقيمة ${formatPrice(netTotalToPay)}. طريقة السداد: دفع فوري عند الاستلام.`,
-        type: 'order_update',
-        isRead: false,
-        createdAt: new Date().toISOString()
-      });
-
-      // Clear layout and reset
       setSuccess(true);
       onClearCart();
-      onCheckoutSuccess();
     } catch (err) {
       console.error('Order creation error:', err);
-      if (err instanceof Error) {
-        console.error('Error message:', err.message);
-        console.error('Error code:', (err as any).code);
-      }
       alert(lang === 'fr' ? 'Erreur lors du passage de commande.' : 'حدث خطأ أثناء إتمام الطلب.', 'error');
     } finally {
       setLoading(false);
@@ -268,27 +312,50 @@ export default function CartView({
 
   if (success) {
     return (
-      <div className="text-center py-16 space-y-6 max-w-md mx-auto" dir={isRtl ? 'rtl' : 'ltr'}>
-        <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto text-emerald-500">
-          <CheckCircle size={44} />
+      <div className="py-12 px-4 flex items-center justify-center min-h-[60vh]" dir={isRtl ? 'rtl' : 'ltr'}>
+        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-8 md:p-10 max-w-lg w-full text-center space-y-6 shadow-2xl relative overflow-hidden">
+          {/* Top Decorative Gradient Overlay */}
+          <div className="absolute -top-16 -left-16 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="absolute -top-16 -right-16 w-32 h-32 bg-brand-cyan/10 rounded-full blur-2xl pointer-events-none" />
+
+          {/* Success Animated Icon Badge */}
+          <div className="relative inline-flex items-center justify-center">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-lg shadow-emerald-500/20">
+              <div className="w-full h-full bg-white dark:bg-slate-900 rounded-full flex items-center justify-center text-emerald-500">
+                <CheckCircle size={52} className="stroke-[2.2]" />
+              </div>
+            </div>
+            <div className="absolute -bottom-1 -right-1 bg-amber-400 text-white p-1.5 rounded-full shadow-md">
+              <Sparkles size={16} />
+            </div>
+          </div>
+
+          {/* Text Content */}
+          <div className="space-y-3">
+            <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+              {lang === 'fr' ? 'Merci pour votre confiance !' : 'شكراً لثقتك بنا'}
+            </h2>
+            <p className="text-base md:text-lg text-slate-600 dark:text-slate-300 font-bold leading-relaxed px-2">
+              {lang === 'fr'
+                ? 'Votre commande a été reçue avec succès et nous la préparons actuellement. Nous avons hâte de vous revoir bientôt !'
+                : 'تم استلام طلبك بنجاح، ونعمل حالياً على تجهيزه. نتطلع لرؤيتك قريباً!'}
+            </p>
+          </div>
+
+          {/* OK Button */}
+          <div className="pt-3">
+            <button
+              onClick={() => {
+                setSuccess(false);
+                onCheckoutSuccess();
+                setActiveTab('browse');
+              }}
+              className="w-full bg-gradient-to-r from-brand-cyan to-teal-600 hover:from-brand-dark hover:to-teal-700 text-white font-black text-base py-4 px-8 rounded-2xl transition-all duration-200 shadow-lg shadow-brand-cyan/25 hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+            >
+              {lang === 'fr' ? "D'accord" : 'حسناً'}
+            </button>
+          </div>
         </div>
-        <div className="space-y-2">
-          <h2 className="text-2xl font-black text-slate-900">{getTranslation(lang, 'orderSuccess')}</h2>
-          <p className="text-sm text-slate-500">
-            {lang === 'fr' 
-              ? 'Votre commande a été transmise à notre équipe pour préparation. Vous recevrez une notification d\'expédition sous peu.'
-              : 'تم استلام طلبكم بنجاح وجارٍ تحضيره. ستتلقون إشعارًا فور شحنه إلى عيادتكم.'}
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            setSuccess(false);
-            setActiveTab('dashboard');
-          }}
-          className="w-full bg-brand-cyan text-white font-extrabold py-3.5 rounded-xl hover:bg-brand-cyan/90 transition-all shadow-xs"
-        >
-          {lang === 'fr' ? 'Consulter mon tableau de bord' : 'الذهاب إلى لوحة التحكم الخاصة بي'}
-        </button>
       </div>
     );
   }
@@ -303,12 +370,12 @@ export default function CartView({
       </div>
 
       {cart.length === 0 ? (
-        <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-4">
+        <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-4 shadow-xs">
           <ShoppingCart className="mx-auto text-slate-300" size={48} />
           <h3 className="font-bold text-slate-700 text-sm md:text-base">{getTranslation(lang, 'emptyCart')}</h3>
           <button
             onClick={() => setActiveTab('browse')}
-            className="bg-brand-cyan text-white font-extrabold text-xs md:text-sm px-6 py-2.5 rounded-xl hover:bg-brand-cyan/90 transition-colors"
+            className="bg-brand-cyan text-white font-extrabold text-xs md:text-sm px-6 py-2.5 rounded-xl hover:bg-brand-cyan/90 transition-colors shadow-xs"
           >
             {lang === 'fr' ? 'Continuer mes achats' : 'تصفح المنتجات الآن'}
           </button>
@@ -395,15 +462,186 @@ export default function CartView({
             </div>
           </div>
 
-          {/* Right Column: Checkout Order Summary info */}
+          {/* Right Column: Checkout Order Summary & Fast Checkout Info */}
           <div className="space-y-6">
             <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
               <h3 className="text-base font-black text-slate-800 border-b border-slate-50 pb-3">
-                {lang === 'fr' ? 'Résumé de la commande' : 'ملخص الطلب والسداد'}
+                {lang === 'fr' ? 'Résumé de la commande' : 'ملخص الطلب والمعلومات'}
               </h3>
 
+              {/* Guest Checkout Fields Form */}
+              {!user && (
+                <div className="space-y-4 bg-slate-50/70 border border-slate-200/80 p-4 rounded-2xl">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                      <User size={15} className="text-brand-cyan" />
+                      {lang === 'fr' ? 'Achat Rapide (Sans compte)' : 'الشراء السريع المباشر (معلومات الزبون)'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('auth')}
+                      className="text-xs font-bold text-brand-cyan hover:text-brand-dark flex items-center gap-1 transition-colors"
+                    >
+                      <LogIn size={13} />
+                      {lang === 'fr' ? 'Se connecter' : 'تسجيل الدخول'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 pt-1">
+                    {/* Name */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                        {lang === 'fr' ? 'Nom et Prénom *' : 'الإسم واللقب *'}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={guestName}
+                        onChange={(e) => setGuestName(e.target.value)}
+                        placeholder={lang === 'fr' ? 'Ex: Mohamed Amine' : 'مثال: محمد الأمين'}
+                        className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-brand-cyan font-medium"
+                      />
+                    </div>
+
+                    {/* Phone */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                        {lang === 'fr' ? 'Numéro de téléphone *' : 'رقم الهاتف *'}
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={guestPhone}
+                        onChange={(e) => setGuestPhone(e.target.value)}
+                        placeholder="07XX XXX XXX"
+                        className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-brand-cyan font-medium"
+                        dir="ltr"
+                      />
+                    </div>
+
+                    {/* Wilaya Dropdown */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                        {lang === 'fr' ? 'Wilaya de livraison *' : 'الولاية *'}
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={selectedWilaya?.code || ''}
+                          onChange={(e) => handleWilayaChange(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs appearance-none focus:outline-none focus:border-brand-cyan font-medium text-slate-800"
+                          disabled={loadingWilayas}
+                        >
+                          <option value="">{lang === 'fr' ? '-- Sélectionner la Wilaya --' : '-- اختر الولاية --'}</option>
+                          {wilayas.map((w) => (
+                            <option key={w.code} value={w.code}>
+                              {w.code} - {isRtl ? w.nameAr : w.nameAscii}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={14} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none rtl:left-auto rtl:right-3" />
+                      </div>
+                    </div>
+
+                    {/* Commune Dropdown */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                        {lang === 'fr' ? 'Commune de livraison *' : 'البلدية *'}
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={selectedCommune?.id || ''}
+                          onChange={(e) => {
+                            const c = communes.find((item) => String(item.id) === e.target.value) ?? null;
+                            setSelectedCommune(c);
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs appearance-none focus:outline-none focus:border-brand-cyan font-medium text-slate-800"
+                          disabled={!selectedWilaya || communes.length === 0}
+                        >
+                          <option value="">{lang === 'fr' ? '-- Sélectionner la Commune --' : '-- اختر البلدية --'}</option>
+                          {communes.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {isRtl ? c.nameAr : c.nameAscii}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={14} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none rtl:left-auto rtl:right-3" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Delivery Option Selection */}
+              {(!user || (user && !isBlockedFromOrdering)) && (
+                <div className="space-y-3 border-t border-slate-100 pt-4">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest block">
+                    {lang === 'fr' ? 'Option de livraison' : 'مكان التوصيل للشحن'}
+                  </label>
+                  {hasFreeDelivery ? (
+                    <div className="flex items-start gap-2.5 bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs font-semibold p-3.5 rounded-xl">
+                      <Truck size={16} className="shrink-0 mt-0.5" />
+                      <span>
+                        {lang === 'fr'
+                          ? 'Félicitations ! La livraison est gratuite pour la commune de Djelfa.'
+                          : 'تهانينا! التوصيل مجاني بالكامل لبلدية الجلفة.'}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryOption('to_office')}
+                        className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all ${
+                          deliveryOption === 'to_office'
+                            ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark'
+                            : 'border-slate-200 bg-white text-slate-650 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="w-4 h-4 rounded-full border border-slate-350 flex items-center justify-center mt-1 shrink-0">
+                          {deliveryOption === 'to_office' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
+                        </div>
+                        <div className="text-xs space-y-0.5">
+                          <p className="font-extrabold text-slate-800">
+                            {lang === 'fr' ? 'Livraison au المكتب (Bureau)' : 'التوصيل إلى المكتب (Stop Desk)'}
+                          </p>
+                          <p className="text-slate-400">
+                            {lang === 'fr'
+                              ? `Récupération au مكتب de livraison. Tarif : ${formatPrice(deliveryPricing.toOffice)}`
+                              : `استلام الطرد من مكتب التوصيل. السعر: ${formatPrice(deliveryPricing.toOffice)}`}
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryOption('to_clinic')}
+                        className={`w-full p-3 rounded-2xl border text-left flex items-start gap-3 transition-all ${
+                          deliveryOption === 'to_clinic'
+                            ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark'
+                            : 'border-slate-200 bg-white text-slate-650 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="w-4 h-4 rounded-full border border-slate-350 flex items-center justify-center mt-1 shrink-0">
+                          {deliveryOption === 'to_clinic' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
+                        </div>
+                        <div className="text-xs space-y-0.5">
+                          <p className="font-extrabold text-slate-800">
+                            {lang === 'fr' ? 'Livraison au المكان الذي يريده (Domicile/Clinique)' : 'التوصيل للمنزل أو المكان الذي يحدده الزبون'}
+                          </p>
+                          <p className="text-slate-400">
+                            {lang === 'fr'
+                              ? `Livraison directe à votre adresse. Tarif : ${formatPrice(deliveryPricing.toClinic)}`
+                              : `توصيل مباشر إلى المكان والعنوان المحدد. السعر: ${formatPrice(deliveryPricing.toClinic)}`}
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Pricing breakdown */}
-              <div className="space-y-3.5 text-sm font-medium text-slate-600">
+              <div className="space-y-3.5 text-sm font-medium text-slate-600 border-t border-slate-100 pt-4">
                 <div className="flex justify-between">
                   <span>{lang === 'fr' ? 'Sous-total brut' : 'المجموع الإجمالي'}</span>
                   <span className="text-slate-800 font-bold">{formatPrice(totals.grossTotal)}</span>
@@ -444,13 +682,11 @@ export default function CartView({
                   )
                 )}
 
-                <div className="flex justify-between text-base font-black text-slate-800 border-t border-slate-50 pt-3.5">
+                <div className="flex justify-between text-base font-black text-slate-800 border-t border-slate-100 pt-3.5">
                   <span>
-                    {paymentMethod === 'credit'
-                      ? (lang === 'fr' ? 'Net à payer (Dette / Crédit)' : 'الصافي (قيمة الدين)')
-                      : (lang === 'fr' ? 'Net à payer (Comptant)' : 'الصافي (الدفع نقداً)')}
+                    {lang === 'fr' ? 'Net à payer (Comptant)' : 'الصافي الواجب دفعه'}
                   </span>
-                  <span>{formatPrice(netTotalToPay)}</span>
+                  <span className="text-brand-dark">{formatPrice(netTotalToPay)}</span>
                 </div>
               </div>
 
@@ -462,138 +698,26 @@ export default function CartView({
                 </div>
               )}
 
-              {/* Delivery Option Selection */}
-              {user && !isBlockedFromOrdering && (
-                <div className="space-y-3 border-t border-slate-100 pt-4">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest block">
-                    {lang === 'fr' ? 'Option de livraison' : 'خيارات التوصيل والشحن'}
-                  </label>
-                  {hasFreeDelivery ? (
-                    <div className="flex items-start gap-2.5 bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs font-semibold p-3.5 rounded-xl">
-                      <Truck size={16} className="shrink-0 mt-0.5" />
-                      <span>
-                        {lang === 'fr'
-                          ? 'Félicitations ! La livraison est gratuite pour la commune de Djelfa.'
-                          : 'تهانينا! التوصيل مجاني بالكامل لبلدية الجلفة.'}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryOption('to_office')}
-                        className={`w-full p-3.5 rounded-2xl border text-left flex items-start gap-3 transition-all ${
-                          deliveryOption === 'to_office'
-                            ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark'
-                            : 'border-slate-200 bg-white text-slate-650 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="w-4 h-4 rounded-full border border-slate-350 flex items-center justify-center mt-1 shrink-0">
-                          {deliveryOption === 'to_office' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
-                        </div>
-                        <div className="text-xs space-y-0.5">
-                          <p className="font-extrabold text-slate-800">
-                            {lang === 'fr' ? 'Livraison vers Bureau de livraison' : 'شحن إلى مكتب التوصيل'}
-                          </p>
-                          <p className="text-slate-400">
-                            {lang === 'fr'
-                              ? `Récupérez votre colis au bureau. Tarif : ${formatPrice(deliveryPricing.toOffice)}`
-                              : `استلام الطرد من مكتب شركة الشحن. السعر: ${formatPrice(deliveryPricing.toOffice)}`}
-                          </p>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryOption('to_clinic')}
-                        className={`w-full p-3.5 rounded-2xl border text-left flex items-start gap-3 transition-all ${
-                          deliveryOption === 'to_clinic'
-                            ? 'border-brand-cyan bg-brand-cyan/5 text-brand-dark'
-                            : 'border-slate-200 bg-white text-slate-650 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="w-4 h-4 rounded-full border border-slate-350 flex items-center justify-center mt-1 shrink-0">
-                          {deliveryOption === 'to_clinic' && <div className="w-2 h-2 rounded-full bg-brand-cyan" />}
-                        </div>
-                        <div className="text-xs space-y-0.5">
-                          <p className="font-extrabold text-slate-800">
-                            {lang === 'fr' ? 'Livraison à la Clinique / Cabinet' : 'توصيل مباشر إلى العيادة'}
-                          </p>
-                          <p className="text-slate-400">
-                            {lang === 'fr'
-                              ? `Livraison à domicile à votre adresse. Tarif : ${formatPrice(deliveryPricing.toClinic)}`
-                              : `توصيل الطرد مباشرة إلى مقر عيادتك. السعر: ${formatPrice(deliveryPricing.toClinic)}`}
-                          </p>
-                        </div>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Payment Method Info (Cash on Delivery Only) */}
-              <div className="space-y-3 border-t border-slate-100 pt-4">
-                <label className="text-xs font-black text-slate-400 uppercase tracking-widest block">
-                  {lang === 'fr' ? 'Mode de paiement' : 'طريقة الدفع والسداد'}
-                </label>
-                <div className="p-3.5 rounded-2xl border border-brand-cyan bg-brand-cyan/5 text-brand-dark dark:bg-brand-cyan/10 flex items-start gap-3">
-                  <div className="w-4 h-4 rounded-full border border-brand-cyan flex items-center justify-center mt-1 shrink-0">
-                    <div className="w-2 h-2 rounded-full bg-brand-cyan" />
-                  </div>
-                  <div className="text-xs space-y-0.5">
-                    <p className="font-extrabold text-slate-800 dark:text-slate-200">
-                      {lang === 'fr' ? 'Paiement au Comptant à la Livraison' : 'الدفع عند الاستلام نقداً'}
-                    </p>
-                    <p className="text-slate-400">
-                      {lang === 'fr'
-                        ? 'Règlement en espèces au livreur à la réception.'
-                        : 'الدفع المباشر نقداً للمندوب فور استلام الطلب.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
               {/* Delivery Notes */}
-              {user && !isBlockedFromOrdering && (
+              {(!user || (user && !isBlockedFromOrdering)) && (
                 <div className="space-y-1">
                   <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'notes')}</label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder={lang === 'fr' ? 'Indiquez des détails pour le livreur...' : 'أي تفاصيل خاصة بالتوصيل...'}
-                    className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs focus:outline-hidden focus:border-brand-cyan"
+                    placeholder={lang === 'fr' ? 'Indiquez des détails pour le livreur (ex: adresse exacte)...' : 'العنوان التفصيلي أو أية ملاحظات للتوصيل...'}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs focus:outline-none focus:border-brand-cyan"
                     rows={2}
                   />
-                </div>
-              )}
-
-              {/* Scheduled Delivery Date */}
-              {user && !isBlockedFromOrdering && (
-                <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs">
-                    {lang === 'fr' ? 'Date de livraison souhaitée (optionnel)' : 'تاريخ التسليم المطلوب (اختياري)'}
-                  </label>
-                  <input
-                    type="date"
-                    value={scheduledDeliveryDate}
-                    onChange={(e) => setScheduledDeliveryDate(e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
-                    className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs focus:outline-hidden focus:border-brand-cyan"
-                  />
-                  <p className="text-[10px] text-slate-400">
-                    {lang === 'fr' 
-                      ? 'Laissez vide pour livraison normale' 
-                      : 'اتركه فارغاً للتسليم العادي'}
-                  </p>
                 </div>
               )}
 
               {/* Place Order checkout Button */}
               <button
                 onClick={handleCheckout}
-                disabled={loading || isBlockedFromOrdering}
-                className={`w-full font-bold text-sm py-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs ${
-                  isBlockedFromOrdering
+                disabled={loading || (user ? isBlockedFromOrdering : false)}
+                className={`w-full font-extrabold text-sm py-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs ${
+                  user && isBlockedFromOrdering
                     ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                     : 'bg-brand-cyan text-white hover:bg-brand-cyan/90'
                 }`}

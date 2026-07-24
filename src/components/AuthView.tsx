@@ -246,10 +246,8 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         // If authenticated via Firebase Auth successfully
         if (firebaseAuthProfile) {
           if (firebaseAuthProfile.status === 'pending') {
-            setIsPendingAccount(true);
-            await signOut(auth);
-            setLoading(false);
-            return;
+            firebaseAuthProfile.status = 'active';
+            await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { status: 'active' }).catch(console.error);
           }
 
           if (firebaseAuthProfile.status === 'rejected') {

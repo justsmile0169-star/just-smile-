@@ -262,8 +262,8 @@ export default function App() {
       });
 
       return () => unsubscribe();
-    } else if (isDoctor) {
-      // Doctors: Load products for category counts and display
+    } else {
+      // Non-staff (doctors, visitors & guest buyers): Load products for catalog display and cart
       const q = query(collection(db, 'products'), where('isDeleted', '==', false));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const items: Product[] = [];
@@ -273,20 +273,18 @@ export default function App() {
         });
         setProducts(items);
       }, (err) => {
-        console.error("Error syncing products for doctor:", err);
+        console.error("Error syncing products catalog for guest/doctor:", err);
       });
 
       return () => unsubscribe();
-    } else {
-      setProducts([]);
     }
   }, [currentUser]);
 
   // --- 4.1 Calculate product counts by category from loaded products ---
   useEffect(() => {
-    if (!currentUser || products.length === 0) return;
+    if (products.length === 0) return;
 
-    // Calculate counts from the loaded products array (works for both staff and doctors)
+    // Calculate counts from the loaded products array (works for staff, doctors, and guests)
     const counts: Record<string, number> = {
       all: products.length,
       'Équipements': products.filter(p => p.category === 'Équipements').length,
@@ -297,7 +295,7 @@ export default function App() {
       'Prothèse dentaire': products.filter(p => p.category === 'Prothèse dentaire').length
     };
     setCategoryCounts(counts);
-  }, [products, currentUser]);
+  }, [products]);
 
   // Sync favorites details from Firestore
   useEffect(() => {
@@ -961,7 +959,7 @@ export default function App() {
                   onUpdateQuantity={handleUpdateQuantity}
                   onRemoveItem={handleRemoveItem}
                   onClearCart={handleClearCart}
-                  onCheckoutSuccess={() => setActiveTab('dashboard')}
+                  onCheckoutSuccess={() => setActiveTab('browse')}
                   setActiveTab={setActiveTab}
                 />
               )}

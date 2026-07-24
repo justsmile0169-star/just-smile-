@@ -3,6 +3,104 @@ import { Product, ProductVariant } from '../types';
 import { Language, getTranslation } from '../translations';
 import { X, Award, AlertCircle, ShoppingCart, Check } from 'lucide-react';
 
+// ── Color Shade Mapping Utility ──────────────────────────────────────────────
+const COLOR_MAP: Record<string, { bg: string; border?: string; darkCheck?: boolean }> = {
+  // Dental Tooth Shades
+  'A1': { bg: '#F7F4E9', border: '#E2DEC9', darkCheck: true },
+  'A2': { bg: '#F3ECBE', border: '#DED5A1', darkCheck: true },
+  'A3': { bg: '#E9DD9C', border: '#D5C782', darkCheck: true },
+  'A3.5': { bg: '#E2CE82', border: '#CBB467', darkCheck: true },
+  'A4': { bg: '#DABE6D', border: '#C2A350', darkCheck: true },
+  'B1': { bg: '#FAF8F0', border: '#E7E4D6', darkCheck: true },
+  'B2': { bg: '#F1E6BD', border: '#D9CB9B', darkCheck: true },
+  'B3': { bg: '#E7D59A', border: '#CDBA7C', darkCheck: true },
+  'C1': { bg: '#E7E4D5', border: '#D0CDBB', darkCheck: true },
+  'C2': { bg: '#DACFB5', border: '#C3B69B', darkCheck: true },
+  'C3': { bg: '#C9BB9A', border: '#B1A280', darkCheck: true },
+  'D2': { bg: '#ECE3CE', border: '#D3C9B0', darkCheck: true },
+  'D3': { bg: '#DFD1AF', border: '#C6B793', darkCheck: true },
+  'BL': { bg: '#FFFFFF', border: '#CBD5E1', darkCheck: true },
+  'BLEACH': { bg: '#FFFFFF', border: '#CBD5E1', darkCheck: true },
+
+  // Standard Colors (Arabic, French, English)
+  'RED': { bg: '#EF4444' },
+  'ROUGE': { bg: '#EF4444' },
+  'أحمر': { bg: '#EF4444' },
+
+  'BLUE': { bg: '#3B82F6' },
+  'BLEU': { bg: '#3B82F6' },
+  'أزرق': { bg: '#3B82F6' },
+
+  'GREEN': { bg: '#10B981' },
+  'VERT': { bg: '#10B981' },
+  'أخضر': { bg: '#10B981' },
+
+  'YELLOW': { bg: '#F59E0B' },
+  'JAUNE': { bg: '#F59E0B' },
+  'أصفر': { bg: '#F59E0B' },
+
+  'PINK': { bg: '#EC4899' },
+  'ROSE': { bg: '#EC4899' },
+  'وردي': { bg: '#EC4899' },
+
+  'PURPLE': { bg: '#8B5CF6' },
+  'VIOLET': { bg: '#8B5CF6' },
+  'بنفسجي': { bg: '#8B5CF6' },
+
+  'BLACK': { bg: '#0F172A' },
+  'NOIR': { bg: '#0F172A' },
+  'أسود': { bg: '#0F172A' },
+
+  'WHITE': { bg: '#FFFFFF', border: '#CBD5E1', darkCheck: true },
+  'BLANC': { bg: '#FFFFFF', border: '#CBD5E1', darkCheck: true },
+  'أبيض': { bg: '#FFFFFF', border: '#CBD5E1', darkCheck: true },
+
+  'GREY': { bg: '#64748B' },
+  'GRAY': { bg: '#64748B' },
+  'GRIS': { bg: '#64748B' },
+  'رمادي': { bg: '#64748B' },
+
+  'ORANGE': { bg: '#F97316' },
+  'برتقالي': { bg: '#F97316' },
+
+  'GOLD': { bg: '#EAB308', border: '#CA8A04' },
+  'OR': { bg: '#EAB308', border: '#CA8A04' },
+  'ذهبي': { bg: '#EAB308', border: '#CA8A04' },
+
+  'SILVER': { bg: '#CBD5E1', border: '#94A3B8', darkCheck: true },
+  'ARGENT': { bg: '#CBD5E1', border: '#94A3B8', darkCheck: true },
+  'فضي': { bg: '#CBD5E1', border: '#94A3B8', darkCheck: true },
+
+  'BROWN': { bg: '#78350F' },
+  'MARRON': { bg: '#78350F' },
+  'بني': { bg: '#78350F' },
+};
+
+function isColorAttribute(attrName: string, options: string[]) {
+  const name = attrName.toLowerCase();
+  if (
+    name.includes('لون') ||
+    name.includes('ألوان') ||
+    name.includes('color') ||
+    name.includes('couleur') ||
+    name.includes('teinte') ||
+    name.includes('shade')
+  ) {
+    return true;
+  }
+  const matches = options.filter((opt) => COLOR_MAP[opt.trim().toUpperCase()]);
+  return matches.length > 0 && matches.length >= Math.ceil(options.length / 2);
+}
+
+function getColorInfo(optionName: string) {
+  const key = optionName.trim().toUpperCase();
+  if (COLOR_MAP[key]) return COLOR_MAP[key];
+  if (optionName.startsWith('#') && (optionName.length === 4 || optionName.length === 7)) {
+    return { bg: optionName, darkCheck: optionName.toUpperCase() === '#FFFFFF' };
+  }
+  return { bg: '#CBD5E1', border: '#94A3B8', darkCheck: true };
+}
+
 interface ProductDetailModalProps {
   product: Product;
   lang: Language;
@@ -52,7 +150,6 @@ export default function ProductDetailModal({
       if (matched) {
         setSelectedVariant(matched);
       } else {
-        // Fallback: match by variant ID or first variant with that attribute value
         const partialMatch = product.variants.find((v) => v.attributes?.[attrName] === optionValue);
         setSelectedVariant(partialMatch || product.variants[0]);
       }
@@ -173,34 +270,77 @@ export default function ProductDetailModal({
                 <span>{lang === 'fr' ? 'Sélectionnez les options' : 'اختر خصائص المنتج المطلوبة'}</span>
               </h3>
 
-              <div className="space-y-3">
-                {product.attributes.map((attr) => (
-                  <div key={attr.name} className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700 block">
-                      {attr.name} :
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {attr.options.map((option) => {
-                        const isSelected = selectedAttributes[attr.name] === option;
-                        return (
-                          <button
-                            key={option}
-                            type="button"
-                            onClick={() => handleSelectAttribute(attr.name, option)}
-                            className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all border flex items-center gap-1.5 ${
-                              isSelected
-                                ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                                : 'bg-white text-slate-700 border-slate-200 hover:border-purple-300 hover:bg-purple-50'
-                            }`}
-                          >
-                            {isSelected && <Check size={14} />}
-                            <span>{option}</span>
-                          </button>
-                        );
-                      })}
+              <div className="space-y-4">
+                {product.attributes.map((attr) => {
+                  const isColor = isColorAttribute(attr.name, attr.options);
+                  return (
+                    <div key={attr.name} className="space-y-2">
+                      <label className="text-xs font-bold text-slate-700 block">
+                        {attr.name} : <span className="text-purple-700 font-black">{selectedAttributes[attr.name] || ''}</span>
+                      </label>
+                      {isColor ? (
+                        <div className="flex flex-wrap items-center gap-3 py-1">
+                          {attr.options.map((option) => {
+                            const isSelected = selectedAttributes[attr.name] === option;
+                            const colorInfo = getColorInfo(option);
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => handleSelectAttribute(attr.name, option)}
+                                title={option}
+                                className="group relative flex flex-col items-center gap-1 transition-all focus:outline-none cursor-pointer"
+                              >
+                                <div
+                                  className={`w-9 h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center transition-all shadow-sm ${
+                                    isSelected
+                                      ? 'ring-3 ring-purple-600 ring-offset-2 scale-110 shadow-md'
+                                      : 'hover:scale-105 opacity-85 hover:opacity-100'
+                                  }`}
+                                  style={{
+                                    backgroundColor: colorInfo.bg,
+                                    border: colorInfo.border ? `1.5px solid ${colorInfo.border}` : '1.5px solid rgba(0,0,0,0.12)'
+                                  }}
+                                >
+                                  {isSelected && (
+                                    <Check
+                                      size={16}
+                                      className={colorInfo.darkCheck ? 'text-slate-900 stroke-[3]' : 'text-white stroke-[3]'}
+                                    />
+                                  )}
+                                </div>
+                                <span className={`text-[11px] tracking-tight ${isSelected ? 'text-purple-800 font-black' : 'text-slate-600 font-semibold'}`}>
+                                  {option}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {attr.options.map((option) => {
+                            const isSelected = selectedAttributes[attr.name] === option;
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => handleSelectAttribute(attr.name, option)}
+                                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:border-purple-300 hover:bg-purple-50'
+                                }`}
+                              >
+                                {isSelected && <Check size={14} />}
+                                <span>{option}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Direct Variants List fallback selector if attributes are simple */}
@@ -220,16 +360,25 @@ export default function ProductDetailModal({
                           type="button"
                           onClick={() => {
                             setSelectedVariant(v);
-                            if (v.attributes) setSelectedAttributes(v.attributes);
+                            if (v.attributes) {
+                              setSelectedAttributes(v.attributes);
+                            }
                           }}
-                          className={`p-2.5 rounded-xl text-xs text-right border flex items-center justify-between transition-all ${
+                          className={`p-2.5 rounded-xl text-xs font-bold text-left border flex items-center justify-between transition-all cursor-pointer ${
                             isVSelected
-                              ? 'bg-purple-600 text-white border-purple-600 font-bold shadow-xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:border-purple-300'
+                              ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                              : 'bg-white text-slate-800 border-slate-200 hover:border-purple-300'
                           }`}
                         >
                           <span className="truncate max-w-[140px]">{v.name}</span>
-                          <span className="font-black">{formatPrice(vFinalPrice)}</span>
+                          <div className="flex items-center gap-1 text-[11px] shrink-0">
+                            <span>{formatPrice(vFinalPrice)}</span>
+                            {v.stock <= 0 && (
+                              <span className="text-[9px] bg-red-100 text-red-600 px-1 rounded font-bold">
+                                {lang === 'fr' ? 'Épuisé' : 'نفد'}
+                              </span>
+                            )}
+                          </div>
                         </button>
                       );
                     })}
@@ -239,50 +388,46 @@ export default function ProductDetailModal({
             </div>
           )}
 
-          {/* Description */}
-          <div className="space-y-2">
-            <h3 className="font-bold text-slate-800 text-sm md:text-base">
-              {lang === 'fr' ? 'Description' : 'الوصف'}
-            </h3>
-            <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">
-              {product.description || (lang === 'fr' ? 'Aucune description disponible.' : 'لا يوجد وصف متاح لهذا المنتج.')}
-            </p>
-          </div>
+          {/* Technical Sheet / Description */}
+          {product.description && (
+            <div className="space-y-2">
+              <h3 className="font-extrabold text-slate-900 text-sm">{getTranslation(lang, 'description')}</h3>
+              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100 whitespace-pre-line">
+                {product.description}
+              </p>
+            </div>
+          )}
 
-          {/* Technical sheet */}
           {product.technicalSheet && (
-            <div className="space-y-2 pt-4 border-t border-slate-100">
-              <h3 className="font-bold text-slate-800 text-sm md:text-base flex items-center gap-1.5">
-                <AlertCircle size={16} className="text-brand-cyan" />
-                {getTranslation(lang, 'technicalSheet')}
-              </h3>
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 text-xs md:text-sm text-slate-600 font-medium space-y-1">
-                {product.technicalSheet.split(';').map((spec, index) => (
-                  <div key={index} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
-                    <span>{spec.split(':')[0]}</span>
-                    <span className="font-bold text-slate-800">{spec.split(':')[1] || ''}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="space-y-2">
+              <h3 className="font-extrabold text-slate-900 text-sm">{getTranslation(lang, 'technicalSheet')}</h3>
+              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100 whitespace-pre-line">
+                {product.technicalSheet}
+              </p>
             </div>
           )}
         </div>
 
-        {/* Footer actions */}
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+        {/* Modal Footer / Add to Cart Action */}
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-4">
+          <div className="flex flex-col">
+            <span className="text-xs text-slate-400 font-semibold">{lang === 'fr' ? 'Prix total' : 'السعر النهائي'}</span>
+            <span className="text-xl font-black text-brand-dark">{formatPrice(finalPrice)}</span>
+          </div>
+
           <button
             onClick={() => {
               onAddToCart(product, selectedVariant || undefined);
               onClose();
             }}
             disabled={isOutOfStock}
-            className={`w-full md:w-auto font-bold text-sm px-6 py-3 rounded-xl flex items-center justify-center gap-2 transition-all ${
+            className={`px-6 py-3 rounded-2xl font-black text-sm flex items-center gap-2 transition-all cursor-pointer ${
               isOutOfStock
                 ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                : 'bg-brand-cyan text-white hover:bg-brand-cyan/90 shadow-xs'
+                : 'bg-brand-cyan text-white hover:bg-brand-cyan/90 shadow-md shadow-brand-cyan/20'
             }`}
           >
-            <ShoppingCart size={16} />
+            <ShoppingCart size={18} />
             {getTranslation(lang, 'addToCart')}
           </button>
         </div>
