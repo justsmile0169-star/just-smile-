@@ -12,6 +12,7 @@ interface ProductCardProps {
   onToggleFavorite: (product: Product) => void;
   onViewDetails: (product: Product) => void;
   user: UserProfile | null;
+  imageHeight?: string;
 }
 
 export default function ProductCard({
@@ -21,7 +22,8 @@ export default function ProductCard({
   isFavorite,
   onToggleFavorite,
   onViewDetails,
-  user
+  user,
+  imageHeight
 }: ProductCardProps): React.ReactElement {
   const isRtl = lang === 'ar';
   
@@ -89,7 +91,7 @@ export default function ProductCard({
       {/* Product Image */}
       <div
         onClick={() => onViewDetails(product)}
-        className="w-full h-24 sm:h-36 md:h-48 bg-slate-50 dark:bg-slate-800/50 relative flex items-center justify-center overflow-hidden cursor-pointer shrink-0"
+        className={`w-full ${imageHeight || 'h-24 sm:h-36 md:h-48'} bg-slate-50 dark:bg-slate-800/50 relative flex items-center justify-center overflow-hidden cursor-pointer shrink-0`}
       >
         <img
           src={product.image && String(product.image) !== '0' ? product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
