@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -35,20 +35,18 @@ const C = {
 
 export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClose }: InvoicePrintViewProps) {
   const [showPrintConfirm, setShowPrintConfirm] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState('');
   const [printMode, setPrintMode] = useState<'a4' | 'thermal'>('a4');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-  useEffect(() => {
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+  const qrThermalCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  const renderQrToCanvas = (canvas: HTMLCanvasElement, size: number) => {
     const orderIdParam = order.id || '';
     const verificationUrl = `${window.location.origin}/?verifyOrder=${encodeURIComponent(orderIdParam)}`;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 280;
-    canvas.height = 280;
-
     QRCode.toCanvas(canvas, verificationUrl, {
-      width: 280,
+      width: size,
       margin: 1,
       color: {
         dark: '#1A3A5C', // Brand Navy
@@ -57,62 +55,65 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
       errorCorrectionLevel: 'H'
     }).then(() => {
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        // Draw central branded logo badge
-        const center = 140;
-        const badgeSize = 64;
-        const radius = 14;
+      if (!ctx) return;
 
-        ctx.save();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.shadowColor = 'rgba(26, 58, 92, 0.25)';
-        ctx.shadowBlur = 6;
-        ctx.beginPath();
-        if (typeof ctx.roundRect === 'function') {
-          ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
-        } else {
-          ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
-        }
-        ctx.fill();
-        ctx.restore();
+      const center = size / 2;
+      const badgeSize = Math.round(size * 0.23);
+      const radius = Math.round(badgeSize * 0.22);
 
-        ctx.strokeStyle = '#2563A8';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        if (typeof ctx.roundRect === 'function') {
-          ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
-        } else {
-          ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
-        }
-        ctx.stroke();
-
-        // Vector Branding - Pure untainted canvas rendering
-        ctx.fillStyle = '#1A3A5C';
-        ctx.font = '900 10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('JUST', center, center - 9);
-
-        ctx.fillStyle = '#B8963E';
-        ctx.font = '900 11px sans-serif';
-        ctx.fillText('SMILE', center, center + 7);
-
-        // Smile arc
-        ctx.strokeStyle = '#2563A8';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(center, center + 13, 10, 0.25 * Math.PI, 0.75 * Math.PI);
-        ctx.stroke();
+      ctx.save();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.shadowColor = 'rgba(26, 58, 92, 0.25)';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
+      } else {
+        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
       }
+      ctx.fill();
+      ctx.restore();
 
-      setQrDataUrl(canvas.toDataURL('image/png'));
+      ctx.strokeStyle = '#2563A8';
+      ctx.lineWidth = Math.max(1.5, size * 0.009);
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
+      } else {
+        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
+      }
+      ctx.stroke();
+
+      // Vector Branding
+      ctx.fillStyle = '#1A3A5C';
+      ctx.font = `900 ${Math.round(size * 0.036)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('JUST', center, center - Math.round(size * 0.032));
+
+      ctx.fillStyle = '#B8963E';
+      ctx.font = `900 ${Math.round(size * 0.039)}px sans-serif`;
+      ctx.fillText('SMILE', center, center + Math.round(size * 0.025));
+
+      // Smile arc
+      ctx.strokeStyle = '#2563A8';
+      ctx.lineWidth = Math.max(1.5, size * 0.007);
+      ctx.beginPath();
+      ctx.arc(center, center + Math.round(size * 0.046), Math.round(size * 0.036), 0.25 * Math.PI, 0.75 * Math.PI);
+      ctx.stroke();
     }).catch((err) => {
-      console.error('Error generating branded QR Canvas:', err);
-      QRCode.toDataURL(verificationUrl, { width: 140, margin: 1 })
-        .then(setQrDataUrl)
-        .catch(console.error);
+      console.error('Error drawing QR Canvas:', err);
     });
-  }, [order.id]);
+  };
+
+  useEffect(() => {
+    if (qrCanvasRef.current) {
+      renderQrToCanvas(qrCanvasRef.current, 280);
+    }
+    if (qrThermalCanvasRef.current) {
+      renderQrToCanvas(qrThermalCanvasRef.current, 200);
+    }
+  }, [order.id, printMode]);
 
   useEffect(() => {
     document.body.classList.remove('print-mode-a4', 'print-mode-thermal');
@@ -153,20 +154,15 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
         executePrint();
         return;
       }
+      if (qrCanvasRef.current) {
+        renderQrToCanvas(qrCanvasRef.current, 280);
+      }
       const canvas = await html2canvas(el, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         logging: false,
-        backgroundColor: '#FFFFFF',
-        onclone: (_clonedDoc, clonedEl) => {
-          const qrImg = clonedEl.querySelector('img[alt="QR Verification"]') as HTMLImageElement;
-          if (qrImg && qrDataUrl) {
-            qrImg.src = qrDataUrl;
-            qrImg.style.display = 'block';
-            qrImg.style.visibility = 'visible';
-          }
-        }
+        backgroundColor: '#FFFFFF'
       });
       const imgData = canvas.toDataURL('image/jpeg', 0.98);
       const pdf = new jsPDF('p', 'mm', 'a4');
@@ -301,23 +297,28 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                   <span><b style={{ color: C.gray }}>NIS</b> {shopInfo.nis}</span>
                 </div>
               </div>
-              {qrDataUrl && (
-                <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                  <div style={{
-                    padding: '3px',
-                    background: 'white',
-                    borderRadius: '10px',
-                    border: `1.5px solid ${C.border}`,
-                    boxShadow: '0 2px 8px rgba(26,58,92,0.08)',
-                    display: 'inline-block'
-                  }}>
-                    <img src={qrDataUrl} alt="QR Verification" style={{ width: '82px', height: '82px', display: 'block', borderRadius: '6px' }} />
-                  </div>
-                  <div style={{ fontSize: '5.5pt', color: C.navy, fontWeight: 700, marginTop: '3px', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
-                    Scan to Verify 🛡️
-                  </div>
+
+              {/* Directly embedded Canvas QR code for 100% html2canvas rendering */}
+              <div style={{ textAlign: 'center', flexShrink: 0 }}>
+                <div style={{
+                  padding: '3px',
+                  background: 'white',
+                  borderRadius: '10px',
+                  border: `1.5px solid ${C.border}`,
+                  boxShadow: '0 2px 8px rgba(26,58,92,0.08)',
+                  display: 'inline-block'
+                }}>
+                  <canvas
+                    ref={qrCanvasRef}
+                    width={280}
+                    height={280}
+                    style={{ width: '82px', height: '82px', display: 'block', borderRadius: '6px' }}
+                  />
                 </div>
-              )}
+                <div style={{ fontSize: '5.5pt', color: C.navy, fontWeight: 700, marginTop: '3px', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                  Scan to Verify 🛡️
+                </div>
+              </div>
             </div>
 
             {/* ── DOCUMENT TITLE (centered) ── */}
@@ -687,12 +688,16 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
               )}
             </div>
 
-            {qrDataUrl && (
-              <div style={{ textAlign: 'center', marginTop: '12px', paddingTop: '8px', borderTop: '1px dashed #aaa' }}>
-                <img src={qrDataUrl} alt="QR Verification" style={{ width: '76px', height: '76px', margin: '0 auto', display: 'block' }} />
-                <div style={{ fontSize: '6pt', marginTop: '3px', fontWeight: 'bold', color: C.navy }}>SCAN TO VERIFY 🛡️</div>
-              </div>
-            )}
+            <div style={{ textAlign: 'center', marginTop: '12px', paddingTop: '8px', borderTop: '1px dashed #aaa' }}>
+              <canvas
+                ref={qrThermalCanvasRef}
+                width={200}
+                height={200}
+                style={{ width: '76px', height: '76px', margin: '0 auto', display: 'block', borderRadius: '6px' }}
+              />
+              <div style={{ fontSize: '6pt', marginTop: '3px', fontWeight: 'bold', color: C.navy }}>SCAN TO VERIFY 🛡️</div>
+            </div>
+
             <div style={{ textAlign: 'center', fontSize: '6.5pt', marginTop: '8px', color: '#666' }}>
               Merci pour votre confiance !<br />www.justsmile.dz
             </div>
