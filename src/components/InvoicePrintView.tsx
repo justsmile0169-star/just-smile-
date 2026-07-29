@@ -49,14 +49,79 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
   const [qrDataUrl, setQrDataUrl] = useState('');
 
   useEffect(() => {
-    const payload = JSON.stringify({
-      invoice: order.id ? order.id.slice(-8).toUpperCase() : 'UNKNOWN',
-      total: order.totalAfterDiscount,
-      date: order.createdAt,
-      shop: shopInfo.companyName
+    const orderIdParam = order.id || '';
+    const verificationUrl = `${window.location.origin}/?verifyOrder=${encodeURIComponent(orderIdParam)}`;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 280;
+    canvas.height = 280;
+
+    QRCode.toCanvas(canvas, verificationUrl, {
+      width: 280,
+      margin: 1,
+      color: {
+        dark: '#1A3A5C', // Brand Navy
+        light: '#FFFFFF'
+      },
+      errorCorrectionLevel: 'H'
+    }).then(() => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        setQrDataUrl(canvas.toDataURL());
+        return;
+      }
+
+      // Draw central branded logo badge
+      const center = 140;
+      const badgeSize = 64;
+      const radius = 12;
+
+      ctx.save();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.shadowColor = 'rgba(26, 58, 92, 0.25)';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
+      } else {
+        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
+      }
+      ctx.fill();
+      ctx.restore();
+
+      ctx.strokeStyle = '#2563A8';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
+      } else {
+        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
+      }
+      ctx.stroke();
+
+      const logoImg = new Image();
+      logoImg.crossOrigin = 'anonymous';
+      logoImg.onload = () => {
+        const imgSize = 44;
+        ctx.drawImage(logoImg, center - imgSize / 2, center - imgSize / 2, imgSize, imgSize);
+        setQrDataUrl(canvas.toDataURL('image/png'));
+      };
+      logoImg.onerror = () => {
+        ctx.fillStyle = '#1A3A5C';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('JUST SMILE', center, center);
+        setQrDataUrl(canvas.toDataURL('image/png'));
+      };
+      logoImg.src = getLogoUrl(shopInfo.logoUrl);
+    }).catch((err) => {
+      console.error('Error generating branded QR Canvas:', err);
+      QRCode.toDataURL(verificationUrl, { width: 140, margin: 1 })
+        .then(setQrDataUrl)
+        .catch(console.error);
     });
-    QRCode.toDataURL(payload, { width: 120, margin: 1 }).then(setQrDataUrl).catch(console.error);
-  }, [order, shopInfo.companyName]);
+  }, [order.id, shopInfo.logoUrl]);
 
   const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(Math.round(n));
   const tvaRate = shopInfo.tvaRate ?? 19;
@@ -98,7 +163,7 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
   const sans = "'DM Sans', 'Segoe UI', sans-serif";
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-2 overflow-y-auto no-print">
+    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-2 overflow-y-auto invoice-print-overlay">
       <div className="fixed top-4 right-4 z-[60] flex items-center gap-2 no-print">
         <button onClick={handlePrint} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 font-bold text-sm px-4 py-2 rounded-xl shadow-lg hover:bg-slate-50 transition-all">
           <Printer size={16} /><span>Imprimer</span>
@@ -168,8 +233,19 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
             </div>
             {qrDataUrl && (
               <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                <img src={qrDataUrl} alt="QR Facture" style={{ width: '72px', height: '72px' }} />
-                <div style={{ fontSize: '6pt', color: C.gray, marginTop: '2px' }}>Scan QR</div>
+                <div style={{
+                  padding: '3px',
+                  background: 'white',
+                  borderRadius: '10px',
+                  border: `1.5px solid ${C.border}`,
+                  boxShadow: '0 2px 8px rgba(26,58,92,0.08)',
+                  display: 'inline-block'
+                }}>
+                  <img src={qrDataUrl} alt="QR Verification" style={{ width: '82px', height: '82px', display: 'block', borderRadius: '6px' }} />
+                </div>
+                <div style={{ fontSize: '5.5pt', color: C.navy, fontWeight: 700, marginTop: '3px', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                  Scan to Verify 🛡️
+                </div>
               </div>
             )}
           </div>
@@ -250,10 +326,11 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
                 <span style={{ fontWeight: 600, color: C.text }}>{order.doctorClinic}</span>
                 <span style={{ margin: '0 8px', color: C.border }}>|</span>
                 <span style={{ fontWeight: 700, color: '#94A3B8' }}>Tél. </span>{order.doctorPhone}
-                {doctor?.location && (
+                {(order.doctorWilayaName || doctor?.location) && (
                   <>
                     <span style={{ margin: '0 8px', color: C.border }}>|</span>
-                    <span style={{ fontWeight: 700, color: '#94A3B8' }}>Adr. </span>{doctor.location}
+                    <span style={{ fontWeight: 700, color: '#94A3B8' }}>Adr. </span>
+                    {order.doctorWilayaName ? `${order.doctorWilayaName}${order.doctorCommuneName ? ` (${order.doctorCommuneName})` : ''}` : doctor?.location}
                   </>
                 )}
               </div>
@@ -467,13 +544,15 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
         <div>Client: {order.doctorName}</div>
         <div>Clinique: {order.doctorClinic}</div>
         <table>
-          {order.items.map((item, i) => (
-            <tr key={i}>
-              <td>{item.name ? item.name.slice(0, 20) : 'Unknown'}</td>
-              <td>x{item.quantity}</td>
-              <td>{fmt(item.price * item.quantity)}</td>
-            </tr>
-          ))}
+          <tbody>
+            {order.items.map((item, i) => (
+              <tr key={i}>
+                <td>{item.name ? item.name.slice(0, 20) : 'Unknown'}</td>
+                <td>x{item.quantity}</td>
+                <td>{fmt(item.price * item.quantity)}</td>
+              </tr>
+            ))}
+          </tbody>
         </table>
         <div className="bold">TOTAL: {fmt(order.totalAfterDiscount)} DA</div>
         {qrDataUrl && <div className="center"><img src={qrDataUrl} width="80" alt="QR" /></div>}

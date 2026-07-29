@@ -2026,6 +2026,7 @@ export default function AdminDashboard({
               ordersList={ordersList}
               paymentsList={paymentsList}
               returnsList={returnsList}
+              onPrintInvoice={onPrintInvoice}
             />
           </Suspense>
         </div>

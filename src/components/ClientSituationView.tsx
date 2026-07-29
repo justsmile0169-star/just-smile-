@@ -5,7 +5,7 @@ import { Order, Payment, ProductReturn, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 import { useAppDialog } from '../context/AppDialogContext';
 import {
-  Search, User, ShoppingBag, CreditCard, RotateCcw, FileText, Plus, X
+  Search, User, ShoppingBag, CreditCard, RotateCcw, FileText, Plus, X, Printer
 } from 'lucide-react';
 
 interface ClientSituationViewProps {
@@ -14,6 +14,7 @@ interface ClientSituationViewProps {
   ordersList: Order[];
   paymentsList: Payment[];
   returnsList: ProductReturn[];
+  onPrintInvoice?: (order: Order) => void;
 }
 
 export default function ClientSituationView({
@@ -21,7 +22,8 @@ export default function ClientSituationView({
   usersList,
   ordersList,
   paymentsList,
-  returnsList
+  returnsList,
+  onPrintInvoice
 }: ClientSituationViewProps) {
   const { alert } = useAppDialog();
   const isRtl = lang === 'ar';
@@ -397,12 +399,13 @@ export default function ClientSituationView({
                         <th className="py-2 px-3 text-left rtl:text-right">{getTranslation(lang, 'orderDate')}</th>
                         <th className="py-2 px-3 text-left rtl:text-right">{getTranslation(lang, 'total')}</th>
                         <th className="py-2 px-3 text-left rtl:text-right">{getTranslation(lang, 'status')}</th>
+                        <th className="py-2 px-3 text-right">{getTranslation(lang, 'actions')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {clientOrders.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="py-6 text-center text-xs text-slate-400">
+                          <td colSpan={5} className="py-6 text-center text-xs text-slate-400">
                             {lang === 'fr' ? 'Aucune commande.' : 'لا توجد طلبات.'}
                           </td>
                         </tr>
@@ -418,6 +421,19 @@ export default function ClientSituationView({
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
                                 {statusLabel(order.status)}
                               </span>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {onPrintInvoice && (
+                                <button
+                                  type="button"
+                                  onClick={() => onPrintInvoice(order)}
+                                  className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-bold"
+                                  title={lang === 'fr' ? 'Imprimer Facture' : 'طباعة الفاتورة'}
+                                >
+                                  <Printer size={14} />
+                                  <span className="hidden sm:inline">{lang === 'fr' ? 'Facture' : 'فاتورة'}</span>
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))
