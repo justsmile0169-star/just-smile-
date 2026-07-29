@@ -107,7 +107,7 @@ export default function ProductSlider({
         style={{ scrollSnapType: 'x mandatory' }}
       >
         {products.map((p) => (
-          <div key={p.id} className="shrink-0 w-[250px] sm:w-[280px] md:w-[320px]" style={{ scrollSnapAlign: 'start' }}>
+          <div key={p.id} className="shrink-0 w-[260px] sm:w-[300px] md:w-[340px]" style={{ scrollSnapAlign: 'start' }}>
             <ProductCard
               product={p}
               lang={lang}
@@ -116,7 +116,7 @@ export default function ProductSlider({
               onToggleFavorite={onToggleFavorite}
               onViewDetails={onViewProduct}
               user={user}
-              imageHeight="h-44 sm:h-56 md:h-64"
+              imageHeight="h-60 sm:h-72 md:h-80"
             />
           </div>
         ))}
