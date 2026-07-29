@@ -83,7 +83,8 @@ service cloud.firestore {
     
     // Orders
     match /orders/{orderId} {
-      allow read: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow get: if true;
+      allow list: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow create: if true;
       allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.status == resource.data.status);
       allow delete: if isAdmin();

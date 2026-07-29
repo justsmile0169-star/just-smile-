@@ -1303,6 +1303,7 @@ export default function App() {
             orderId={verificationOrderId}
             lang={lang}
             shopInfo={shopInfo}
+            existingOrders={ordersList.length > 0 ? ordersList : userOrders}
             onClose={() => {
               setVerificationOrderId(null);
               window.history.replaceState({}, '', window.location.pathname);

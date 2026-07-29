@@ -9,6 +9,7 @@ interface OrderVerificationModalProps {
   orderId: string;
   lang: Language;
   shopInfo: ShopInfo;
+  existingOrders?: Order[];
   onClose: () => void;
   onPrintInvoice?: (order: Order) => void;
 }
@@ -17,6 +18,7 @@ export default function OrderVerificationModal({
   orderId,
   lang,
   shopInfo,
+  existingOrders,
   onClose,
   onPrintInvoice
 }: OrderVerificationModalProps) {
@@ -28,8 +30,26 @@ export default function OrderVerificationModal({
     async function fetchOrder() {
       setLoading(true);
       setError(false);
+
+      const targetId = orderId.trim();
+
+      // Check if available in local state / props first
+      if (existingOrders && existingOrders.length > 0) {
+        const found = existingOrders.find(
+          (o) =>
+            o.id === targetId ||
+            (o.id && o.id.slice(-8).toUpperCase() === targetId.toUpperCase()) ||
+            (o.id && o.id.slice(-6).toUpperCase() === targetId.toUpperCase())
+        );
+        if (found) {
+          setOrder(found);
+          setLoading(false);
+          return;
+        }
+      }
+
       try {
-        const snap = await getDoc(doc(db, 'orders', orderId));
+        const snap = await getDoc(doc(db, 'orders', targetId));
         if (snap.exists()) {
           setOrder({ id: snap.id, ...snap.data() } as Order);
         } else {
@@ -45,7 +65,7 @@ export default function OrderVerificationModal({
     if (orderId) {
       fetchOrder();
     }
-  }, [orderId]);
+  }, [orderId, existingOrders]);
 
   const fmt = (num: number) => new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' DA';
 

@@ -58,10 +58,10 @@ body.dark {
   text-align: right;
 }
 
-/* High-quality print styles for invoices (A4, 300 DPI ready) */
+/* High-quality print styles for invoices (A4 & Thermal 80mm) */
 @media print {
   @page {
-    size: A4 portrait;
+    size: auto;
     margin: 0;
   }
 
@@ -95,11 +95,36 @@ body.dark {
     z-index: 99999 !important;
   }
 
-  #invoice-a4 {
+  /* Mode A4 */
+  body.print-mode-a4 #invoice-a4 {
     width: 210mm !important;
     min-height: 297mm !important;
     margin: 0 auto !important;
     box-shadow: none !important;
+    page-break-after: always;
+  }
+
+  body.print-mode-a4 #invoice-thermal-container {
+    display: none !important;
+  }
+
+  /* Mode Thermal */
+  body.print-mode-thermal #invoice-a4 {
+    display: none !important;
+  }
+
+  body.print-mode-thermal #invoice-thermal-container {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body.print-mode-thermal #invoice-thermal {
+    width: 78mm !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 2mm !important;
     page-break-after: always;
   }
 }
