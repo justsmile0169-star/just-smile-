@@ -37,7 +37,7 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
   const [showPrintConfirm, setShowPrintConfirm] = useState(false);
   const [printMode, setPrintMode] = useState<'a4' | 'thermal'>('a4');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [qrSvgHtml, setQrSvgHtml] = useState<string>('');
+  const [qrPngUrl, setQrPngUrl] = useState<string>('');
 
   useEffect(() => {
     const orderIdParam = order.id || '';
@@ -62,7 +62,7 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
       const bX = center - bSize / 2;
       const bY = center - bSize / 2;
 
-      // Pure SVG vector badge - Guaranteed 100% html2canvas vector PDF rendering
+      // Pure SVG vector badge
       const badgeSvg = `
         <g>
           <rect x="${bX}" y="${bY}" width="${bSize}" height="${bSize}" rx="${rad}" fill="#FFFFFF" stroke="#2563A8" stroke-width="0.6" />
@@ -72,10 +72,27 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
         </g>
       `;
 
-      // Make SVG responsive inside container
-      let styledSvg = rawSvg.replace('<svg ', '<svg style="width:100%;height:100%;display:block;" ');
-      styledSvg = styledSvg.replace('</svg>', `${badgeSvg}</svg>`);
-      setQrSvgHtml(styledSvg);
+      const finalSvg = rawSvg.replace('</svg>', `${badgeSvg}</svg>`);
+      const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(finalSvg)}`;
+
+      // Offscreen SVG-to-PNG rasterization to guarantee 100% pre-loaded html2canvas rendering
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = 300;
+        c.height = 300;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, 300, 300);
+          setQrPngUrl(c.toDataURL('image/png'));
+        } else {
+          setQrPngUrl(svgDataUrl);
+        }
+      };
+      img.onerror = () => {
+        setQrPngUrl(svgDataUrl);
+      };
+      img.src = svgDataUrl;
     }).catch((err) => {
       console.error('Error generating QR SVG:', err);
     });
@@ -261,7 +278,7 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                 </div>
               </div>
 
-              {/* Directly embedded SVG QR code for 100% html2canvas vector PDF rendering */}
+              {/* Pre-rasterized PNG QR code image for 100% guaranteed html2canvas PDF rendering */}
               <div style={{ textAlign: 'center', flexShrink: 0 }}>
                 <div style={{
                   padding: '3px',
@@ -273,10 +290,11 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                   width: '82px',
                   height: '82px'
                 }}>
-                  {qrSvgHtml ? (
-                    <div
-                      dangerouslySetInnerHTML={{ __html: qrSvgHtml }}
-                      style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px', overflow: 'hidden' }}
+                  {qrPngUrl ? (
+                    <img
+                      src={qrPngUrl}
+                      alt="QR Verification"
+                      style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px' }}
                     />
                   ) : (
                     <div style={{ width: '76px', height: '76px', background: '#F1F5F9', borderRadius: '6px' }} />
@@ -657,10 +675,11 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
 
             <div style={{ textAlign: 'center', marginTop: '12px', paddingTop: '8px', borderTop: '1px dashed #aaa' }}>
               <div style={{ width: '76px', height: '76px', margin: '0 auto', display: 'block' }}>
-                {qrSvgHtml ? (
-                  <div
-                    dangerouslySetInnerHTML={{ __html: qrSvgHtml }}
-                    style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px', overflow: 'hidden' }}
+                {qrPngUrl ? (
+                  <img
+                    src={qrPngUrl}
+                    alt="QR Verification"
+                    style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px' }}
                   />
                 ) : null}
               </div>
