@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -37,83 +37,49 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
   const [showPrintConfirm, setShowPrintConfirm] = useState(false);
   const [printMode, setPrintMode] = useState<'a4' | 'thermal'>('a4');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [qrSvgHtml, setQrSvgHtml] = useState<string>('');
 
-  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
-  const qrThermalCanvasRef = useRef<HTMLCanvasElement>(null);
-
-  const renderQrToCanvas = (canvas: HTMLCanvasElement, size: number) => {
+  useEffect(() => {
     const orderIdParam = order.id || '';
     const verificationUrl = `${window.location.origin}/?verifyOrder=${encodeURIComponent(orderIdParam)}`;
 
-    QRCode.toCanvas(canvas, verificationUrl, {
-      width: size,
+    QRCode.toString(verificationUrl, {
+      type: 'svg',
       margin: 1,
+      errorCorrectionLevel: 'H',
       color: {
         dark: '#1A3A5C', // Brand Navy
         light: '#FFFFFF'
-      },
-      errorCorrectionLevel: 'H'
-    }).then(() => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const center = size / 2;
-      const badgeSize = Math.round(size * 0.23);
-      const radius = Math.round(badgeSize * 0.22);
-
-      ctx.save();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.shadowColor = 'rgba(26, 58, 92, 0.25)';
-      ctx.shadowBlur = 6;
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
-      } else {
-        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
       }
-      ctx.fill();
-      ctx.restore();
+    }).then((rawSvg) => {
+      // Parse viewBox size
+      const match = rawSvg.match(/viewBox="0 0 (\d+) (\d+)"/);
+      const vb = match ? parseInt(match[1], 10) : 37;
 
-      ctx.strokeStyle = '#2563A8';
-      ctx.lineWidth = Math.max(1.5, size * 0.009);
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
-      } else {
-        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
-      }
-      ctx.stroke();
+      const center = vb / 2;
+      const bSize = vb * 0.26; // Center badge size
+      const rad = bSize * 0.2;
+      const bX = center - bSize / 2;
+      const bY = center - bSize / 2;
 
-      // Vector Branding
-      ctx.fillStyle = '#1A3A5C';
-      ctx.font = `900 ${Math.round(size * 0.036)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('JUST', center, center - Math.round(size * 0.032));
+      // Pure SVG vector badge - Guaranteed 100% html2canvas vector PDF rendering
+      const badgeSvg = `
+        <g>
+          <rect x="${bX}" y="${bY}" width="${bSize}" height="${bSize}" rx="${rad}" fill="#FFFFFF" stroke="#2563A8" stroke-width="0.6" />
+          <text x="${center}" y="${center - bSize * 0.12}" font-size="${bSize * 0.22}" font-weight="900" font-family="sans-serif" fill="#1A3A5C" text-anchor="middle">JUST</text>
+          <text x="${center}" y="${center + bSize * 0.16}" font-size="${bSize * 0.24}" font-weight="900" font-family="sans-serif" fill="#B8963E" text-anchor="middle">SMILE</text>
+          <path d="M ${center - bSize * 0.22} ${center + bSize * 0.26} Q ${center} ${center + bSize * 0.42} ${center + bSize * 0.22} ${center + bSize * 0.26}" fill="none" stroke="#2563A8" stroke-width="0.4" stroke-linecap="round" />
+        </g>
+      `;
 
-      ctx.fillStyle = '#B8963E';
-      ctx.font = `900 ${Math.round(size * 0.039)}px sans-serif`;
-      ctx.fillText('SMILE', center, center + Math.round(size * 0.025));
-
-      // Smile arc
-      ctx.strokeStyle = '#2563A8';
-      ctx.lineWidth = Math.max(1.5, size * 0.007);
-      ctx.beginPath();
-      ctx.arc(center, center + Math.round(size * 0.046), Math.round(size * 0.036), 0.25 * Math.PI, 0.75 * Math.PI);
-      ctx.stroke();
+      // Make SVG responsive inside container
+      let styledSvg = rawSvg.replace('<svg ', '<svg style="width:100%;height:100%;display:block;" ');
+      styledSvg = styledSvg.replace('</svg>', `${badgeSvg}</svg>`);
+      setQrSvgHtml(styledSvg);
     }).catch((err) => {
-      console.error('Error drawing QR Canvas:', err);
+      console.error('Error generating QR SVG:', err);
     });
-  };
-
-  useEffect(() => {
-    if (qrCanvasRef.current) {
-      renderQrToCanvas(qrCanvasRef.current, 280);
-    }
-    if (qrThermalCanvasRef.current) {
-      renderQrToCanvas(qrThermalCanvasRef.current, 200);
-    }
-  }, [order.id, printMode]);
+  }, [order.id]);
 
   useEffect(() => {
     document.body.classList.remove('print-mode-a4', 'print-mode-thermal');
@@ -153,9 +119,6 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
       if (!el) {
         executePrint();
         return;
-      }
-      if (qrCanvasRef.current) {
-        renderQrToCanvas(qrCanvasRef.current, 280);
       }
       const canvas = await html2canvas(el, {
         scale: 2,
@@ -298,7 +261,7 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                 </div>
               </div>
 
-              {/* Directly embedded Canvas QR code for 100% html2canvas rendering */}
+              {/* Directly embedded SVG QR code for 100% html2canvas vector PDF rendering */}
               <div style={{ textAlign: 'center', flexShrink: 0 }}>
                 <div style={{
                   padding: '3px',
@@ -306,14 +269,18 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                   borderRadius: '10px',
                   border: `1.5px solid ${C.border}`,
                   boxShadow: '0 2px 8px rgba(26,58,92,0.08)',
-                  display: 'inline-block'
+                  display: 'inline-block',
+                  width: '82px',
+                  height: '82px'
                 }}>
-                  <canvas
-                    ref={qrCanvasRef}
-                    width={280}
-                    height={280}
-                    style={{ width: '82px', height: '82px', display: 'block', borderRadius: '6px' }}
-                  />
+                  {qrSvgHtml ? (
+                    <div
+                      dangerouslySetInnerHTML={{ __html: qrSvgHtml }}
+                      style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px', overflow: 'hidden' }}
+                    />
+                  ) : (
+                    <div style={{ width: '76px', height: '76px', background: '#F1F5F9', borderRadius: '6px' }} />
+                  )}
                 </div>
                 <div style={{ fontSize: '5.5pt', color: C.navy, fontWeight: 700, marginTop: '3px', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
                   Scan to Verify 🛡️
@@ -689,12 +656,14 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
             </div>
 
             <div style={{ textAlign: 'center', marginTop: '12px', paddingTop: '8px', borderTop: '1px dashed #aaa' }}>
-              <canvas
-                ref={qrThermalCanvasRef}
-                width={200}
-                height={200}
-                style={{ width: '76px', height: '76px', margin: '0 auto', display: 'block', borderRadius: '6px' }}
-              />
+              <div style={{ width: '76px', height: '76px', margin: '0 auto', display: 'block' }}>
+                {qrSvgHtml ? (
+                  <div
+                    dangerouslySetInnerHTML={{ __html: qrSvgHtml }}
+                    style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px', overflow: 'hidden' }}
+                  />
+                ) : null}
+              </div>
               <div style={{ fontSize: '6pt', marginTop: '3px', fontWeight: 'bold', color: C.navy }}>SCAN TO VERIFY 🛡️</div>
             </div>
 
