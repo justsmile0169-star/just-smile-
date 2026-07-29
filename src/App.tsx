@@ -29,6 +29,7 @@ const InvoicePrintView = lazy(() => import('./components/InvoicePrintView'));
 const BarcodeScanner = lazy(() => import('./components/BarcodeScanner'));
 const BarcodePrintView = lazy(() => import('./components/BarcodePrintView'));
 const OrderVerificationModal = lazy(() => import('./components/OrderVerificationModal'));
+const InvoiceVerificationView = lazy(() => import('./components/InvoiceVerificationView'));
 
 
 // Icons
@@ -1297,19 +1298,21 @@ export default function App() {
           />
         )}
 
-        {/* Invoice QR Code Verification Modal */}
+        {/* Dedicated Digital Invoice Verification Page */}
         {verificationOrderId && (
-          <OrderVerificationModal
-            orderId={verificationOrderId}
-            lang={lang}
-            shopInfo={shopInfo}
-            existingOrders={ordersList.length > 0 ? ordersList : userOrders}
-            onClose={() => {
-              setVerificationOrderId(null);
-              window.history.replaceState({}, '', window.location.pathname);
-            }}
-            onPrintInvoice={setSelectedInvoiceOrder}
-          />
+          <div className="fixed inset-0 z-[100] bg-slate-900 overflow-y-auto no-print">
+            <InvoiceVerificationView
+              orderId={verificationOrderId}
+              lang={lang}
+              shopInfo={shopInfo}
+              existingOrders={ordersList.length > 0 ? ordersList : userOrders}
+              onGoToShop={() => {
+                setVerificationOrderId(null);
+                window.history.replaceState({}, '', window.location.pathname);
+              }}
+              onPrintInvoice={setSelectedInvoiceOrder}
+            />
+          </div>
         )}
 
       </div>
