@@ -57,62 +57,62 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
       errorCorrectionLevel: 'H'
     }).then(() => {
       const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        setQrDataUrl(canvas.toDataURL());
-        return;
-      }
+      if (ctx) {
+        // Draw central branded logo badge
+        const center = 140;
+        const badgeSize = 64;
+        const radius = 14;
 
-      // Draw central branded logo badge
-      const center = 140;
-      const badgeSize = 64;
-      const radius = 12;
+        ctx.save();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.shadowColor = 'rgba(26, 58, 92, 0.25)';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
+        } else {
+          ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
+        }
+        ctx.fill();
+        ctx.restore();
 
-      ctx.save();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.shadowColor = 'rgba(26, 58, 92, 0.25)';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
-      } else {
-        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
-      }
-      ctx.fill();
-      ctx.restore();
+        ctx.strokeStyle = '#2563A8';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
+        } else {
+          ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
+        }
+        ctx.stroke();
 
-      ctx.strokeStyle = '#2563A8';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize, radius);
-      } else {
-        ctx.rect(center - badgeSize / 2, center - badgeSize / 2, badgeSize, badgeSize);
-      }
-      ctx.stroke();
-
-      const logoImg = new Image();
-      logoImg.crossOrigin = 'anonymous';
-      logoImg.onload = () => {
-        const imgSize = 44;
-        ctx.drawImage(logoImg, center - imgSize / 2, center - imgSize / 2, imgSize, imgSize);
-        setQrDataUrl(canvas.toDataURL('image/png'));
-      };
-      logoImg.onerror = () => {
+        // Vector Branding - Pure untainted canvas rendering
         ctx.fillStyle = '#1A3A5C';
-        ctx.font = 'bold 11px sans-serif';
+        ctx.font = '900 10px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('JUST SMILE', center, center);
-        setQrDataUrl(canvas.toDataURL('image/png'));
-      };
-      logoImg.src = getLogoUrl(shopInfo.logoUrl);
+        ctx.fillText('JUST', center, center - 9);
+
+        ctx.fillStyle = '#B8963E';
+        ctx.font = '900 11px sans-serif';
+        ctx.fillText('SMILE', center, center + 7);
+
+        // Smile arc
+        ctx.strokeStyle = '#2563A8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(center, center + 13, 10, 0.25 * Math.PI, 0.75 * Math.PI);
+        ctx.stroke();
+      }
+
+      setQrDataUrl(canvas.toDataURL('image/png'));
     }).catch((err) => {
       console.error('Error generating branded QR Canvas:', err);
       QRCode.toDataURL(verificationUrl, { width: 140, margin: 1 })
         .then(setQrDataUrl)
         .catch(console.error);
     });
-  }, [order.id, shopInfo.logoUrl]);
+  }, [order.id]);
 
   useEffect(() => {
     document.body.classList.remove('print-mode-a4', 'print-mode-thermal');
@@ -156,8 +156,17 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
       const canvas = await html2canvas(el, {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         logging: false,
-        backgroundColor: '#FFFFFF'
+        backgroundColor: '#FFFFFF',
+        onclone: (_clonedDoc, clonedEl) => {
+          const qrImg = clonedEl.querySelector('img[alt="QR Verification"]') as HTMLImageElement;
+          if (qrImg && qrDataUrl) {
+            qrImg.src = qrDataUrl;
+            qrImg.style.display = 'block';
+            qrImg.style.visibility = 'visible';
+          }
+        }
       });
       const imgData = canvas.toDataURL('image/jpeg', 0.98);
       const pdf = new jsPDF('p', 'mm', 'a4');
