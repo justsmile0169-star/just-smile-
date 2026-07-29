@@ -33,7 +33,7 @@ const C = {
   cashBorder: '#86EFAC',
 };
 
-export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: InvoicePrintViewProps) {
+export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClose }: InvoicePrintViewProps) {
   const [showPrintConfirm, setShowPrintConfirm] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [printMode, setPrintMode] = useState<'a4' | 'thermal'>('a4');
