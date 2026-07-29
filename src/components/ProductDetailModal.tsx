@@ -166,7 +166,7 @@ export default function ProductDetailModal({
   const currentStock = selectedVariant ? selectedVariant.stock : product.stock;
   const currentImage = selectedVariant?.image || product.image;
 
-  const hasProductDiscount = product.discountPercent && product.discountPercent > 0;
+  const hasProductDiscount = typeof product.discountPercent === 'number' && product.discountPercent > 0;
   const finalPrice = hasProductDiscount
     ? Math.round(currentBasePrice * (1 - (product.discountPercent || 0) / 100))
     : currentBasePrice;
@@ -207,7 +207,7 @@ export default function ProductDetailModal({
               <img
                 src={currentImage && String(currentImage) !== '0' ? currentImage : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
                 alt={product.name}
-                className="object-cover w-full h-full"
+                className="object-contain w-full h-full p-2"
                 referrerPolicy="no-referrer"
               />
               {hasProductDiscount && (
@@ -387,6 +387,97 @@ export default function ProductDetailModal({
               )}
             </div>
           )}
+
+          {/* Dynamic Shade & Material Compatibility Matcher */}
+          {(() => {
+            const currentShade = selectedAttributes['Couleur'] || selectedAttributes['Teinte'] || selectedAttributes['لون'] || selectedVariant?.name || '';
+            const text = `${product.name} ${product.category} ${product.description || ''} ${selectedVariant?.name || ''} ${currentShade}`.toLowerCase();
+
+            let titleAr = `💡 المواد المكملة والموصى بها لهذا المنتج ${currentShade ? `(الدرجة المختارة: ${currentShade})` : ''}`;
+            let titleFr = `💡 Produits complémentaires recommandés ${currentShade ? `(Teinte: ${currentShade})` : ''}`;
+            let itemsAr = [
+              'حمض التخريش 37% (Acid Etch Gel) لإعداد السن قبل الحشو',
+              'المادة اللاصقة الشاملة (Universal Bonding Agent)',
+              'معجون وأشرطة تلميع الحشوات (Polishing Strips & Paste)'
+            ];
+            let itemsFr = [
+              'Acide d\'étchage (Acid Etch 37%) pour la préparation émail/dentine',
+              'Adhésif universel monocomposant (Bonding Agent)',
+              'Disques & pâtes de polissage pour finition esthétique'
+            ];
+            let bgStyle = 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200 text-amber-900';
+
+            if (text.includes('endo') || text.includes('gutta') || text.includes('مبرد') || text.includes('عصب') || text.includes('paper point')) {
+              titleAr = '💡 المستلزمات المكملة لعلاج العصب والجذور (Endodontie)';
+              titleFr = '💡 Matériels complémentaires pour Traitement Endodontique';
+              itemsAr = [
+                'محلول وسيروم التطهير (Sodium Hypochlorite / EDTA Gel)',
+                'أقماع الجوتا بيركا والأقماع الورقية المطبقة للمقاس (Gutta & Paper Points)',
+                'مادة سد القنوات العصبية (Root Canal Sealer)'
+              ];
+              itemsFr = [
+                'Gel EDTA & Hypochlorite de Sodium pour irrigation',
+                'Pointes de Gutta-percha & Papier au diamètre correspondant',
+                'Ciment d\'obturation canalaire (Root Canal Sealer)'
+              ];
+              bgStyle = 'bg-gradient-to-r from-blue-50 to-cyan-50 border-blue-200 text-blue-900';
+            } else if (text.includes('anesth') || text.includes('مخدر') || text.includes('needle') || text.includes('إبرة')) {
+              titleAr = '💡 المستلزمات المكملة للتخدير الموضعي (Anesthésie)';
+              titleFr = '💡 Produits complémentaires pour Anesthésie Dentaire';
+              itemsAr = [
+                'إبر التخدير القصيرة والطويلة المقاومة للانكسار (Dental Needles 27G / 30G)',
+                'جيل التخدير السطحي قبل الحقن (Topical Anesthetic Gel)',
+                'محقنة التخدير المعدنية المعقمة (Cartridge Syringe)'
+              ];
+              itemsFr = [
+                'Aiguilles dentaires stériles (27G court / 30G très court)',
+                'Gel d\'anesthésie topique de contact',
+                'Seringue à carpuche en acier inoxydable'
+              ];
+              bgStyle = 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200 text-emerald-900';
+            } else if (text.includes('empreinte') || text.includes('طبعة') || text.includes('alginate') || text.includes('silicone')) {
+              titleAr = '💡 المستلزمات المكملة لأخذ طبعات الأسنان (Prise d\'empreinte)';
+              titleFr = '💡 Produits complémentaires pour Prise d\'Empreinte';
+              itemsAr = [
+                'طوابع أخذ الطبعات المعدنية أو البلاستيكية (Impression Trays)',
+                'بخاخ لاصق مواد الطبعة (Tray Adhesive Spray)',
+                'خلط السيليكون التلقائي ونشرات الخلط (Mixing Tips & Gun)'
+              ];
+              itemsFr = [
+                'Porte-empreintes perforés haut/bas',
+                'Adhésif pour porte-empreinte (Tray Adhesive)',
+                'Embouts mélangeurs automatiques pour Silicone'
+              ];
+              bgStyle = 'bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200 text-purple-900';
+            } else if (text.includes('turbine') || text.includes('معدات') || text.includes('مقبض') || text.includes('contre-angle') || text.includes('équipement')) {
+              titleAr = '💡 المستلزمات المكملة وصيانة الأجهزة والتوربينات';
+              titleFr = '💡 Matériel de maintenance & Accessoires Équipement';
+              itemsAr = [
+                'بخاخ التزييت والتنظيف اليومي للتوربين (Lubricant Spray Oil)',
+                'وصلة التوربين السريعة المزودة بالإضاءة (Quick Coupling Raccord)',
+                'أكياس ومؤشرات التعقيم بالأوتوكلاف (Autoclave Sterilization Pouches)'
+              ];
+              itemsFr = [
+                'Huile spray de lubrification et nettoyage automatique',
+                'Raccord rapide avec fibre optique',
+                'Gaines & sachets de stérilisation pour Autoclave'
+              ];
+              bgStyle = 'bg-gradient-to-r from-slate-100 to-cyan-50 border-slate-300 text-slate-900';
+            }
+
+            return (
+              <div className={`p-4 rounded-2xl border ${bgStyle} space-y-2`}>
+                <h4 className="text-xs font-black flex items-center gap-1.5">
+                  <span>{lang === 'fr' ? titleFr : titleAr}</span>
+                </h4>
+                <ul className="text-[11px] font-semibold space-y-1 list-disc list-inside opacity-90 leading-relaxed">
+                  {(lang === 'fr' ? itemsFr : itemsAr).map((item, idx) => (
+                    <li key={idx}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
 
           {/* Technical Sheet / Description */}
           {product.description && (

@@ -45,6 +45,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.auth.uid == userId &&
                       request.resource.data.role == 'doctor' &&
                       request.resource.data.status in ['pending', 'active'];
+      // Allow create for any authenticated user creating their own document
+      // (covers Google Sign-in profile migration for staff accounts)
+      allow create: if isAuthenticated() && request.auth.uid == userId &&
+                      request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'] &&
+                      request.resource.data.status in ['pending', 'active'];
       // Allow admin to create staff accounts
       allow create: if isAdmin() &&
                       request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];

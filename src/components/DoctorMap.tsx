@@ -82,8 +82,74 @@ export default function DoctorMap({ doctors, orders, lang }: DoctorMapProps) {
   const topWilayas = wilayaStats.slice(0, 5);
   const totalWilayas = wilayaStats.length;
 
+  // Calculate clinic activity status for Sales Rep field strategy
+  const doctorActivityStats = useMemo(() => {
+    const now = new Date().getTime();
+    let activeCount = 0;
+    let mediumCount = 0;
+    let inactiveCount = 0;
+
+    doctors.forEach(doc => {
+      const docOrders = orders.filter(o => o.userId === doc.uid && o.status !== 'cancelled');
+      if (docOrders.length === 0) {
+        inactiveCount++;
+      } else {
+        const sorted = [...docOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const lastDate = new Date(sorted[0].createdAt);
+        const diffDays = Math.ceil((now - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 30) activeCount++;
+        else if (diffDays <= 90) mediumCount++;
+        else inactiveCount++;
+      }
+    });
+
+    return { activeCount, mediumCount, inactiveCount };
+  }, [doctors, orders]);
+
   return (
     <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'}>
+      {/* Sales Rep Field Activity & Clinic Heatmap Summary */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950 p-6 rounded-3xl text-white shadow-xl border border-cyan-900/50">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-700/60 pb-4 mb-4">
+          <div>
+            <h3 className="text-lg font-black flex items-center gap-2 text-cyan-400">
+              <TrendingUp size={20} />
+              {lang === 'fr' ? 'الخريطة الحرارية الميدانية ونشاط العيادات (Field Sales Heatmap)' : 'الخريطة الحرارية الميدانية ونشاط العيادات'}
+            </h3>
+            <p className="text-xs text-slate-300 mt-1">
+              {lang === 'fr' 
+                ? 'Analyse en temps réel de l\'activité des cabinets pour les délégués commerciaux'
+                : 'تحليل دقيق لنشاط العيادات لمساعدة المندوبين التجاريين في تخطيط الزيارات الميدانية'}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-2xl flex items-center gap-3">
+            <span className="w-4 h-4 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <div>
+              <p className="text-xs text-emerald-300 font-extrabold">{lang === 'fr' ? 'Cabinets Actifs (<30j)' : 'عيادات نشطة جداً (<30 يوماً)'}</p>
+              <p className="text-xl font-black text-white">{doctorActivityStats.activeCount} <span className="text-xs font-normal text-emerald-400">عيادة</span></p>
+            </div>
+          </div>
+
+          <div className="bg-amber-950/40 border border-amber-500/30 p-4 rounded-2xl flex items-center gap-3">
+            <span className="w-4 h-4 rounded-full bg-amber-500 shrink-0" />
+            <div>
+              <p className="text-xs text-amber-300 font-extrabold">{lang === 'fr' ? 'Moyenne Activité (30-90j)' : 'نشاط متوسط (30-90 يوماً)'}</p>
+              <p className="text-xl font-black text-white">{doctorActivityStats.mediumCount} <span className="text-xs font-normal text-amber-400">عيادة</span></p>
+            </div>
+          </div>
+
+          <div className="bg-rose-950/40 border border-rose-500/30 p-4 rounded-2xl flex items-center gap-3">
+            <span className="w-4 h-4 rounded-full bg-rose-500 shrink-0" />
+            <div>
+              <p className="text-xs text-rose-300 font-extrabold">{lang === 'fr' ? 'Inactifs / À Visiter (>90j)' : 'متوقفة / تحتاج زيارة (>90 يوماً)'}</p>
+              <p className="text-xl font-black text-white">{doctorActivityStats.inactiveCount} <span className="text-xs font-normal text-rose-400">عيادة</span></p>
+            </div>
+          </div>
+        </div>
+      </div>
       {/* Overall Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 p-4 rounded-2xl border border-blue-200 dark:border-blue-800">

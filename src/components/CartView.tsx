@@ -4,12 +4,14 @@ import { calculatePromotionDiscount } from '../utils/promotionEngine';
 import { Language, getTranslation } from '../translations';
 import { db } from '../firebase';
 import { collection, addDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
-import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, CheckCircle, Truck, User, Phone, MapPin, ChevronDown, LogIn, Sparkles } from 'lucide-react';
+import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, AlertTriangle, CheckCircle, Truck, User, Phone, MapPin, ChevronDown, LogIn, Sparkles, Percent, DollarSign } from 'lucide-react';
 import { useAppDialog } from '../context/AppDialogContext';
 import {
   isFreeDelivery, getDeliveryPricing, getWilayas, getCommunesByWilaya,
   WilayaOption, CommuneOption
 } from '../utils/algeriaData';
+
+import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
 
 interface CartViewProps {
   cart: CartItem[];
@@ -45,6 +47,7 @@ export default function CartView({
   const [paymentMethod, setPaymentMethod] = useState<'credit' | 'cash'>('cash');
   const [deliveryOption, setDeliveryOption] = useState<'to_office' | 'to_clinic'>('to_clinic');
   const [scheduledDeliveryDate, setScheduledDeliveryDate] = useState<string>('');
+  const [isEmergencyOrder, setIsEmergencyOrder] = useState(false);
 
   // ── Guest Checkout Fields ───────────────────────────────────────────────────
   const [guestName, setGuestName] = useState('');
@@ -54,6 +57,27 @@ export default function CartView({
   const [selectedWilaya, setSelectedWilaya] = useState<WilayaOption | null>(null);
   const [selectedCommune, setSelectedCommune] = useState<CommuneOption | null>(null);
   const [loadingWilayas, setLoadingWilayas] = useState(false);
+
+  // ── Per-item discount state ────────────────────────────────────────────────
+  // key = productId (or productId_variantId), value = { type: 'percent'|'cash', value: number }
+  const [itemDiscounts, setItemDiscounts] = useState<Record<string, { type: 'percent' | 'cash'; value: number }>>({})
+
+  const getItemKey = (item: CartItem) =>
+    item.selectedVariant ? `${item.product.id}_${item.selectedVariant.id}` : item.product.id;
+
+  const isStaff = currentUser && ['admin', 'manager', 'cashier', 'accountant'].includes(currentUser.role);
+
+  const setItemDiscount = (key: string, type: 'percent' | 'cash', value: number) => {
+    setItemDiscounts(prev => ({ ...prev, [key]: { type, value } }));
+  };
+
+  const clearItemDiscount = (key: string) => {
+    setItemDiscounts(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   const isRtl = lang === 'ar';
 
@@ -83,6 +107,39 @@ export default function CartView({
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
   };
 
+  // Offline mode auto-sync listener
+  useEffect(() => {
+    const syncOfflineOrders = async () => {
+      if (!navigator.onLine) return;
+      const savedOffline = localStorage.getItem('justsmile_offline_orders');
+      if (!savedOffline) return;
+      try {
+        const queued: any[] = JSON.parse(savedOffline);
+        if (Array.isArray(queued) && queued.length > 0) {
+          for (const ord of queued) {
+            const docRef = await addDoc(collection(db, 'orders'), ord);
+            if (docRef.id) {
+              await updateDoc(doc(db, 'orders', docRef.id), { id: docRef.id });
+            }
+          }
+          localStorage.removeItem('justsmile_offline_orders');
+          alert(
+            lang === 'fr' 
+              ? `⚡ ${queued.length} commande(s) hors-ligne synchronisée(s) avec succès !` 
+              : `⚡ تم رفع وتحديث ${queued.length} طلبية مسجلة أوفلاين بنجاح!`,
+            'success'
+          );
+        }
+      } catch (err) {
+        console.error('Error syncing offline orders:', err);
+      }
+    };
+
+    window.addEventListener('online', syncOfflineOrders);
+    syncOfflineOrders();
+    return () => window.removeEventListener('online', syncOfflineOrders);
+  }, [lang]);
+
   // --- Calculate Totals & Discounts ---
   const totals = cart.reduce(
     (acc, item) => {
@@ -92,12 +149,25 @@ export default function CartView({
       const finalProductPrice = Math.round(unitBasePrice * (1 - pDiscount / 100));
       const finalProductTotal = finalProductPrice * item.quantity;
 
+      // Per-item extra discount
+      const key = item.selectedVariant ? `${item.product.id}_${item.selectedVariant.id}` : item.product.id;
+      const extraDisc = itemDiscounts[key];
+      let extraDiscAmount = 0;
+      if (extraDisc && extraDisc.value > 0) {
+        if (extraDisc.type === 'percent') {
+          extraDiscAmount = Math.round(finalProductTotal * (extraDisc.value / 100));
+        } else {
+          extraDiscAmount = Math.min(extraDisc.value * item.quantity, finalProductTotal);
+        }
+      }
+
       acc.grossTotal += baseProductTotal;
       acc.productDiscounts += baseProductTotal - finalProductTotal;
-      acc.runningTotalAfterProductDiscounts += finalProductTotal;
+      acc.extraItemDiscounts += extraDiscAmount;
+      acc.runningTotalAfterProductDiscounts += finalProductTotal - extraDiscAmount;
       return acc;
     },
-    { grossTotal: 0, productDiscounts: 0, runningTotalAfterProductDiscounts: 0 }
+    { grossTotal: 0, productDiscounts: 0, extraItemDiscounts: 0, runningTotalAfterProductDiscounts: 0 }
   );
 
   // Apply doctor-level custom invoice discount from profile if approved
@@ -107,7 +177,7 @@ export default function CartView({
   );
 
   const promoResult = calculatePromotionDiscount(cart, promotions);
-  const totalDiscount = totals.productDiscounts + doctorDiscountAmount + promoResult.promotionDiscount;
+  const totalDiscount = totals.productDiscounts + totals.extraItemDiscounts + doctorDiscountAmount + promoResult.promotionDiscount;
 
   // --- Delivery cost calculations ---
   const activeWilayaCode = user ? (user.wilayaCode || '') : (selectedWilaya?.code || '');
@@ -170,7 +240,7 @@ export default function CartView({
     try {
       const orderDate = new Date();
       const deadlineDate = new Date();
-      deadlineDate.setDate(orderDate.getDate() + 20);
+      deadlineDate.setDate(orderDate.getDate() + 15);
 
       const orderRef = collection(db, 'orders');
 
@@ -189,7 +259,18 @@ export default function CartView({
         doctorPhone,
         items: cart.map((item) => {
           const unitBasePrice = item.selectedVariant ? item.selectedVariant.price : item.product.price;
-          const finalPrice = item.product.discountPercent ? Math.round(unitBasePrice * (1 - item.product.discountPercent / 100)) : unitBasePrice;
+          const afterProdDisc = item.product.discountPercent ? Math.round(unitBasePrice * (1 - item.product.discountPercent / 100)) : unitBasePrice;
+          const key = item.selectedVariant ? `${item.product.id}_${item.selectedVariant.id}` : item.product.id;
+          const extraDisc = itemDiscounts[key];
+          let extraDiscAmt = 0;
+          if (extraDisc && extraDisc.value > 0) {
+            if (extraDisc.type === 'percent') {
+              extraDiscAmt = Math.round(afterProdDisc * item.quantity * (extraDisc.value / 100));
+            } else {
+              extraDiscAmt = Math.min(extraDisc.value * item.quantity, afterProdDisc * item.quantity);
+            }
+          }
+          const finalPrice = afterProdDisc;
           // Build item object — omit undefined fields (Firestore rejects them)
           const orderItem: any = {
             productId: item.product.id,
@@ -198,6 +279,11 @@ export default function CartView({
             quantity: item.quantity,
             category: item.product.category,
             discountPercent: item.product.discountPercent || 0,
+            ...(extraDisc && extraDisc.value > 0 ? {
+              extraDiscountType: extraDisc.type,
+              extraDiscountValue: extraDisc.value,
+              extraDiscountAmount: extraDiscAmt,
+            } : {}),
           };
           if (item.selectedVariant?.id) orderItem.variantId = item.selectedVariant.id;
           if (item.selectedVariant?.name) orderItem.variantName = item.selectedVariant.name;
@@ -214,6 +300,7 @@ export default function CartView({
         createdAt: orderDate.toISOString(),
         deadlineDate: deadlineDate.toISOString(),
         paymentMethod: paymentMethod,
+        isEmergency: isEmergencyOrder,
         commercialName: user?.commercialName || 'Directe',
         notes: notes.trim() || "",
         // Optional fields: only include when defined (Firestore rejects undefined)
@@ -392,73 +479,143 @@ export default function CartView({
                 const priceBefore = unitBase;
                 const priceAfter = discount > 0 ? Math.round(priceBefore * (1 - discount / 100)) : priceBefore;
                 const itemKey = item.selectedVariant ? `${item.product.id}_${item.selectedVariant.id}_${index}` : `${item.product.id}_${index}`;
+                const discKey = getItemKey(item);
+                const extraDisc = itemDiscounts[discKey];
+                const extraDiscPerUnit = extraDisc && extraDisc.value > 0
+                  ? (extraDisc.type === 'percent'
+                    ? Math.round(priceAfter * extraDisc.value / 100)
+                    : Math.min(extraDisc.value, priceAfter))
+                  : 0;
+                const finalPricePerUnit = priceAfter - extraDiscPerUnit;
 
                 return (
-                  <div key={itemKey} className="flex items-start gap-4 py-5 first:pt-0 last:pb-0">
-                    <img
-                      src={item.selectedVariant?.image || (item.product.image && String(item.product.image) !== '0' ? item.product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300')}
-                      alt={item.product.name}
-                      className="w-16 h-16 md:w-20 md:h-20 object-cover rounded-2xl bg-slate-150 border border-slate-50 shrink-0"
-                    />
+                  <div key={itemKey} className="py-5 first:pt-0 last:pb-0 space-y-2.5">
+                    {/* Item row */}
+                    <div className="flex items-start gap-4">
+                      <img
+                        src={item.selectedVariant?.image || (item.product.image && String(item.product.image) !== '0' ? item.product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300')}
+                        alt={item.product.name}
+                        className="w-16 h-16 md:w-20 md:h-20 object-cover rounded-2xl bg-slate-150 border border-slate-50 shrink-0"
+                      />
 
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] bg-brand-cyan/5 text-brand-cyan px-2 py-0.5 rounded-md font-bold uppercase">
-                          {item.product.category}
-                        </span>
-                        {item.selectedVariant && (
-                          <span className="text-[11px] bg-cyan-100 text-cyan-800 font-bold px-2 py-0.5 rounded-md border border-cyan-200">
-                            {item.selectedVariant.name}
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] bg-brand-cyan/5 text-brand-cyan px-2 py-0.5 rounded-md font-bold uppercase">
+                            {item.product.category}
                           </span>
-                        )}
+                          {item.selectedVariant && (
+                            <span className="text-[11px] bg-cyan-100 text-cyan-800 font-bold px-2 py-0.5 rounded-md border border-cyan-200">
+                              {item.selectedVariant.name}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="font-bold text-slate-800 text-sm md:text-base truncate">{item.product.name}</h4>
+                        
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {discount > 0 && (
+                            <span className="text-xs text-slate-400 line-through">{formatPrice(priceBefore)}</span>
+                          )}
+                          <span className={`text-sm md:text-base font-black ${extraDiscPerUnit > 0 ? 'text-slate-400 line-through text-sm' : 'text-brand-dark'}`}>
+                            {formatPrice(priceAfter)}
+                          </span>
+                          {extraDiscPerUnit > 0 && (
+                            <span className="text-sm font-black text-rose-600">
+                              {formatPrice(finalPricePerUnit)}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <h4 className="font-bold text-slate-800 text-sm md:text-base truncate">{item.product.name}</h4>
-                      
-                      <div className="flex items-center gap-2">
-                        {discount > 0 && (
-                          <span className="text-xs text-slate-400 line-through">
-                            {formatPrice(priceBefore)}
+
+                      {/* Quantity controls */}
+                      <div className="flex flex-col items-end gap-3 justify-between self-stretch shrink-0">
+                        <button
+                          onClick={() => onRemoveItem(item.product.id)}
+                          className="p-1 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
+                          title={lang === 'fr' ? 'Supprimer' : 'حذف'}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+
+                        <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden h-8 bg-slate-50">
+                          <button
+                            onClick={() => onUpdateQuantity(item.product.id, item.quantity - 1)}
+                            className="px-2.5 hover:bg-slate-200 transition-colors h-full text-slate-500 font-bold"
+                          >
+                            <Minus size={12} />
+                          </button>
+                          <span className="px-3 font-extrabold text-xs text-slate-800 text-center w-8 select-none">
+                            {item.quantity}
                           </span>
-                        )}
-                        <span className="text-sm md:text-base font-black text-brand-dark">
-                          {formatPrice(priceAfter)}
-                        </span>
+                          <button
+                            onClick={() => onUpdateQuantity(item.product.id, item.quantity + 1)}
+                            className="px-2.5 hover:bg-slate-200 transition-colors h-full text-slate-500 font-bold"
+                            disabled={item.quantity >= item.product.stock}
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Quantity controls */}
-                    <div className="flex flex-col items-end gap-3 justify-between self-stretch shrink-0">
-                      <button
-                        onClick={() => onRemoveItem(item.product.id)}
-                        className="p-1 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
-                        title={lang === 'fr' ? 'Supprimer' : 'حذف'}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-
-                      <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden h-8 bg-slate-50">
-                        <button
-                          onClick={() => onUpdateQuantity(item.product.id, item.quantity - 1)}
-                          className="px-2.5 hover:bg-slate-200 transition-colors h-full text-slate-500 font-bold"
-                        >
-                          <Minus size={12} />
-                        </button>
-                        <span className="px-3 font-extrabold text-xs text-slate-800 text-center w-8 select-none">
-                          {item.quantity}
+                    {/* Per-item extra discount row (Admin & Staff Only) */}
+                    {isStaff && (
+                      <div className="flex items-center gap-2 flex-wrap bg-rose-50/60 border border-rose-100 rounded-xl px-3 py-2">
+                        <span className="text-[11px] font-bold text-rose-500 flex items-center gap-1 shrink-0">
+                          <Percent size={11} />
+                          {lang === 'fr' ? 'Remise Spéciale (Admin):' : 'تخفيض خاص (الإدارة):'}
                         </span>
-                        <button
-                          onClick={() => onUpdateQuantity(item.product.id, item.quantity + 1)}
-                          className="px-2.5 hover:bg-slate-200 transition-colors h-full text-slate-500 font-bold"
-                          disabled={item.quantity >= item.product.stock}
-                        >
-                          <Plus size={12} />
-                        </button>
+                        {/* Toggle type buttons */}
+                        <div className="flex items-center border border-rose-200 rounded-lg overflow-hidden text-[11px] font-bold shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setItemDiscount(discKey, 'percent', extraDisc?.value || 0)}
+                            className={`px-2 py-1 flex items-center gap-0.5 transition-colors ${(!extraDisc || extraDisc.type === 'percent') ? 'bg-rose-500 text-white' : 'bg-white text-rose-500 hover:bg-rose-50'}`}
+                          >
+                            <Percent size={10} />
+                            <span className="text-[9px]">%</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setItemDiscount(discKey, 'cash', extraDisc?.value || 0)}
+                            className={`px-2 py-1 flex items-center gap-0.5 transition-colors ${extraDisc?.type === 'cash' ? 'bg-rose-500 text-white' : 'bg-white text-rose-500 hover:bg-rose-50'}`}
+                          >
+                            <DollarSign size={10} />
+                            <span className="text-[9px]">{lang === 'fr' ? 'DA' : 'دج'}</span>
+                          </button>
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          max={(!extraDisc || extraDisc.type === 'percent') ? 100 : undefined}
+                          value={extraDisc?.value ?? ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setItemDiscount(discKey, extraDisc?.type || 'percent', val);
+                          }}
+                          placeholder="0"
+                          className="w-16 text-xs font-bold bg-white border border-rose-200 rounded-lg px-2 py-1 focus:outline-none focus:border-rose-400 text-center"
+                        />
+                        {extraDiscPerUnit > 0 && (
+                          <>
+                            <span className="text-[11px] font-black text-rose-600">
+                              = -{formatPrice(extraDiscPerUnit * item.quantity)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => clearItemDiscount(discKey)}
+                              className="text-rose-300 hover:text-rose-500 transition-colors ml-auto"
+                              title={lang === 'fr' ? 'Annuler la remise' : 'إلغاء التخفيض'}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </>
+                        )}
                       </div>
-                    </div>
-
+                    )}
                   </div>
                 );
               })}
+
             </div>
           </div>
 
@@ -519,54 +676,18 @@ export default function CartView({
                       />
                     </div>
 
-                    {/* Wilaya Dropdown */}
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                        {lang === 'fr' ? 'Wilaya de livraison *' : 'الولاية *'}
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={selectedWilaya?.code || ''}
-                          onChange={(e) => handleWilayaChange(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs appearance-none focus:outline-none focus:border-brand-cyan font-medium text-slate-800"
-                          disabled={loadingWilayas}
-                        >
-                          <option value="">{lang === 'fr' ? '-- Sélectionner la Wilaya --' : '-- اختر الولاية --'}</option>
-                          {wilayas.map((w) => (
-                            <option key={w.code} value={w.code}>
-                              {w.code} - {isRtl ? w.nameAr : w.nameAscii}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={14} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none rtl:left-auto rtl:right-3" />
-                      </div>
-                    </div>
-
-                    {/* Commune Dropdown */}
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                        {lang === 'fr' ? 'Commune de livraison *' : 'البلدية *'}
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={selectedCommune?.id || ''}
-                          onChange={(e) => {
-                            const c = communes.find((item) => String(item.id) === e.target.value) ?? null;
-                            setSelectedCommune(c);
-                          }}
-                          className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs appearance-none focus:outline-none focus:border-brand-cyan font-medium text-slate-800"
-                          disabled={!selectedWilaya || communes.length === 0}
-                        >
-                          <option value="">{lang === 'fr' ? '-- Sélectionner la Commune --' : '-- اختر البلدية --'}</option>
-                          {communes.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {isRtl ? c.nameAr : c.nameAscii}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={14} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none rtl:left-auto rtl:right-3" />
-                      </div>
-                    </div>
+                    {/* Searchable Wilaya & Commune Selector */}
+                    <SearchableWilayaCommuneSelector
+                      lang={lang}
+                      selectedWilaya={selectedWilaya}
+                      selectedCommune={selectedCommune}
+                      onSelectWilaya={(w) => {
+                        setSelectedWilaya(w);
+                        setSelectedCommune(null);
+                      }}
+                      onSelectCommune={(c) => setSelectedCommune(c)}
+                      required
+                    />
                   </div>
                 </div>
               )}
@@ -640,6 +761,36 @@ export default function CartView({
                 </div>
               )}
 
+              {/* Emergency Order Toggle Section */}
+              <div className={`p-4 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                isEmergencyOrder ? 'bg-rose-50 border-rose-300 ring-2 ring-rose-200' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2.5 rounded-xl text-white shrink-0 ${isEmergencyOrder ? 'bg-rose-600 animate-pulse' : 'bg-slate-400'}`}>
+                    <AlertTriangle size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900">
+                      {lang === 'fr' ? 'Commande d\'Urgence Cabinet 🚨' : 'طلب طوارئ عاجل للعيادة 🚨'}
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5 leading-snug">
+                      {lang === 'fr'
+                        ? 'Cochez si vous avez un besoin urgent en cabinet (Priorité absolue de préparation)'
+                        : 'حدد هذا الخيار عند وجود عطل أو احتياج عاجل بالعيادة لمنح طلبك الأولوية الفورية للتجهيز والشحن!'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsEmergencyOrder(!isEmergencyOrder)}
+                  className={`w-12 h-6 rounded-full transition-colors relative flex items-center p-0.5 cursor-pointer shrink-0 ${
+                    isEmergencyOrder ? 'bg-rose-600 justify-end' : 'bg-slate-300 justify-start'
+                  }`}
+                >
+                  <span className="w-5 h-5 bg-white rounded-full shadow-md" />
+                </button>
+              </div>
+
               {/* Pricing breakdown */}
               <div className="space-y-3.5 text-sm font-medium text-slate-600 border-t border-slate-100 pt-4">
                 <div className="flex justify-between">
@@ -651,6 +802,13 @@ export default function CartView({
                   <div className="flex justify-between text-rose-500 font-semibold">
                     <span>{lang === 'fr' ? 'Remises articles' : 'تخفيضات المنتجات'}</span>
                     <span>-{formatPrice(totals.productDiscounts)}</span>
+                  </div>
+                )}
+
+                {totals.extraItemDiscounts > 0 && (
+                  <div className="flex justify-between text-rose-600 font-bold">
+                    <span>{lang === 'fr' ? 'Remises manuelles (facture)' : 'تخفيضات يدوية (الفاتورة)'}</span>
+                    <span>-{formatPrice(totals.extraItemDiscounts)}</span>
                   </div>
                 )}
 

@@ -211,7 +211,7 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
               {[
                 { label: 'Nom du client', value: order.doctorName, bold: true },
                 { label: 'Date', value: invoiceDate },
-                { label: 'Mode de paiement', value: isCash ? 'Comptant / Livraison' : 'Crédit 20 jours', accent: true },
+                { label: 'Mode de paiement', value: isCash ? 'Comptant / Livraison' : 'Crédit 15 jours', accent: true },
                 { label: 'Commercial', value: order.commercialName || 'Directe' },
               ].map((field, i) => (
                 <div key={i} style={{
@@ -279,10 +279,10 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
                   Conditions de paiement
                 </div>
                 <div style={{ fontSize: '9pt', fontWeight: 700, color: isCash ? C.cash : C.credit, lineHeight: 1.35 }}>
-                  {isCash ? 'Paiement à la livraison' : 'Paiement à crédit – Échéance: 20 jours'}
+                  {isCash ? 'Paiement à la livraison' : 'Paiement à crédit – Échéance: 15 jours'}
                 </div>
                 <div style={{ fontSize: '7pt', fontWeight: 500, color: isCash ? '#15803D' : '#C2410C', marginTop: '3px' }}>
-                  {isCash ? 'Payé à la réception' : `Crédit client: paiement sous 20 jours — ${deadlineDate}`}
+                  {isCash ? 'Payé à la réception' : `Crédit client: paiement sous 15 jours — ${deadlineDate}`}
                 </div>
               </div>
             </div>
@@ -294,19 +294,20 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
               <thead>
                 <tr style={{ background: C.navy, color: 'white' }}>
                   {[
-                    { h: 'N°', align: 'center' as const, w: '5%' },
-                    { h: 'Code', align: 'left' as const, w: '9%' },
-                    { h: 'Désignation', align: 'left' as const, w: '28%' },
-                    { h: 'Quantité', align: 'center' as const, w: '8%' },
-                    { h: 'Prix Unitaire TTC', align: 'right' as const, w: '12%' },
-                    { h: 'Remise %', align: 'center' as const, w: '8%' },
-                    { h: 'Prix Vente TTC', align: 'right' as const, w: '12%' },
-                    { h: 'Montant TTC', align: 'right' as const, w: '12%' },
+                    { h: 'N°', align: 'center' as const, w: '4%' },
+                    { h: 'Code', align: 'left' as const, w: '8%' },
+                    { h: 'Désignation', align: 'left' as const, w: '26%' },
+                    { h: 'Qté', align: 'center' as const, w: '6%' },
+                    { h: 'Prix Unit. TTC', align: 'right' as const, w: '11%' },
+                    { h: 'Remise Produit', align: 'center' as const, w: '9%' },
+                    { h: 'Remise Facture', align: 'center' as const, w: '9%' },
+                    { h: 'Prix Vente TTC', align: 'right' as const, w: '11%' },
+                    { h: 'Montant TTC', align: 'right' as const, w: '11%' },
                   ].map((col, i) => (
                     <th key={i} style={{
                       padding: '6px 7px', fontWeight: 600, fontSize: '6.5pt',
                       letterSpacing: '0.3px', textAlign: col.align, whiteSpace: 'nowrap',
-                      borderRight: i < 7 ? '1px solid rgba(255,255,255,0.12)' : 'none',
+                      borderRight: i < 8 ? '1px solid rgba(255,255,255,0.12)' : 'none',
                       width: col.w,
                     }}>{col.h}</th>
                   ))}
@@ -316,8 +317,16 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
                 {order.items.map((item, idx) => {
                   const disc = item.discountPercent ?? 0;
                   const pu = Math.round(item.price / (1 - disc / 100)) || item.price;
-                  const pv = item.price;
-                  const montant = pv * item.quantity;
+                  // Extra invoice discount (manual by doctor)
+                  const extraDiscType = (item as any).extraDiscountType as 'percent' | 'cash' | undefined;
+                  const extraDiscValue = (item as any).extraDiscountValue as number | undefined;
+                  const extraDiscAmount = (item as any).extraDiscountAmount as number | undefined;
+                  const pv = item.price; // price after product discount
+                  // Final price per unit after extra discount
+                  const finalPv = extraDiscAmount && extraDiscAmount > 0
+                    ? Math.max(0, pv - Math.round(extraDiscAmount / item.quantity))
+                    : pv;
+                  const montant = finalPv * item.quantity;
                   return (
                     <tr key={idx} style={{
                       background: idx % 2 === 0 ? '#FFFFFF' : C.grayLight,
@@ -341,14 +350,23 @@ export default function InvoicePrintView({ order, doctor, shopInfo, onClose }: I
                       <td style={{ padding: '5px 7px', textAlign: 'center', color: disc > 0 ? '#DC2626' : '#CBD5E1', fontWeight: disc > 0 ? 700 : 400, borderRight: `1px solid ${C.border}` }}>
                         {disc > 0 ? `${disc}%` : '—'}
                       </td>
-                      <td style={{ padding: '5px 7px', textAlign: 'right', color: C.gray, borderRight: `1px solid ${C.border}` }}>{fmt(pv)}</td>
+                      <td style={{ padding: '5px 7px', textAlign: 'center', borderRight: `1px solid ${C.border}` }}>
+                        {extraDiscValue && extraDiscValue > 0 ? (
+                          <span style={{ color: '#7C3AED', fontWeight: 700 }}>
+                            {extraDiscType === 'percent'
+                              ? `-${extraDiscValue}%`
+                              : `-${fmt(extraDiscValue)} DA`}
+                          </span>
+                        ) : <span style={{ color: '#CBD5E1' }}>—</span>}
+                      </td>
+                      <td style={{ padding: '5px 7px', textAlign: 'right', color: C.gray, borderRight: `1px solid ${C.border}` }}>{fmt(finalPv)}</td>
                       <td style={{ padding: '5px 7px', textAlign: 'right', fontWeight: 700, color: C.navy }}>{fmt(montant)}</td>
                     </tr>
                   );
                 })}
                 {order.items.length === 0 && (
                   <tr>
-                    <td colSpan={8} style={{ padding: '12px', textAlign: 'center', color: '#94A3B8', fontStyle: 'italic' }}>Aucun article</td>
+                    <td colSpan={9} style={{ padding: '12px', textAlign: 'center', color: '#94A3B8', fontStyle: 'italic' }}>Aucun article</td>
                   </tr>
                 )}
               </tbody>

@@ -3,17 +3,18 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, CartesianGrid, Legend
 } from 'recharts';
-import { Order, Expense } from '../../types';
+import { Order, Expense, Product } from '../../types';
 import { Language, getTranslation } from '../../translations';
-import { TrendingUp, Package, Calendar, DollarSign } from 'lucide-react';
+import { TrendingUp, Package, Calendar, DollarSign, ShoppingBag, Scale } from 'lucide-react';
 
 interface AnalyticsDashboardProps {
   lang: Language;
   ordersList: Order[];
   expensesList: Expense[];
+  productsList?: Product[];
 }
 
-export default function AnalyticsDashboard({ lang, ordersList, expensesList }: AnalyticsDashboardProps) {
+export default function AnalyticsDashboard({ lang, ordersList, expensesList, productsList = [] }: AnalyticsDashboardProps) {
   const fmt = (n: number) =>
     new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(Math.round(n)) +
     ' ' + getTranslation(lang, 'currency');
@@ -26,6 +27,10 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList }: A
     const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear;
 
     const activeOrders = ordersList.filter((o) => o.status !== 'cancelled');
+
+    // Create lookup map for products purchase price
+    const productsMap = new Map<string, Product>();
+    productsList.forEach(p => productsMap.set(p.id, p));
 
     const monthSales = (m: number, y: number) =>
       activeOrders
@@ -43,8 +48,22 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList }: A
         : 0;
 
     const totalSales = activeOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
+    
+    // Calculate total cost of goods sold (COGS / purchase costs)
+    let totalPurchaseCost = 0;
+    activeOrders.forEach((o) => {
+      o.items.forEach((item) => {
+        const prod = productsMap.get(item.productId);
+        const purchasePrice = Number((item as any).purchasePrice ?? prod?.purchasePrice ?? 0);
+        totalPurchaseCost += purchasePrice * (Number(item.quantity) || 1);
+      });
+    });
+
+    const grossProfit = totalSales - totalPurchaseCost;
     const totalExpenses = expensesList.reduce((s, e) => s + e.amount, 0);
-    const netProfit = totalSales - totalExpenses;
+    
+    // Accurate Net Profit = Total Sales - Cost of Purchase (COGS) - Operational Expenses
+    const netProfit = grossProfit - totalExpenses;
 
     const productMap = new Map<string, { name: string; qty: number; revenue: number }>();
     activeOrders.forEach((o) => {
@@ -83,32 +102,38 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList }: A
       }
     ];
 
-    return { totalSales, totalExpenses, netProfit, monthChange, topProducts, peakDays, monthCompare, currentMonthSales, previousMonthSales };
-  }, [ordersList, expensesList, lang]);
+    return { totalSales, totalPurchaseCost, grossProfit, totalExpenses, netProfit, monthChange, topProducts, peakDays, monthCompare, currentMonthSales, previousMonthSales };
+  }, [ordersList, expensesList, productsList, lang]);
 
   return (
     <div className="space-y-6">
       <div className="border-b border-slate-50 pb-4">
         <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
           <TrendingUp size={20} className="text-brand-cyan" />
-          {lang === 'fr' ? 'Tableau de Bord Analytique' : 'لوحة التحكم التحليلية'}
+          {lang === 'fr' ? 'Tableau de Bord Analytique' : 'لوحة التحكم التحليلية الشاملة'}
         </h3>
+        <p className="text-xs text-slate-400 font-medium mt-1">
+          {lang === 'fr'
+            ? 'Calculs financiers précis : Profit net = Ventes - Coût d\'achat des produits - Dépenses opérationnelles'
+            : 'الحسابات المالية الدقيقة: صافي الربح = إجمالي المبيعات - تكلفة شراء البضاعة المباعة - المصروفات التشغيلية'}
+        </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
           { label: lang === 'fr' ? 'Ventes totales' : 'إجمالي المبيعات', value: stats.totalSales, icon: DollarSign, color: 'text-brand-cyan' },
-          { label: lang === 'fr' ? 'Dépenses' : 'المصروفات', value: stats.totalExpenses, icon: Calendar, color: 'text-amber-600' },
-          { label: lang === 'fr' ? 'Profit net' : 'صافي الربح', value: stats.netProfit, icon: TrendingUp, color: stats.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600' },
-          { label: lang === 'fr' ? 'Évolution mensuelle' : 'تغير شهري', value: stats.monthChange, icon: Package, color: 'text-violet-600', suffix: '%' }
-        ].map(({ label, value, icon: Icon, color, suffix }) => (
+          { label: lang === 'fr' ? 'Coût d\'achat (COGS)' : 'تكلفة الشراء (البضاعة)', value: stats.totalPurchaseCost, icon: ShoppingBag, color: 'text-slate-600' },
+          { label: lang === 'fr' ? 'Marge brute' : 'الربح الإجمالي للمبيعات', value: stats.grossProfit, icon: Scale, color: 'text-blue-600' },
+          { label: lang === 'fr' ? 'Dépenses' : 'المصروفات التشغيلية', value: stats.totalExpenses, icon: Calendar, color: 'text-amber-600' },
+          { label: lang === 'fr' ? 'Profit net réel' : 'صافي الربح الصافي النهائي', value: stats.netProfit, icon: TrendingUp, color: stats.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600' }
+        ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-xs">
             <div className="flex items-center gap-1.5 mb-1">
               <Icon size={14} className={color} />
-              <span className="text-[10px] font-bold text-slate-400 uppercase">{label}</span>
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-tight">{label}</span>
             </div>
-            <p className="font-black text-slate-900 text-lg">
-              {suffix ? `${value > 0 ? '+' : ''}${value}${suffix}` : fmt(value)}
+            <p className="font-black text-slate-900 text-base md:text-lg">
+              {fmt(value)}
             </p>
           </div>
         ))}

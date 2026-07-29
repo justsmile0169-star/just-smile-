@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { collection, query, where, orderBy, limit, startAfter, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, startAfter, getDocs, getDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 import ProductCard from './ProductCard';
 import AnnouncementsSection from './AnnouncementsSection';
 import ProductSlider from './ProductSlider';
-import { Search, X, ShieldAlert, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, ScanBarcode, Sparkles, Flame, ShoppingBag } from 'lucide-react';
+import { Search, X, ShieldAlert, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, ScanBarcode, Sparkles, Flame, ShoppingBag, Box } from 'lucide-react';
 
 interface BrowseViewProps {
   products: Product[];
@@ -20,6 +20,7 @@ interface BrowseViewProps {
   selectedCategory?: string;
   onSelectCategory?: (category: string) => void;
   onOpenBarcodeScanner?: () => void;
+  mode?: 'catalog' | 'routine_clinic' | 'most_requested';
 }
 
 export default function BrowseView({
@@ -33,7 +34,8 @@ export default function BrowseView({
   currentUser,
   selectedCategory: propSelectedCategory,
   onSelectCategory,
-  onOpenBarcodeScanner
+  onOpenBarcodeScanner,
+  mode = 'catalog'
 }: BrowseViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [localCategory, setLocalCategory] = useState<string>('all');
@@ -43,233 +45,54 @@ export default function BrowseView({
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const [latestProducts, setLatestProducts] = useState<Product[]>([]);
-  const [mostRequestedProducts, setMostRequestedProducts] = useState<Product[]>([]);
-  const [routineClinicProducts, setRoutineClinicProducts] = useState<Product[]>([]);
+  // Custom categories from Firestore
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  useEffect(() => {
+    getDoc(doc(db, 'settings', 'categories'))
+      .then(snap => {
+        if (snap && snap.exists()) {
+          const data = snap.data();
+          if (Array.isArray(data.list) && data.list.length > 0) {
+            setCustomCategories(data.list);
+          }
+        }
+      })
+      .catch(() => {}); // Silent catch for offline mode
+  }, []);
 
-  // Main catalog products pagination state
-  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
-  const [lastVisible, setLastVisible] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
 
-  // Search state
-  const [searchProducts, setSearchProducts] = useState<Product[]>([]);
-  const [loadingSearch, setLoadingSearch] = useState(false);
-
+  // Virtual local pagination for instant rendering without network requests
+  const [displayLimit, setDisplayLimit] = useState(24);
+  const [fallbackProducts, setFallbackProducts] = useState<Product[]>([]);
+  const [loadingFallback, setLoadingFallback] = useState(false);
   const loaderRef = useRef<HTMLDivElement>(null);
 
-  // Fetch sliders on mount or when currentUser changes - optimized to use single query
+  // Reset local pagination limit on category or search change
   useEffect(() => {
-    const fetchSlidersData = async () => {
-      try {
-        // Fetch more products in a single query to cover all slider needs
-        const q = query(
-          collection(db, 'products'),
-          orderBy('createdAt', 'desc'),
-          limit(100)
-        );
-        const snap = await getDocs(q);
-        const allProducts: Product[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Product;
-          if (!data.isDeleted) allProducts.push({ ...data, id: d.id });
-        });
+    setDisplayLimit(24);
+  }, [selectedCategory, searchQuery]);
 
-        // Filter locally for different sliders
-        setLatestProducts(allProducts.slice(0, 20));
-        
-        if (currentUser && currentUser.role === 'doctor') {
-          const mostRequested = [...allProducts]
-            .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
-            .slice(0, 20);
-          setMostRequestedProducts(mostRequested);
-
-          const routine = allProducts
-            .filter(p => p.isRoutineClinic)
-            .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0))
-            .slice(0, 20);
-          setRoutineClinicProducts(routine);
-        }
-      } catch (err) {
-        console.error("Error fetching sliders data:", err);
-      }
-    };
-
-    fetchSlidersData();
-  }, [currentUser]);
-
-  // Reset page and load first batch of catalog products when category changes
+  // Fallback fetch if products prop is initially empty
   useEffect(() => {
-    const initFetch = async () => {
-      setLoading(true);
-      try {
-        let q;
-        const productsRef = collection(db, 'products');
-
-        if (selectedCategory === 'all') {
-          q = query(
-            productsRef,
-            orderBy('createdAt', 'desc'),
-            limit(40)
-          );
-        } else {
-          q = query(
-            productsRef,
-            where('category', '==', selectedCategory),
-            limit(40)
-          );
-        }
-
-        const snap = await getDocs(q);
-        const items: Product[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Product;
-          if (!data.isDeleted) {
-            items.push({ ...data, id: d.id });
-          }
-        });
-
-        setCatalogProducts(items);
-
-        if (snap.docs.length < 40) {
-          setHasMore(false);
-          setLastVisible(null);
-        } else {
-          setHasMore(true);
-          setLastVisible(snap.docs[snap.docs.length - 1]);
-        }
-      } catch (err) {
-        console.error("Error fetching initial catalog products:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initFetch();
-  }, [selectedCategory]);
-
-  // Fetch more products (Infinite Scroll)
-  const fetchMoreProducts = async () => {
-    if (loading || !hasMore || !lastVisible || searchQuery.trim()) return;
-
-    setLoading(true);
-    try {
-      let q;
-      const productsRef = collection(db, 'products');
-
-      if (selectedCategory === 'all') {
-        q = query(
-          productsRef,
-          orderBy('createdAt', 'desc'),
-          startAfter(lastVisible),
-          limit(40)
-        );
-      } else {
-        q = query(
-          productsRef,
-          where('category', '==', selectedCategory),
-          startAfter(lastVisible),
-          limit(40)
-        );
-      }
-
-      const snap = await getDocs(q);
-      const items: Product[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as Product;
-        if (!data.isDeleted) {
-          items.push({ ...data, id: d.id });
-        }
-      });
-
-      setCatalogProducts((prev) => {
-        const ids = new Set(prev.map(p => p.id));
-        const newItems = items.filter(p => !ids.has(p.id));
-        return [...prev, ...newItems];
-      });
-
-      if (snap.docs.length < 40) {
-        setHasMore(false);
-        setLastVisible(null);
-      } else {
-        setHasMore(true);
-        setLastVisible(snap.docs[snap.docs.length - 1]);
-      }
-    } catch (err) {
-      console.error("Error fetching more catalog products:", err);
-    } finally {
-      setLoading(false);
+    if (!products || products.length === 0) {
+      setLoadingFallback(true);
+      getDocs(collection(db, 'products'))
+        .then((snap) => {
+          const items: Product[] = [];
+          snap.forEach((d) => {
+            const data = d.data() as Product;
+            if (!data.isDeleted) {
+              items.push({ ...data, id: d.id });
+            }
+          });
+          setFallbackProducts(items);
+        })
+        .catch(() => {}) // Silent catch for offline mode
+        .finally(() => setLoadingFallback(false));
     }
-  };
+  }, [products]);
 
-  // IntersectionObserver for Infinite Scroll
-  useEffect(() => {
-    if (!hasMore || loading || searchQuery.trim()) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          fetchMoreProducts();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    const currentLoader = loaderRef.current;
-    if (currentLoader) {
-      observer.observe(currentLoader);
-    }
-
-    return () => {
-      if (currentLoader) {
-        observer.unobserve(currentLoader);
-      }
-    };
-  }, [loaderRef.current, hasMore, loading, searchQuery, lastVisible]);
-
-  // Debounced search queries database
-  useEffect(() => {
-    const trimmed = searchQuery.trim();
-    if (!trimmed) {
-      setSearchProducts([]);
-      return;
-    }
-
-    const fetchAllForSearch = async () => {
-      setLoadingSearch(true);
-      try {
-        let q;
-        const productsRef = collection(db, 'products');
-        if (selectedCategory === 'all') {
-          q = query(productsRef);
-        } else {
-          q = query(productsRef, where('category', '==', selectedCategory));
-        }
-
-        const snap = await getDocs(q);
-        const items: Product[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Product;
-          if (!data.isDeleted) {
-            items.push({ ...data, id: d.id });
-          }
-        });
-        setSearchProducts(items);
-      } catch (err) {
-        console.error("Error fetching products for search:", err);
-      } finally {
-        setLoadingSearch(false);
-      }
-    };
-
-    const timer = setTimeout(() => {
-      fetchAllForSearch();
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [searchQuery, selectedCategory]);
-
+  // Handle outside click for category dropdown
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -283,6 +106,7 @@ export default function BrowseView({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [isCategoryDropdownOpen]);
+
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem('justsmile_recent_searches');
@@ -315,7 +139,7 @@ export default function BrowseView({
 
   const isRtl = lang === 'ar';
 
-  const categories = [
+  const defaultCategories = [
     { id: 'all', labelFr: 'Tous', labelAr: 'الكل', icon: LayoutGrid },
     { id: 'Équipements', labelFr: 'Équipements', labelAr: 'المعدات', icon: Activity },
     { id: 'Consommables', labelFr: 'Consommables', labelAr: 'المواد الاستهلاكية', icon: Syringe },
@@ -325,31 +149,107 @@ export default function BrowseView({
     { id: 'Prothèse dentaire', labelFr: 'Prothèse dentaire', labelAr: 'بدائل الأسنان', icon: Layers }
   ];
 
+  const defaultCatIds = defaultCategories.map(c => c.id);
+  const extraCategories = customCategories
+    .filter(cat => !defaultCatIds.includes(cat))
+    .map(cat => ({ id: cat, labelFr: cat, labelAr: cat, icon: Box }));
+
+  const categories = [...defaultCategories, ...extraCategories];
+
   const activeCategoryObj = categories.find((c) => c.id === selectedCategory) || categories[0];
   const ActiveCategoryIcon = activeCategoryObj.icon;
 
-  // Filter products based on search query and category select
-  const filteredProducts = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return catalogProducts;
-    }
-    return searchProducts.filter((prod) => {
-      const matchesCategory = selectedCategory === 'all' || prod.category === selectedCategory;
-      const matchesSearch = prod.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            prod.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            prod.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            (prod.barcode && prod.barcode.includes(searchQuery));
-      return matchesCategory && matchesSearch;
-    });
-  }, [catalogProducts, searchProducts, selectedCategory, searchQuery]);
+  const activeProducts = (products && products.length > 0) ? products : fallbackProducts;
 
-  // Smart Search suggestions (max 5 suggestions)
+  // Normalize text for Arabic (diacritics/letter variants) and French accents
+  const normalizeText = (str: string): string => {
+    if (!str) return '';
+    return str
+      .toLowerCase()
+      .replace(/[\u064B-\u0652]/g, '') // remove Arabic tashkeel
+      .replace(/[أإآ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/ى/g, 'ي')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // remove French diacritics
+      .trim();
+  };
+
+  // Base source products depending on mode
+  const sourceProducts = useMemo(() => {
+    const valid = activeProducts.filter(p => !p.isDeleted);
+
+    if (mode === 'routine_clinic') {
+      return valid.filter(p => p.isRoutineClinic);
+    }
+    if (mode === 'most_requested') {
+      const trulyRequested = valid.filter(p => Number(p.salesCount || 0) > 0);
+      if (trulyRequested.length > 0) {
+        return [...trulyRequested].sort((a, b) => Number(b.salesCount || 0) - Number(a.salesCount || 0));
+      }
+      return [...valid].sort((a, b) => Number(b.salesCount || 0) - Number(a.salesCount || 0));
+    }
+    return valid;
+  }, [activeProducts, mode]);
+
+  // Derived latest products for top slider
+  const latestProducts = useMemo(() => {
+    return activeProducts
+      .filter(p => !p.isDeleted)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, 16);
+  }, [activeProducts]);
+
+  // Enhanced Filter & Multi-token Search Engine
+  const filteredProducts = useMemo(() => {
+    const trimmed = searchQuery.trim();
+    const tokens = normalizeText(trimmed).split(/\s+/).filter(Boolean);
+
+    return sourceProducts.filter((prod) => {
+      const matchesCategory =
+        !selectedCategory ||
+        selectedCategory === 'all' ||
+        prod.category === selectedCategory ||
+        (prod.category && normalizeText(prod.category) === normalizeText(selectedCategory));
+
+      if (!matchesCategory) return false;
+
+      if (tokens.length === 0) return true;
+
+      const searchableCorpus = [
+        prod.name,
+        prod.description,
+        prod.category,
+        prod.barcode || '',
+        prod.technicalSheet || '',
+        ...(prod.variants ? prod.variants.flatMap(v => [v.name, v.barcode || '', ...Object.values(v.attributes || {})]) : []),
+        ...(prod.attributes ? prod.attributes.flatMap(a => [a.name, ...a.options]) : [])
+      ].map(normalizeText).join(' ');
+
+      return tokens.every(token => searchableCorpus.includes(token));
+    });
+  }, [sourceProducts, selectedCategory, searchQuery]);
+
+  // Virtual batch for instant rendering
+  const displayedProducts = useMemo(() => {
+    return filteredProducts.slice(0, displayLimit);
+  }, [filteredProducts, displayLimit]);
+
+  const hasMoreLocal = displayedProducts.length < filteredProducts.length;
+
+  // Smart Search suggestions (max 6 suggestions)
   const searchSuggestions = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    return searchProducts
-      .filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
-      .slice(0, 5);
-  }, [searchProducts, searchQuery]);
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return [];
+    const tokens = normalizeText(trimmed).split(/\s+/).filter(Boolean);
+
+    return sourceProducts
+      .filter((p) => {
+        const corpus = normalizeText(`${p.name} ${p.category} ${p.description}`);
+        return tokens.every(token => corpus.includes(token));
+      })
+      .slice(0, 6);
+  }, [sourceProducts, searchQuery]);
 
   return (
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -363,18 +263,36 @@ export default function BrowseView({
         </div>
 
         <div className="relative z-10 max-w-2xl space-y-4">
-          <span className="text-[10px] md:text-xs font-black tracking-widest uppercase bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/20 px-3 py-1 rounded-full inline-block">
-            {lang === 'fr' ? 'Commandez vos fournitures en toute sérénité' : 'اطلب مستلزمات عيادتك بكل أريحية'}
+          <span className="text-[10px] md:text-xs font-black tracking-widest uppercase bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/20 px-3 py-1 rounded-full inline-flex items-center gap-1.5">
+            {mode === 'routine_clinic' ? (
+              <><ShoppingBag size={14} className="text-emerald-400" /> {lang === 'fr' ? 'Section Spéciale' : 'قسم خاص'}</>
+            ) : mode === 'most_requested' ? (
+              <><Flame size={14} className="text-amber-400" /> {lang === 'fr' ? 'Section Spéciale' : 'قسم خاص'}</>
+            ) : (
+              lang === 'fr' ? 'Commandez vos fournitures en toute sérénité' : 'اطلب مستلزمات عيادتك بكل أريحية'
+            )}
           </span>
           <h2 className="text-xl sm:text-2xl md:text-4xl font-extrabold tracking-tight leading-tight">
-            {lang === 'fr'
-              ? 'Le meilleur matériel dentaire livré directement à votre cabinet'
-              : 'أجود المواد والمستلزمات الطبية لطب الأسنان تصل لعيادتكم'}
+            {mode === 'routine_clinic' ? (
+              lang === 'fr' ? 'Produits de la Routine de Clinique' : 'منتجات العيادة الروتينية'
+            ) : mode === 'most_requested' ? (
+              lang === 'fr' ? 'Produits les plus demandés & vendus' : 'المنتجات الأكثر طلباً ومبيعاً'
+            ) : (
+              lang === 'fr'
+                ? 'Le meilleur matériel dentaire livré directement à votre cabinet'
+                : 'أجود المواد والمستلزمات الطبية لطب الأسنان تصل لعيادتكم'
+            )}
           </h2>
           <p className="text-xs sm:text-sm md:text-sm text-slate-200 font-medium max-w-lg">
-            {lang === 'fr'
-              ? 'JUST SMILE propose un large choix de produits d\'équipements, consommables, et instruments de haute qualité.'
-              : 'منصة JUST SMILE توفر تشكيلة واسعة من مستهلكات ومعدات طب الأسنان عالية الجودة.'}
+            {mode === 'routine_clinic' ? (
+              lang === 'fr' ? 'Tous les produits et consommables utilisés quotidiennement dans les cabinets dentaires.' : 'جميع المستلزمات والمواد الطبية المستعملة يومياً وبشكل روتيني في عيادة الأسنان.'
+            ) : mode === 'most_requested' ? (
+              lang === 'fr' ? 'Les articles et équipements les plus commandés par les praticiens.' : 'أكثر المنتجات والمعدات إقبالاً وطلباً من أطباء الأسنان.'
+            ) : (
+              lang === 'fr'
+                ? 'JUST SMILE propose un large choix de produits d\'équipements, consommables, et instruments de haute qualité.'
+                : 'منصة JUST SMILE توفر تشكيلة واسعة من مستهلكات ومعدات طب الأسنان عالية الجودة.'
+            )}
           </p>
 
           {/* Smart Search Bar & Category Dropdown */}
@@ -423,9 +341,9 @@ export default function BrowseView({
                   onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
                   className="w-full md:w-auto h-full min-h-[48px] sm:min-h-[52px] bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl sm:rounded-2xl px-4 sm:px-5 py-3 flex items-center justify-between md:justify-center gap-2 sm:gap-3 transition-all cursor-pointer font-extrabold text-xs sm:text-sm backdrop-blur-md shadow-lg"
                 >
-                  <div className="flex items-center gap-2">
-                    <ActiveCategoryIcon size={16} className="text-brand-cyan" />
-                    <span className="hidden sm:inline">
+                  <div className="flex items-center gap-2 truncate">
+                    <ActiveCategoryIcon size={16} className="text-brand-cyan shrink-0" />
+                    <span className="inline text-xs sm:text-sm font-extrabold truncate">
                       {isRtl ? activeCategoryObj.labelAr : activeCategoryObj.labelFr}
                     </span>
                   </div>
@@ -436,7 +354,7 @@ export default function BrowseView({
                   /* Dropdown Menu */
                   <div className={`absolute top-full mt-2 ${isRtl ? 'right-0' : 'left-0 md:right-0 md:left-auto'} w-64 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-40 divide-y divide-slate-50 dark:divide-slate-800 text-slate-700 dark:text-slate-200 py-1.5 animate-in fade-in slide-in-from-top-2 duration-150`}>
                     <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 px-4 py-2 uppercase tracking-widest">
-                      {lang === 'fr' ? 'Sélectionner une catégorie' : 'اختر fئة للمنتجات'}
+                      {lang === 'fr' ? 'Sélectionner une catégorie' : 'اختر فئة المنتجات'}
                     </p>
                     {categories.map((cat) => {
                       const CatIcon = cat.icon;
@@ -560,40 +478,12 @@ export default function BrowseView({
       {/* Announcements carousel */}
       <AnnouncementsSection lang={lang} currentUser={currentUser ?? null} />
 
-      {/* New Products Slider */}
-      <ProductSlider
-        title={lang === 'fr' ? 'Nouveaux Produits' : 'آخر المنتجات المضافة'}
-        icon={<Sparkles size={18} className="text-brand-cyan" />}
-        products={latestProducts}
-        favorites={favorites}
-        lang={lang}
-        onAddToCart={onAddToCart}
-        onToggleFavorite={onToggleFavorite}
-        onViewProduct={onViewProduct}
-        user={user}
-      />
-
-      {/* Most Requested Section (Only for logged-in doctors) */}
-      {currentUser && currentUser.role === 'doctor' && (
+      {/* New Products Slider (Catalog mode only) */}
+      {mode === 'catalog' && (
         <ProductSlider
-          title={lang === 'fr' ? 'Produits les plus demandés' : 'المنتجات الأكثر طلباً'}
-          icon={<Flame size={18} className="text-amber-500 animate-pulse" />}
-          products={mostRequestedProducts}
-          favorites={favorites}
-          lang={lang}
-          onAddToCart={onAddToCart}
-          onToggleFavorite={onToggleFavorite}
-          onViewProduct={onViewProduct}
-          user={user}
-        />
-      )}
-
-      {/* Routine Clinic Products Section (Only for logged-in doctors) */}
-      {currentUser && currentUser.role === 'doctor' && (
-        <ProductSlider
-          title={lang === 'fr' ? 'Routine de Clinique' : 'منتجات العيادة الروتينية'}
-          icon={<ShoppingBag size={18} className="text-emerald-500" />}
-          products={routineClinicProducts}
+          title={lang === 'fr' ? 'Nouveaux Produits' : 'آخر المنتجات المضافة'}
+          icon={<Sparkles size={18} className="text-brand-cyan" />}
+          products={latestProducts}
           favorites={favorites}
           lang={lang}
           onAddToCart={onAddToCart}
@@ -606,8 +496,9 @@ export default function BrowseView({
       {/* Category Pills Navigation Filter Bar */}
       <div className="space-y-3 shrink-0">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-            {getTranslation(lang, 'categories')}
+          <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <Layers size={18} className="text-brand-cyan" />
+            {lang === 'fr' ? 'Choisissez une catégorie de produits' : 'اختر فئة المنتجات'}
           </h3>
           {(selectedCategory !== 'all' || searchQuery !== '') && (
             <button
@@ -646,12 +537,15 @@ export default function BrowseView({
       </div>
 
       {/* Products Grid list */}
-      {loading && catalogProducts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 space-y-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-cyan"></div>
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
-            {lang === 'fr' ? 'Chargement des produits...' : 'جاري تحميل المنتجات...'}
-          </p>
+      {loadingFallback && activeProducts.length === 0 ? (
+        <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-1.5 sm:gap-3 md:gap-5">
+          {Array.from({ length: 9 }).map((_, idx) => (
+            <div key={idx} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-3 space-y-3 animate-pulse">
+              <div className="w-full h-24 sm:h-36 bg-slate-100 dark:bg-slate-800 rounded-xl" />
+              <div className="h-3 bg-slate-100 dark:bg-slate-800 rounded-md w-3/4" />
+              <div className="h-3 bg-slate-100 dark:bg-slate-800 rounded-md w-1/2" />
+            </div>
+          ))}
         </div>
       ) : filteredProducts.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-8 space-y-2 shadow-xs">
@@ -660,41 +554,35 @@ export default function BrowseView({
           <p className="text-xs text-slate-400 dark:text-slate-500">{lang === 'fr' ? 'Essayez de reformuler votre recherche ou de changer de catégorie.' : 'يرجى محاولة البحث بعبارة أخرى أو تصفح فئة مختلفة.'}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {filteredProducts.map((p) => (
-            <ProductCard
-              key={p.id}
-              product={p}
-              lang={lang}
-              onAddToCart={onAddToCart}
-              isFavorite={favorites.includes(p.id)}
-              onToggleFavorite={onToggleFavorite}
-              onViewDetails={onViewProduct}
-              user={user}
-            />
-          ))}
-        </div>
-      )}
+        <>
+          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-1.5 sm:gap-3 md:gap-5">
+            {displayedProducts.map((p) => (
+              <ProductCard
+                key={p.id}
+                product={p}
+                lang={lang}
+                onAddToCart={onAddToCart}
+                isFavorite={favorites.includes(p.id)}
+                onToggleFavorite={onToggleFavorite}
+                onViewDetails={onViewProduct}
+                user={user}
+              />
+            ))}
+          </div>
 
-      {/* Infinite Scroll trigger element */}
-      {hasMore && !searchQuery.trim() && (
-        <div ref={loaderRef} className="flex justify-center py-8">
-          {loading ? (
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan"></div>
-          ) : (
-            <div className="h-4 w-4"></div>
+          {/* Load More Button for Instant Memory-based Pagination */}
+          {hasMoreLocal && (
+            <div className="flex justify-center pt-6 pb-4">
+              <button
+                type="button"
+                onClick={() => setDisplayLimit((prev) => prev + 24)}
+                className="bg-white dark:bg-slate-900 hover:bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/30 font-extrabold text-xs md:text-sm px-6 py-3 rounded-2xl shadow-xs transition-all cursor-pointer"
+              >
+                {lang === 'fr' ? 'Afficher plus de produits...' : 'عرض المزيد من المنتجات...'}
+              </button>
+            </div>
           )}
-        </div>
-      )}
-
-      {/* Search loader */}
-      {searchQuery.trim() && loadingSearch && (
-        <div className="flex flex-col items-center justify-center py-10 space-y-2">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-cyan"></div>
-          <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
-            {lang === 'fr' ? 'Recherche en cours...' : 'جاري البحث...'}
-          </span>
-        </div>
+        </>
       )}
 
     </div>

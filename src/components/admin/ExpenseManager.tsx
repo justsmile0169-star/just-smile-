@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { collection, addDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Expense, ExpenseCategory, Order, UserProfile } from '../../types';
+import { Expense, ExpenseCategory, Order, Product, UserProfile } from '../../types';
 import { Language, getTranslation } from '../../translations';
 import { useAppDialog } from '../../context/AppDialogContext';
 import { logActivity } from '../../utils/activityLogger';
@@ -11,6 +11,7 @@ interface ExpenseManagerProps {
   lang: Language;
   expenses: Expense[];
   ordersList: Order[];
+  productsList?: Product[];
   currentUser: UserProfile;
 }
 
@@ -22,7 +23,7 @@ const CATEGORIES: { id: ExpenseCategory; fr: string; ar: string }[] = [
   { id: 'other', fr: 'Autre', ar: 'أخرى' }
 ];
 
-export default function ExpenseManager({ lang, expenses, ordersList, currentUser }: ExpenseManagerProps) {
+export default function ExpenseManager({ lang, expenses, ordersList, productsList = [], currentUser }: ExpenseManagerProps) {
   const { alert, confirm } = useAppDialog();
   const [category, setCategory] = useState<ExpenseCategory>('rent');
   const [description, setDescription] = useState('');
@@ -31,13 +32,36 @@ export default function ExpenseManager({ lang, expenses, ordersList, currentUser
   const [loading, setLoading] = useState(false);
 
   const fmt = (n: number) =>
-    new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(n) + ' ' + getTranslation(lang, 'currency');
+    new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(Math.round(n)) + ' ' + getTranslation(lang, 'currency');
 
-  const totalSales = ordersList
-    .filter((o) => o.status !== 'cancelled')
-    .reduce((s, o) => s + o.totalAfterDiscount, 0);
-  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-  const netProfit = totalSales - totalExpenses;
+  const { totalSales, totalPurchaseCost, grossProfit, totalExpenses, netProfit } = useMemo(() => {
+    const activeOrders = ordersList.filter((o) => o.status !== 'cancelled');
+    const sales = activeOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
+
+    const productsMap = new Map<string, Product>();
+    productsList.forEach((p) => productsMap.set(p.id, p));
+
+    let purchaseCosts = 0;
+    activeOrders.forEach((o) => {
+      o.items.forEach((item) => {
+        const prod = productsMap.get(item.productId);
+        const purchasePrice = Number((item as any).purchasePrice ?? prod?.purchasePrice ?? 0);
+        purchaseCosts += purchasePrice * (Number(item.quantity) || 1);
+      });
+    });
+
+    const gross = sales - purchaseCosts;
+    const exp = expenses.reduce((s, e) => s + e.amount, 0);
+    const net = gross - exp;
+
+    return {
+      totalSales: sales,
+      totalPurchaseCost: purchaseCosts,
+      grossProfit: gross,
+      totalExpenses: exp,
+      netProfit: net
+    };
+  }, [ordersList, productsList, expenses]);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,22 +105,31 @@ export default function ExpenseManager({ lang, expenses, ordersList, currentUser
       <div className="border-b border-slate-50 pb-4">
         <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
           <Wallet size={20} className="text-brand-cyan" />
-          {lang === 'fr' ? 'Gestion des Dépenses' : 'إدارة المصروفات'}
+          {lang === 'fr' ? 'Gestion des Dépenses & Bilan Financier' : 'إدارة المصروفات والتقرير المالي الفعلي'}
         </h3>
+        <p className="text-xs text-slate-400 font-medium mt-1">
+          {lang === 'fr'
+            ? 'Bilan exact : Profit Net = Ventes - Coût d\'achat des marchandises - Dépenses opérationnelles'
+            : 'الملخص المالي الفعلي: صافي الربح = إجمالي المبيعات - تكلفة شراء البضاعة - المصروفات التشغيلية'}
+        </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-          <p className="text-[10px] font-bold text-emerald-600 uppercase">{lang === 'fr' ? 'Ventes' : 'المبيعات'}</p>
-          <p className="font-black text-emerald-800">{fmt(totalSales)}</p>
+          <p className="text-[10px] font-bold text-emerald-600 uppercase">{lang === 'fr' ? 'Ventes totales' : 'إجمالي المبيعات'}</p>
+          <p className="font-black text-emerald-800 text-sm md:text-base">{fmt(totalSales)}</p>
+        </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+          <p className="text-[10px] font-bold text-slate-600 uppercase">{lang === 'fr' ? 'Coût d\'achat' : 'تكلفة شراء البضاعة'}</p>
+          <p className="font-black text-slate-800 text-sm md:text-base">{fmt(totalPurchaseCost)}</p>
         </div>
         <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-          <p className="text-[10px] font-bold text-amber-600 uppercase">{lang === 'fr' ? 'Dépenses' : 'المصروفات'}</p>
-          <p className="font-black text-amber-800">{fmt(totalExpenses)}</p>
+          <p className="text-[10px] font-bold text-amber-600 uppercase">{lang === 'fr' ? 'Dépenses' : 'المصروفات التشغيلية'}</p>
+          <p className="font-black text-amber-800 text-sm md:text-base">{fmt(totalExpenses)}</p>
         </div>
-        <div className={`border rounded-2xl p-4 ${netProfit >= 0 ? 'bg-brand-cyan/5 border-brand-cyan/20' : 'bg-rose-50 border-rose-100'}`}>
-          <p className="text-[10px] font-bold uppercase text-slate-500">{lang === 'fr' ? 'Profit net' : 'صافي الربح'}</p>
-          <p className={`font-black ${netProfit >= 0 ? 'text-brand-cyan' : 'text-rose-600'}`}>{fmt(netProfit)}</p>
+        <div className={`border rounded-2xl p-4 ${netProfit >= 0 ? 'bg-emerald-100/60 border-emerald-300' : 'bg-rose-50 border-rose-200'}`}>
+          <p className="text-[10px] font-bold uppercase text-slate-700">{lang === 'fr' ? 'Profit net réel' : 'صافي الربح الصافي الفعلي'}</p>
+          <p className={`font-black text-sm md:text-base ${netProfit >= 0 ? 'text-emerald-900' : 'text-rose-600'}`}>{fmt(netProfit)}</p>
         </div>
       </div>
 
@@ -110,7 +143,7 @@ export default function ExpenseManager({ lang, expenses, ordersList, currentUser
         <input type="number" required min={1} value={amount || ''} onChange={(e) => setAmount(Number(e.target.value))} placeholder="DA" className="border rounded-xl py-2 px-3 text-sm bg-white" />
         <div className="flex gap-2">
           <input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className="flex-1 border rounded-xl py-2 px-2 text-sm bg-white" />
-          <button type="submit" disabled={loading} className="bg-brand-cyan text-white px-3 rounded-xl"><Plus size={16} /></button>
+          <button type="submit" disabled={loading} className="bg-brand-cyan text-white px-3 rounded-xl cursor-pointer hover:bg-brand-cyan/90 transition-all flex items-center justify-center"><Plus size={16} /></button>
         </div>
       </form>
 
@@ -136,7 +169,7 @@ export default function ExpenseManager({ lang, expenses, ordersList, currentUser
                   <td className="py-2 px-3">{exp.description}</td>
                   <td className="py-2 px-3 font-bold text-rose-600">{fmt(exp.amount)}</td>
                   <td className="py-2 px-3">
-                    <button type="button" onClick={() => handleDelete(exp)} className="text-slate-400 hover:text-rose-600"><Trash2 size={14} /></button>
+                    <button type="button" onClick={() => handleDelete(exp)} className="text-slate-400 hover:text-rose-600 cursor-pointer"><Trash2 size={14} /></button>
                   </td>
                 </tr>
               ))

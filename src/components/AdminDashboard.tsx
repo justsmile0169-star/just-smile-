@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocFromServer, getDocs, query, where, writeBatch } from 'firebase/firestore';
+import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocs, query, where, writeBatch, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Order, Product, ProductVariant, ProductAttribute, OrderStatus, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage } from '../types';
 import { Language, getTranslation } from '../translations';
@@ -9,9 +9,9 @@ import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { hasPermission } from '../utils/permissions';
 import { logActivity } from '../utils/activityLogger';
 import { deleteProductFully } from '../utils/productFirestore';
-import { getYalidineConfig, saveYalidineConfig } from '../utils/yalidineService';
+import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../utils/yalidineService';
 import {
-  Users, DollarSign, Package, Tag, AlertTriangle, Calendar,
+  DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
   History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin,
@@ -54,7 +54,7 @@ interface AdminDashboardProps {
 }
 
 type AdminSubTab =
-  | 'orders' | 'analytics' | 'users' | 'doctors' | 'clientSituation' | 'debts' | 'inventory'
+  | 'orders' | 'analytics' | 'doctors' | 'clientSituation' | 'debts' | 'inventory'
   | 'promotions' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages' | 'announcements';
 
 export default function AdminDashboard({
@@ -89,72 +89,10 @@ export default function AdminDashboard({
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
   };
 
-  // --- 1. Filter Doctor Profiles ---
-  const pendingDoctors = usersList.filter((u) => u.role === 'doctor' && u.status === 'pending');
-  const approvedDoctors = usersList.filter((u) => u.role === 'doctor' && u.status === 'approved');
+  const approvedDoctors = usersList.filter((u) => u.role === 'doctor');
   const allDoctors = usersList.filter((u) => u.role === 'doctor');
 
   const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
-
-  // Approve Doctor Account
-  const handleApproveDoctor = async (uid: string) => {
-    setLoading(true);
-    try {
-      // Write approval to Firestore
-      await updateDoc(doc(db, 'users', uid), { status: 'approved' });
-
-      // Verify the write was persisted on the server (not just the local cache)
-      const verifySnap = await getDocFromServer(doc(db, 'users', uid));
-      if (!verifySnap.exists() || verifySnap.data().status !== 'approved') {
-        throw new Error('Server write verification failed — status did not persist.');
-      }
-
-      // Send welcome notification separately (failure here should NOT undo approval)
-      addDoc(collection(db, 'notifications'), {
-        userId: uid,
-        titleFr: 'Bienvenue sur JUST SMILE !',
-        titleAr: 'مرحباً بك في JUST SMILE!',
-        messageFr: 'Votre compte professionnel de praticien a été validé. Vous pouvez dès à présent commander.',
-        messageAr: 'تم تفعيل حسابك المهني بنجاح. يمكنك الآن تصفح المنتجات والقيام بالطلبات.',
-        type: 'system',
-        isRead: false,
-        createdAt: new Date().toISOString()
-      }).catch((notifErr) => console.warn('Notification send failed (non-critical):', notifErr));
-
-      alert(
-        lang === 'fr'
-          ? 'Compte validé avec succès ! Le praticien peut maintenant se connecter.'
-          : 'تم تفعيل الحساب بنجاح! يمكن للطبيب الآن تسجيل الدخول.',
-        'success'
-      );
-      onRefreshData();
-    } catch (err: any) {
-      console.error('Approve doctor error:', err);
-      alert(
-        lang === 'fr'
-          ? `Erreur lors de la validation : ${err?.message || err}. Vérifiez vos permissions Firebase.`
-          : `فشل التفعيل: ${err?.message || err}. تحقق من صلاحيات Firebase.`,
-        'error'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Reject Doctor Account
-  const handleRejectDoctor = async (uid: string) => {
-    if (!(await confirm(lang === 'fr' ? 'Refuser ce compte ?' : 'هل أنت متأكد من رفض هذا الحساب؟'))) return;
-    setLoading(true);
-    try {
-      await updateDoc(doc(db, 'users', uid), { status: 'rejected' });
-      onRefreshData();
-    } catch (err) {
-      console.error(err);
-      alert('Erreur.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // --- 2. Debt Management ---
   const [selectedOrderForPayment, setSelectedOrderForPayment] = useState<Order | null>(null);
@@ -163,14 +101,103 @@ export default function AdminDashboard({
   const [orderPaymentFilter, setOrderPaymentFilter] = useState<'all' | 'unpaid' | 'paid'>('unpaid');
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
 
-  // --- Order Details & Yalidine Integration States ---
-  const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<Order | null>(null);
+  // --- Order Details & Edit States ---
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<Order | null>(null);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [editingOrderItems, setEditingOrderItems] = useState<Order['items']>([]);
+  const [editingPaymentMethod, setEditingPaymentMethod] = useState<'cash' | 'credit'>('credit');
+  const [editingDeliveryCost, setEditingDeliveryCost] = useState<number>(0);
   const [yalidineSubmitting, setYalidineSubmitting] = useState(false);
+
+  const handleStartEditOrder = (order: Order) => {
+    setEditingOrder(order);
+    setEditingOrderItems(order.items.map((item) => ({ ...item })));
+    setEditingPaymentMethod(order.paymentMethod || 'credit');
+    setEditingDeliveryCost(order.deliveryCost || 0);
+  };
+
+  const handleItemPriceChange = (index: number, newPrice: number) => {
+    setEditingOrderItems((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], price: Math.max(0, newPrice) };
+      return updated;
+    });
+  };
+
+  const handleItemQuantityChange = (index: number, newQty: number) => {
+    setEditingOrderItems((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], quantity: Math.max(1, newQty) };
+      return updated;
+    });
+  };
+
+  const handleRemoveItemFromEdit = (index: number) => {
+    setEditingOrderItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const calculateEditingTotals = () => {
+    const totalBefore = editingOrderItems.reduce(
+      (sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1),
+      0
+    );
+    const delivery = Number(editingDeliveryCost) || 0;
+    const netTotal = totalBefore + delivery;
+    const paid = editingOrder?.paidAmount || 0;
+    const remaining = Math.max(0, netTotal - paid);
+    return { totalBefore, delivery, netTotal, paid, remaining };
+  };
+
+  const handleSaveOrderEdit = async () => {
+    if (!editingOrder) return;
+    if (editingOrderItems.length === 0) {
+      alert(lang === 'fr' ? 'La commande doit contenir au moins un produit.' : 'يجب أن يحتوي الطلب على منتج واحد على الأقل.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { totalBefore, delivery, netTotal, paid, remaining } = calculateEditingTotals();
+      const orderRef = doc(db, 'orders', editingOrder.id);
+
+      const newPaymentStatus = netTotal === 0 ? 'paid' : paid >= netTotal ? 'paid' : paid > 0 ? 'partial' : 'unpaid';
+
+      const updatePayload: Partial<Order> = {
+        items: editingOrderItems,
+        paymentMethod: editingPaymentMethod,
+        totalBeforeDiscount: totalBefore,
+        totalAfterDiscount: netTotal,
+        deliveryCost: delivery,
+        remainingBalance: remaining,
+        paymentStatus: newPaymentStatus,
+      };
+
+      await updateDoc(orderRef, updatePayload);
+
+      await logActivity(
+        currentUser,
+        'order_edit',
+        'order',
+        `Edited order #${editingOrder.id.slice(-6).toUpperCase()}: paymentMethod=${editingPaymentMethod}, total=${netTotal} DA`,
+        editingOrder.id
+      );
+
+      alert(lang === 'fr' ? 'Commande modifiée avec succès !' : 'تم تعديل الطلب بنجاح!', 'success');
+
+      setEditingOrder(null);
+      setSelectedOrderForDetail((prev) => (prev && prev.id === editingOrder.id ? { ...prev, ...updatePayload } : prev));
+      onRefreshData();
+    } catch (err: any) {
+      console.error('Error updating order:', err);
+      alert(lang === 'fr' ? 'Erreur lors de la modification du produit.' : 'حدث خطأ أثناء تعديل الطلب.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSendToYalidine = async (order: Order) => {
     setYalidineSubmitting(true);
     try {
-      const { createYalidineParcel } = await import('../utils/yalidineService');
       const result = await createYalidineParcel(order, yalidineConfig);
       if (result.success && result.trackingNumber) {
         const orderRef = doc(db, 'orders', order.id);
@@ -197,7 +224,7 @@ export default function AdminDashboard({
           order.id
         );
 
-        setSelectedOrderForDetails(prev => prev && prev.id === order.id ? {
+        setSelectedOrderForDetail(prev => prev && prev.id === order.id ? {
           ...prev,
           ...updateData
         } : prev);
@@ -254,10 +281,6 @@ export default function AdminDashboard({
 
       alert(lang === 'fr' ? 'Statut mis à jour !' : 'تم تحديث حالة الطلب!', 'success');
 
-      setSelectedOrderForDetails(prev => prev && prev.id === orderId ? {
-        ...prev,
-        status: newStatus
-      } : prev);
       setSelectedOrderForDetail(prev => prev && prev.id === orderId ? {
         ...prev,
         status: newStatus
@@ -419,7 +442,6 @@ export default function AdminDashboard({
 
   // --- Orders SubTab State ---
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | OrderStatus>('all');
-  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<Order | null>(null);
 
   // --- 3. Product Inventory State ---
   const [showProductForm, setShowProductForm] = useState(false);
@@ -452,6 +474,77 @@ export default function AdminDashboard({
   const [pImage, setPImage] = useState('');
   const [pBarcode, setPBarcode] = useState('');
   const [pIsRoutineClinic, setPIsRoutineClinic] = useState(false);
+  const [pPurchasePrice, setPPurchasePrice] = useState(0); // سعر الشراء لحساب الفائدة
+
+  // Custom Categories Management
+  const [customCategories, setCustomCategories] = useState<string[]>([
+    'Équipements', 'Consommables', 'Instruments', 'Orthodontie', 'Hygiène & Stérilisation', 'Prothèse dentaire'
+  ]);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [savingCategory, setSavingCategory] = useState(false);
+
+  // Load custom categories from Firestore on mount
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'categories'));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (Array.isArray(data.list) && data.list.length > 0) {
+            setCustomCategories(data.list);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading categories:', err);
+      }
+    };
+    loadCategories();
+  }, []);
+
+  const handleAddCategory = async () => {
+    const trimmed = newCategoryInput.trim();
+    if (!trimmed) return;
+    if (customCategories.includes(trimmed)) {
+      alert(lang === 'fr' ? 'Cette catégorie existe déjà.' : 'هذه الفئة موجودة مسبقاً.', 'error');
+      return;
+    }
+    setSavingCategory(true);
+    try {
+      const updated = [...customCategories, trimmed];
+      await setDoc(doc(db, 'settings', 'categories'), { list: updated });
+      setCustomCategories(updated);
+      setNewCategoryInput('');
+      alert(lang === 'fr' ? `Catégorie "${trimmed}" ajoutée !` : `تمت إضافة الفئة "${trimmed}" بنجاح!`, 'success');
+    } catch (err) {
+      console.error(err);
+      alert('Erreur.', 'error');
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (cat: string) => {
+    const defaultCats = ['Équipements', 'Consommables', 'Instruments', 'Orthodontie', 'Hygiène & Stérilisation', 'Prothèse dentaire'];
+    if (defaultCats.includes(cat)) {
+      alert(lang === 'fr' ? 'Impossible de supprimer une catégorie par défaut.' : 'لا يمكن حذف الفئات الأساسية.', 'error');
+      return;
+    }
+    const ok = await confirm(
+      lang === 'fr' ? `Supprimer la catégorie "${cat}" ?` : `حذف الفئة "${cat}" ؟`,
+      lang === 'fr' ? 'Cette action ne supprime pas les produits existants dans cette catégorie.' : 'هذا لن يحذف المنتجات الموجودة في هذه الفئة.'
+    );
+    if (!ok) return;
+    setSavingCategory(true);
+    try {
+      const updated = customCategories.filter(c => c !== cat);
+      await setDoc(doc(db, 'settings', 'categories'), { list: updated });
+      setCustomCategories(updated);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingCategory(false);
+    }
+  };
 
   // Variable Product States inside Product Form
   const [pIsVariable, setPIsVariable] = useState(false);
@@ -595,6 +688,7 @@ export default function AdminDashboard({
       setPIsVariable(prod.isVariable ?? false);
       setPAttributes(prod.attributes || []);
       setPVariants(prod.variants || []);
+      setPPurchasePrice((prod as any).purchasePrice || 0);
     } else {
       setEditingProduct(null);
       setPName('');
@@ -611,6 +705,7 @@ export default function AdminDashboard({
       setPIsVariable(false);
       setPAttributes([]);
       setPVariants([]);
+      setPPurchasePrice(0);
       const scannedBarcode = localStorage.getItem('justsmile_new_product_barcode');
       setPBarcode(scannedBarcode || '');
       if (scannedBarcode) {
@@ -654,6 +749,7 @@ export default function AdminDashboard({
       const payload = cleanFirestoreData({
         name: pName.trim(),
         price: computedMinPrice > 0 ? computedMinPrice : Number(pPrice),
+        purchasePrice: Number(pPurchasePrice) > 0 ? Number(pPurchasePrice) : undefined,
         stock: computedStock,
         description: pDesc.trim(),
         category: pCategory,
@@ -964,17 +1060,6 @@ export default function AdminDashboard({
           </button>
         )}
         <button
-          onClick={() => setActiveSubTab('users')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'users'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-            }`}
-        >
-          <Users size={16} />
-          {getTranslation(lang, 'pendingDoctors')} ({pendingDoctors.length})
-        </button>
-
-        <button
           onClick={() => setActiveSubTab('doctors')}
           className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctors'
               ? 'bg-brand-cyan text-white shadow-xs'
@@ -1263,7 +1348,9 @@ export default function AdminDashboard({
                       <div
                         key={order.id}
                         className={`bg-white p-5 rounded-2xl border transition-all ${
-                          order.status === 'pending'
+                          order.isEmergency
+                            ? 'border-2 border-rose-500 shadow-xl ring-2 ring-rose-300 bg-rose-50/20'
+                            : order.status === 'pending'
                             ? 'border-amber-200 shadow-md ring-1 ring-amber-100'
                             : 'border-slate-200 hover:border-brand-cyan/30'
                         }`}
@@ -1272,6 +1359,11 @@ export default function AdminDashboard({
                           {/* Doctor & Order Header Info */}
                           <div className="space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
+                              {order.isEmergency && (
+                                <span className="text-xs bg-rose-600 text-white font-black px-3 py-1 rounded-full animate-pulse shadow-md flex items-center gap-1">
+                                  🚨 {lang === 'fr' ? 'URGENCE CABINET - PRIORITÉ' : 'طلب طوارئ عاجل للعيادة - أولوية قصوى!'}
+                                </span>
+                              )}
                               <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded-md font-bold text-slate-700">
                                 #{order.id ? order.id.slice(-8).toUpperCase() : 'N/A'}
                               </span>
@@ -1352,7 +1444,15 @@ export default function AdminDashboard({
                           </div>
 
                           {/* Quick Action Buttons */}
-                          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                          <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+                            <button
+                              onClick={() => handleStartEditOrder(order)}
+                              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-all flex items-center gap-1"
+                            >
+                              <Edit3 size={14} />
+                              {lang === 'fr' ? 'Modifier' : 'تعديل الطلب'}
+                            </button>
+
                             <button
                               onClick={() => setSelectedOrderForDetail(order)}
                               className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1"
@@ -1484,7 +1584,16 @@ export default function AdminDashboard({
                   )}
                 </div>
 
-                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      handleStartEditOrder(selectedOrderForDetail);
+                    }}
+                    className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5"
+                  >
+                    <Edit3 size={16} />
+                    {lang === 'fr' ? 'Modifier la commande' : 'تعديل الطلب'}
+                  </button>
                   <button
                     onClick={() => {
                       onPrintInvoice(selectedOrderForDetail);
@@ -1504,13 +1613,248 @@ export default function AdminDashboard({
               </div>
             </div>
           )}
+
+          {/* Edit Order Modal */}
+          {editingOrder && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]" dir={isRtl ? 'rtl' : 'ltr'}>
+                {/* Header */}
+                <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="font-extrabold text-slate-900 text-base md:text-lg flex items-center gap-2">
+                    <Edit3 className="text-amber-500" size={20} />
+                    {lang === 'fr' ? `Modifier la commande #${editingOrder.id.slice(-6).toUpperCase()}` : `تعديل الطلب رقم #${editingOrder.id.slice(-6).toUpperCase()}`}
+                  </h3>
+                  <button
+                    onClick={() => setEditingOrder(null)}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="p-6 overflow-y-auto space-y-6">
+                  {/* Doctor Summary */}
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between text-xs">
+                    <div>
+                      <p className="font-extrabold text-slate-900 text-sm">{editingOrder.doctorName}</p>
+                      <p className="text-slate-500">{editingOrder.doctorClinic} • 📞 {editingOrder.doctorPhone}</p>
+                    </div>
+                  </div>
+
+                  {/* 1. Payment Method Selection (Cash vs Credit) */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-black uppercase text-slate-500 tracking-wider block">
+                      💳 {lang === 'fr' ? 'Mode de paiement de la commande :' : 'طريقة دفع الفاتورة (نقداً أم دَين):'}
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setEditingPaymentMethod('cash')}
+                        className={`p-4 rounded-2xl border text-right font-extrabold text-xs md:text-sm transition-all flex items-center justify-between ${
+                          editingPaymentMethod === 'cash'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-2 ring-emerald-200'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div>
+                          <p className="font-black">{lang === 'fr' ? 'Paiement Comptant (Cash)' : 'دفع نقداً (دفع فوري)'}</p>
+                          <p className="text-[11px] text-slate-500 font-normal mt-0.5">{lang === 'fr' ? 'Règlement direct lors de la livraison' : 'تسليم وتصفية الحساب كاش عند الاستلام'}</p>
+                        </div>
+                        <Check className={`shrink-0 ${editingPaymentMethod === 'cash' ? 'opacity-100 text-emerald-600' : 'opacity-0'}`} size={18} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEditingPaymentMethod('credit')}
+                        className={`p-4 rounded-2xl border text-right font-extrabold text-xs md:text-sm transition-all flex items-center justify-between ${
+                          editingPaymentMethod === 'credit'
+                            ? 'bg-purple-50 border-purple-500 text-purple-800 ring-2 ring-purple-200'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div>
+                          <p className="font-black">{lang === 'fr' ? 'Paiement Crédit (Dette 15j)' : 'دفع كدين (مهلة 15 يوماً)'}</p>
+                          <p className="text-[11px] text-slate-500 font-normal mt-0.5">{lang === 'fr' ? 'Compte débité pour le médecin' : 'إبقاء الفاتورة كدين على حساب الطبيب'}</p>
+                        </div>
+                        <Check className={`shrink-0 ${editingPaymentMethod === 'credit' ? 'opacity-100 text-purple-600' : 'opacity-0'}`} size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2. Product Items and Price Modifications */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <h4 className="font-extrabold text-slate-800 text-xs md:text-sm uppercase tracking-wider">
+                        📦 {lang === 'fr' ? 'Modification des prix & quantités :' : 'تعديل أسعار وكميات المنتجات المطلوبة:'}
+                      </h4>
+                      <span className="text-xs text-slate-400 font-medium">
+                        {lang === 'fr' ? 'Vous pouvez augmenter, réduire ou laisser le prix d’origine.' : 'يمكنك رفع السعر، تخفيضه (عمل تخفيض)، أو إبقائه كما هو.'}
+                      </span>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
+                      {editingOrderItems.map((item, idx) => {
+                        const originalProduct = productsList.find(p => p.id === item.productId);
+                        const originalPrice = originalProduct?.price ?? item.price;
+                        const subtotal = item.price * item.quantity;
+                        const isDiscounted = item.price < originalPrice;
+                        const isIncreased = item.price > originalPrice;
+
+                        return (
+                          <div key={idx} className="p-4 bg-white hover:bg-slate-50/50 transition-colors space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-0.5">
+                                <p className="font-extrabold text-slate-900 text-xs md:text-sm">{item.name}</p>
+                                {item.variantName && (
+                                  <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-md inline-block">
+                                    {item.variantName}
+                                  </span>
+                                )}
+                                <p className="text-[11px] text-slate-400">
+                                  {lang === 'fr' ? `Prix d'origine : ${formatPrice(originalPrice)}` : `السعر الأصلي للمنتج: ${formatPrice(originalPrice)}`}
+                                </p>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItemFromEdit(idx)}
+                                className="text-rose-500 hover:text-rose-700 text-xs font-bold self-start sm:self-center flex items-center gap-1 bg-rose-50 px-2.5 py-1 rounded-lg hover:bg-rose-100 transition-colors"
+                              >
+                                <Trash2 size={13} />
+                                {lang === 'fr' ? 'Supprimer' : 'حذف المنتج'}
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+                              {/* Price Edit Input */}
+                              <div>
+                                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                                  {lang === 'fr' ? 'Prix unitaire (DA) :' : 'سعر المنتج المحسوب (دج):'}
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={item.price}
+                                  onChange={(e) => handleItemPriceChange(idx, parseFloat(e.target.value) || 0)}
+                                  className={`w-full bg-white border rounded-xl px-3 py-1.5 text-xs font-extrabold text-slate-900 focus:outline-hidden focus:ring-2 ${
+                                    isDiscounted
+                                      ? 'border-emerald-400 focus:ring-emerald-200 text-emerald-700'
+                                      : isIncreased
+                                      ? 'border-amber-400 focus:ring-amber-200 text-amber-700'
+                                      : 'border-slate-300 focus:ring-brand-cyan/20'
+                                  }`}
+                                />
+                                {isDiscounted && (
+                                  <span className="text-[10px] font-bold text-emerald-600 mt-0.5 block">
+                                    ↓ {lang === 'fr' ? 'Prix réduit (Remise)' : 'تخفيض خاص للزبون'} (-{formatPrice(originalPrice - item.price)})
+                                  </span>
+                                )}
+                                {isIncreased && (
+                                  <span className="text-[10px] font-bold text-amber-600 mt-0.5 block">
+                                    ↑ {lang === 'fr' ? 'Prix augmenté' : 'سعر مرفوع للزبون'} (+{formatPrice(item.price - originalPrice)})
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Quantity Edit Input */}
+                              <div>
+                                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                                  {lang === 'fr' ? 'Quantité :' : 'الكمية المطلوبة:'}
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) => handleItemQuantityChange(idx, parseInt(e.target.value) || 1)}
+                                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-extrabold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-brand-cyan/20"
+                                />
+                              </div>
+
+                              {/* Item Subtotal Preview */}
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">{lang === 'fr' ? 'Sous-total' : 'إجمالي المادة'}</span>
+                                <span className="text-sm font-black text-brand-dark">{formatPrice(subtotal)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 3. Delivery Cost Edit */}
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between gap-4">
+                    <label className="text-xs font-extrabold text-slate-700 whitespace-nowrap">
+                      🚚 {lang === 'fr' ? 'Frais de livraison (DA) :' : 'مصاريف / سعر التوصيل (دج):'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editingDeliveryCost}
+                      onChange={(e) => setEditingDeliveryCost(parseFloat(e.target.value) || 0)}
+                      className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-extrabold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-brand-cyan/20"
+                    />
+                  </div>
+
+                  {/* 4. Live Total Recalculation Summary */}
+                  {(() => {
+                    const { totalBefore, delivery, netTotal, remaining } = calculateEditingTotals();
+                    return (
+                      <div className="bg-gradient-to-br from-brand-dark to-[#164e63] p-5 rounded-2xl text-white space-y-2 shadow-md">
+                        <div className="flex justify-between text-xs text-slate-200">
+                          <span>{lang === 'fr' ? 'Sous-total produits :' : 'مجموع المنتجات:'}</span>
+                          <span className="font-bold">{formatPrice(totalBefore)}</span>
+                        </div>
+                        {delivery > 0 && (
+                          <div className="flex justify-between text-xs text-slate-200">
+                            <span>{lang === 'fr' ? 'Frais de livraison :' : 'مصاريف التوصيل:'}</span>
+                            <span className="font-bold">+{formatPrice(delivery)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-base font-black border-t border-white/20 pt-2 text-white">
+                          <span>{lang === 'fr' ? 'Nouveau Total Net :' : 'الصافي النهائي الجديد للطلب:'}</span>
+                          <span className="text-brand-cyan">{formatPrice(netTotal)}</span>
+                        </div>
+                        {editingPaymentMethod === 'credit' && (
+                          <div className="flex justify-between text-xs text-amber-300 font-bold pt-1">
+                            <span>{lang === 'fr' ? 'Nouveau Solde Reste à Payer (Dette) :' : 'المبلغ المتبقي كدين على الطبيب:'}</span>
+                            <span>{formatPrice(remaining)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Action Footer */}
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditingOrder(null)}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer"
+                  >
+                    {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveOrderEdit}
+                    disabled={loading}
+                    className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs px-6 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                    {lang === 'fr' ? 'Enregistrer les modifications' : 'حفظ التعديلات على الطلب'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {activeSubTab === 'analytics' && hasPermission(currentUser, 'view_analytics') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
           <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
-            <AnalyticsDashboard lang={lang} ordersList={ordersList} expensesList={expensesList} />
+            <AnalyticsDashboard lang={lang} ordersList={ordersList} expensesList={expensesList} productsList={productsList} />
           </Suspense>
         </div>
       )}
@@ -1542,7 +1886,7 @@ export default function AdminDashboard({
       {activeSubTab === 'expenses' && hasPermission(currentUser, 'view_expenses') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
           <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
-            <ExpenseManager lang={lang} expenses={expensesList} ordersList={ordersList} currentUser={currentUser} />
+            <ExpenseManager lang={lang} expenses={expensesList} ordersList={ordersList} productsList={productsList} currentUser={currentUser} />
           </Suspense>
         </div>
       )}
@@ -1579,63 +1923,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 1. Pending Users approvals */}
-      {activeSubTab === 'users' && hasPermission(currentUser, 'view_doctors') && (
-        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
-          <div className="border-b border-slate-50 pb-4">
-            <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <Users size={20} className="text-brand-cyan" />
-              {getTranslation(lang, 'pendingDoctors')}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1">
-              {lang === 'fr'
-                ? 'Validez les inscriptions des cabinets dentaires pour leur autoriser l\'accès.'
-                : 'قم بتفعيل حسابات العيادات الموثوقة للسماح لهم بالتصفح والطلب.'}
-            </p>
-          </div>
-
-          {pendingDoctors.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 font-semibold text-sm">
-              {lang === 'fr' ? 'Aucun médecin en attente de validation.' : 'لا يوجد أطباء أسنان في انتظار التفعيل حاليًا.'}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {pendingDoctors.map((docProfile) => (
-                <div key={docProfile.uid} className="border border-slate-100 p-5 rounded-2xl flex flex-col justify-between hover:border-brand-cyan/20 transition-all">
-                  <div className="space-y-2">
-                    <span className="text-[10px] bg-amber-50 text-amber-600 font-bold px-2 py-0.5 rounded-md">
-                      {getTranslation(lang, 'status_pending')}
-                    </span>
-                    <h4 className="font-extrabold text-slate-900 text-base">{docProfile.name}</h4>
-                    <p className="text-xs font-bold text-slate-700">{docProfile.clinicName}</p>
-                    <p className="text-xs text-slate-500">{docProfile.location}</p>
-                    <p className="text-xs text-slate-500 font-medium">Tél: {docProfile.phone} • Email: {docProfile.email}</p>
-                  </div>
-
-                  <div className="flex gap-2.5 mt-5">
-                    <button
-                      onClick={() => handleApproveDoctor(docProfile.uid)}
-                      disabled={loading}
-                      className="flex-1 bg-brand-cyan text-white font-bold text-xs py-2.5 px-3 rounded-xl hover:bg-brand-cyan/90 transition-all flex items-center justify-center gap-1 shadow-xs"
-                    >
-                      <Check size={14} />
-                      {getTranslation(lang, 'approve')}
-                    </button>
-                    <button
-                      onClick={() => handleRejectDoctor(docProfile.uid)}
-                      disabled={loading}
-                      className="bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1"
-                    >
-                      <X size={14} />
-                      {getTranslation(lang, 'reject')}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* 1b. All registered doctors */}
       {activeSubTab === 'doctors' && hasPermission(currentUser, 'view_doctors') && (
@@ -1699,15 +1986,8 @@ export default function AdminDashboard({
                         <td className="py-3 text-slate-500 text-xs">{docProfile.email}</td>
                         <td className="py-3 text-slate-500 text-xs">{docProfile.location}</td>
                         <td className="py-3">
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docProfile.status === 'approved'
-                                ? 'bg-emerald-50 text-emerald-600'
-                                : docProfile.status === 'pending'
-                                  ? 'bg-amber-50 text-amber-600'
-                                  : 'bg-rose-50 text-rose-600'
-                              }`}
-                          >
-                            {getTranslation(lang, `status_${docProfile.status}` as any)}
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600">
+                            {lang === 'fr' ? 'Actif' : 'مفعّل'}
                           </span>
                         </td>
                         <td className="py-3">
@@ -1915,7 +2195,7 @@ export default function AdminDashboard({
                             <div className="flex items-center justify-end gap-1.5">
                               {/* View Details + Yalidine button */}
                               <button
-                                onClick={() => setSelectedOrderForDetails(order)}
+                                onClick={() => setSelectedOrderForDetail(order)}
                                 className="p-1.5 text-slate-400 hover:text-brand-cyan hover:bg-brand-cyan/10 rounded-lg transition-colors"
                                 title={lang === 'fr' ? 'Détails & Yalidine' : 'التفاصيل ويالدين'}
                               >
@@ -2088,6 +2368,7 @@ export default function AdminDashboard({
                     <th className="pb-3">{getTranslation(lang, 'categories')}</th>
                     <th className="pb-3">{lang === 'fr' ? 'Prix Brut' : 'السعر الإجمالي'}</th>
                     <th className="pb-3">{lang === 'fr' ? 'Remise' : 'تخفيض'}</th>
+                    <th className="pb-3">{lang === 'fr' ? 'Marge' : 'الفائدة'}</th>
                     <th className="pb-3">Stock</th>
                     <th className="pb-3">{getTranslation(lang, 'expiryDate')}</th>
                     <th className="pb-3 text-right">{getTranslation(lang, 'actions')}</th>
@@ -2111,6 +2392,19 @@ export default function AdminDashboard({
                         <td className="py-3 font-extrabold">{p.price > 0 ? formatPrice(p.price) : '-'}</td>
                         <td className="py-3 text-rose-500 font-bold">
                           {p.discountPercent && p.discountPercent > 0 ? `-${p.discountPercent}%` : '-'}
+                        </td>
+                        <td className="py-3">
+                          {(p as any).purchasePrice && (p as any).purchasePrice > 0 ? (
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
+                              p.price > (p as any).purchasePrice
+                                ? 'text-emerald-700 bg-emerald-50'
+                                : 'text-rose-600 bg-rose-50'
+                            }`}>
+                              {p.price > (p as any).purchasePrice
+                                ? `+${Math.round(((p.price - (p as any).purchasePrice) / (p as any).purchasePrice) * 100)}%`
+                                : `-${Math.round((((p as any).purchasePrice - p.price) / (p as any).purchasePrice) * 100)}%`}
+                            </span>
+                          ) : <span className="text-slate-300 text-xs">—</span>}
                         </td>
                         <td className="py-3">
                           <div className="flex items-center gap-1.5">
@@ -2217,6 +2511,7 @@ export default function AdminDashboard({
                           setSelectedDoctorForDiscount(docProfile);
                           setDoctorDiscountPercent(docProfile.discountPercent || 0);
                           setDoctorCommercial(docProfile.commercialName || '');
+                          setDoctorAllowCredit(docProfile.allowCreditPayment ?? true);
                         }}
                         className="p-1.5 text-slate-400 hover:text-brand-cyan hover:bg-brand-cyan/5 rounded-lg transition-colors"
                       >
@@ -2256,6 +2551,25 @@ export default function AdminDashboard({
                   />
                 </div>
 
+                {/* Credit Payment Toggle */}
+                <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-2xl">
+                  <div>
+                    <p className="text-sm font-bold text-slate-700">{lang === 'fr' ? 'Autoriser le crédit (15 jours)' : 'السماح بالدفع الآجل (15 يوم)'}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{lang === 'fr' ? 'Actif = paiement à crédit autorisé' : 'مفعل = يُسمح بالدفع الآجل'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDoctorAllowCredit(prev => !prev)}
+                    className={`w-12 h-6 rounded-full transition-all relative shrink-0 ${
+                      doctorAllowCredit ? 'bg-brand-cyan' : 'bg-slate-200'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
+                      doctorAllowCredit ? 'right-1' : 'left-1'
+                    }`} />
+                  </button>
+                </div>
+
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={handleUpdateDoctorDiscount}
@@ -2265,7 +2579,7 @@ export default function AdminDashboard({
                     {getTranslation(lang, 'submit')}
                   </button>
                   <button
-                    onClick={() => { setSelectedDoctorForDiscount(null); setDoctorDiscountPercent(0); setDoctorCommercial(''); }}
+                    onClick={() => { setSelectedDoctorForDiscount(null); setDoctorDiscountPercent(0); setDoctorCommercial(''); setDoctorAllowCredit(true); }}
                     className="bg-white text-slate-500 border border-slate-200 text-xs font-bold py-3 px-4 rounded-xl hover:bg-slate-50 transition-all"
                   >
                     {lang === 'fr' ? 'Annuler' : 'إلغاء'}
@@ -2545,27 +2859,27 @@ export default function AdminDashboard({
       )}
 
       {/* Order Details & Yalidine express Modal */}
-      {selectedOrderForDetails && (
+      {selectedOrderForDetail && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-8">
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <span className="font-extrabold text-slate-800 text-base">
-                  {lang === 'fr' ? `Détails Commande #${selectedOrderForDetails.id ? selectedOrderForDetails.id.slice(-6).toUpperCase() : 'UNKNOWN'}` : `تفاصيل الطلب #${selectedOrderForDetails.id ? selectedOrderForDetails.id.slice(-6).toUpperCase() : 'UNKNOWN'}`}
+                  {lang === 'fr' ? `Détails Commande #${selectedOrderForDetail.id ? selectedOrderForDetail.id.slice(-6).toUpperCase() : 'UNKNOWN'}` : `تفاصيل الطلب #${selectedOrderForDetail.id ? selectedOrderForDetail.id.slice(-6).toUpperCase() : 'UNKNOWN'}`}
                 </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase ${selectedOrderForDetails.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
-                    selectedOrderForDetails.status === 'cancelled' ? 'bg-rose-100 text-rose-800' :
-                      selectedOrderForDetails.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
-                        selectedOrderForDetails.status === 'preparing' ? 'bg-amber-100 text-amber-800' :
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase ${selectedOrderForDetail.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
+                    selectedOrderForDetail.status === 'cancelled' ? 'bg-rose-100 text-rose-800' :
+                      selectedOrderForDetail.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
+                        selectedOrderForDetail.status === 'preparing' ? 'bg-amber-100 text-amber-800' :
                           'bg-slate-100 text-slate-800'
                   }`}>
-                  {selectedOrderForDetails.status}
+                  {selectedOrderForDetail.status}
                 </span>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedOrderForDetails(null)}
+                onClick={() => setSelectedOrderForDetail(null)}
                 className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
               >
                 <X size={18} />
@@ -2592,7 +2906,7 @@ export default function AdminDashboard({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50 text-xs">
-                        {selectedOrderForDetails.items.map((item, idx) => (
+                        {selectedOrderForDetail.items.map((item, idx) => (
                           <tr key={idx} className="hover:bg-slate-50/50">
                             <td className="p-3 font-semibold text-slate-800">{item.name}</td>
                             <td className="p-3 text-center text-slate-500">{formatPrice(item.price)}</td>
@@ -2608,23 +2922,23 @@ export default function AdminDashboard({
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs space-y-2">
                     <div className="flex justify-between text-slate-600">
                       <span>{lang === 'fr' ? 'Sous-total brut' : 'المجموع الإجمالي'}</span>
-                      <span className="font-semibold">{formatPrice(selectedOrderForDetails.totalBeforeDiscount)}</span>
+                      <span className="font-semibold">{formatPrice(selectedOrderForDetail.totalBeforeDiscount)}</span>
                     </div>
-                    {selectedOrderForDetails.discountAmount > 0 && (
+                    {selectedOrderForDetail.discountAmount > 0 && (
                       <div className="flex justify-between text-rose-500 font-semibold">
                         <span>{lang === 'fr' ? 'Remises appliquées' : 'التخفيضات المطبقة'}</span>
-                        <span>-{formatPrice(selectedOrderForDetails.discountAmount)}</span>
+                        <span>-{formatPrice(selectedOrderForDetail.discountAmount)}</span>
                       </div>
                     )}
-                    {selectedOrderForDetails.deliveryCost !== undefined && (
+                    {selectedOrderForDetail.deliveryCost !== undefined && (
                       <div className="flex justify-between text-slate-600 font-semibold">
                         <span>{lang === 'fr' ? 'Frais de livraison' : 'تكلفة التوصيل'}</span>
-                        <span>+{formatPrice(selectedOrderForDetails.deliveryCost)}</span>
+                        <span>+{formatPrice(selectedOrderForDetail.deliveryCost)}</span>
                       </div>
                     )}
                     <div className="flex justify-between border-t border-slate-200/60 pt-2 font-black text-slate-800 text-sm">
                       <span>{lang === 'fr' ? 'Net à payer' : 'الصافي المطلوب'}</span>
-                      <span>{formatPrice(selectedOrderForDetails.totalAfterDiscount)}</span>
+                      <span>{formatPrice(selectedOrderForDetail.totalAfterDiscount)}</span>
                     </div>
                   </div>
                 </div>
@@ -2636,25 +2950,25 @@ export default function AdminDashboard({
                       {lang === 'fr' ? 'Destinataire / Cabinet' : 'معلومات المستلم والعيادة'}
                     </h4>
                     <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 text-xs space-y-2">
-                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Nom :' : 'الاسم:'}</strong> {selectedOrderForDetails.doctorName}</p>
-                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Téléphone :' : 'الهاتف:'}</strong> {selectedOrderForDetails.doctorPhone}</p>
-                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Clinique :' : 'العيادة:'}</strong> {selectedOrderForDetails.doctorClinic}</p>
-                      {selectedOrderForDetails.doctorWilayaName && (
+                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Nom :' : 'الاسم:'}</strong> {selectedOrderForDetail.doctorName}</p>
+                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Téléphone :' : 'الهاتف:'}</strong> {selectedOrderForDetail.doctorPhone}</p>
+                      <p className="text-slate-800"><strong className="text-slate-500">{lang === 'fr' ? 'Clinique :' : 'العيادة:'}</strong> {selectedOrderForDetail.doctorClinic}</p>
+                      {selectedOrderForDetail.doctorWilayaName && (
                         <p className="text-slate-800">
-                          <strong className="text-slate-500">{lang === 'fr' ? 'Adresse :' : 'العنوان:'}</strong> {selectedOrderForDetails.doctorWilayaName} - {selectedOrderForDetails.doctorCommuneName}
+                          <strong className="text-slate-500">{lang === 'fr' ? 'Adresse :' : 'العنوان:'}</strong> {selectedOrderForDetail.doctorWilayaName} - {selectedOrderForDetail.doctorCommuneName}
                         </p>
                       )}
-                      {selectedOrderForDetails.deliveryType && (
+                      {selectedOrderForDetail.deliveryType && (
                         <p className="text-slate-800">
                           <strong className="text-slate-500">{lang === 'fr' ? 'Type Livraison :' : 'نوع التوصيل:'}</strong>{' '}
-                          {selectedOrderForDetails.deliveryType === 'free' ? (lang === 'fr' ? 'Gratuit (Djelfa)' : 'مجاني (الجلفة)') :
-                            selectedOrderForDetails.deliveryType === 'to_office' ? (lang === 'fr' ? 'Bureau de livraison' : 'مكتب شركة الشحن') :
+                          {selectedOrderForDetail.deliveryType === 'free' ? (lang === 'fr' ? 'Gratuit (Djelfa)' : 'مجاني (الجلفة)') :
+                            selectedOrderForDetail.deliveryType === 'to_office' ? (lang === 'fr' ? 'Bureau de livraison' : 'مكتب شركة الشحن') :
                               (lang === 'fr' ? 'Clinique' : 'العيادة')}
                         </p>
                       )}
-                      {selectedOrderForDetails.notes && (
+                      {selectedOrderForDetail.notes && (
                         <p className="text-slate-800 italic bg-amber-50/50 border border-amber-100 p-2 rounded-xl mt-1 text-[11px]">
-                          <strong>Note:</strong> {selectedOrderForDetails.notes}
+                          <strong>Note:</strong> {selectedOrderForDetail.notes}
                         </p>
                       )}
                     </div>
@@ -2666,8 +2980,8 @@ export default function AdminDashboard({
                       {lang === 'fr' ? 'Statut du flux' : 'إدارة حالة الطلب'}
                     </h4>
                     <select
-                      value={selectedOrderForDetails.status}
-                      onChange={(e) => handleUpdateOrderStatus(selectedOrderForDetails.id, e.target.value)}
+                      value={selectedOrderForDetail.status}
+                      onChange={(e) => handleUpdateOrderStatus(selectedOrderForDetail.id, e.target.value as OrderStatus)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 focus:outline-none focus:border-brand-cyan text-xs text-slate-800 font-bold"
                     >
                       <option value="pending">En attente / Pending</option>
@@ -2690,19 +3004,19 @@ export default function AdminDashboard({
                       <p className="text-[10px] text-slate-400 italic">
                         {lang === 'fr' ? 'L\'intégration Yalidine est désactivée dans les réglages.' : 'ربط شركة يالدين معطل في الإعدادات.'}
                       </p>
-                    ) : selectedOrderForDetails.yalidineTrackingNumber ? (
+                    ) : selectedOrderForDetail.yalidineTrackingNumber ? (
                       <div className="bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl text-xs space-y-2">
                         <div className="flex justify-between items-center">
                           <span className="text-slate-500 font-bold">{lang === 'fr' ? 'N° Suivi :' : 'رقم التتبع:'}</span>
-                          <span className="font-mono font-black text-slate-800">{selectedOrderForDetails.yalidineTrackingNumber}</span>
+                          <span className="font-mono font-black text-slate-800">{selectedOrderForDetail.yalidineTrackingNumber}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-slate-500 font-bold">{lang === 'fr' ? 'Statut Yalidine :' : 'حالة الطرد:'}</span>
-                          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-semibold text-[10px]">{selectedOrderForDetails.yalidineStatus || 'created'}</span>
+                          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-semibold text-[10px]">{selectedOrderForDetail.yalidineStatus || 'created'}</span>
                         </div>
-                        {selectedOrderForDetails.yalidineLabelUrl && (
+                        {selectedOrderForDetail.yalidineLabelUrl && (
                           <a
-                            href={selectedOrderForDetails.yalidineLabelUrl}
+                            href={selectedOrderForDetail.yalidineLabelUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="block text-center bg-brand-cyan text-white font-extrabold text-[10px] py-1.5 rounded-xl hover:bg-brand-cyan/95 transition-colors mt-2"
@@ -2714,7 +3028,7 @@ export default function AdminDashboard({
                     ) : (
                       <button
                         type="button"
-                        onClick={() => handleSendToYalidine(selectedOrderForDetails)}
+                        onClick={() => handleSendToYalidine(selectedOrderForDetail)}
                         disabled={yalidineSubmitting}
                         className="w-full flex items-center justify-center gap-2 bg-brand-cyan text-white font-bold text-xs py-2.5 px-4 rounded-xl hover:bg-brand-cyan/90 transition-all shadow-xs disabled:opacity-50"
                       >
@@ -2738,10 +3052,18 @@ export default function AdminDashboard({
             </div>
 
             {/* Footer Buttons */}
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap justify-end gap-3">
               <button
                 type="button"
-                onClick={() => onPrintInvoice(selectedOrderForDetails)}
+                onClick={() => handleStartEditOrder(selectedOrderForDetail)}
+                className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-xl text-xs transition-colors"
+              >
+                <Edit3 size={14} />
+                {lang === 'fr' ? 'Modifier la commande' : 'تعديل الطلب'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onPrintInvoice(selectedOrderForDetail)}
                 className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs transition-colors"
               >
                 <FileText size={14} />
@@ -2749,7 +3071,7 @@ export default function AdminDashboard({
               </button>
               <button
                 type="button"
-                onClick={() => setSelectedOrderForDetails(null)}
+                onClick={() => setSelectedOrderForDetail(null)}
                 className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs transition-colors"
               >
                 {lang === 'fr' ? 'Fermer' : 'إغلاق'}
@@ -2931,17 +3253,42 @@ export default function AdminDashboard({
                 />
               </div>
 
+              <div className="space-y-1">
+                <label className="text-slate-500 font-bold text-xs">{lang === 'fr' ? 'Prix Brut (DA)' : 'السعر الإجمالي (دج)'}</label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={pPrice}
+                  onChange={(e) => setPPrice(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs">{lang === 'fr' ? 'Prix Brut (DA)' : 'السعر الإجمالي (دج)'}</label>
+                  <label className="text-slate-500 font-bold text-xs flex items-center gap-1">
+                    <DollarSign size={11} className="text-emerald-500" />
+                    {lang === 'fr' ? 'Prix d\'achat (DA)' : 'سعر الشراء (دج)'}
+                  </label>
                   <input
                     type="number"
-                    required
-                    min="1"
-                    value={pPrice}
-                    onChange={(e) => setPPrice(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan"
+                    min="0"
+                    value={pPurchasePrice}
+                    onChange={(e) => setPPurchasePrice(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-emerald-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-emerald-400"
+                    placeholder="0"
                   />
+                  {pPurchasePrice > 0 && pPrice > 0 && (
+                    <p className={`text-[10px] font-bold mt-0.5 ${
+                      pPrice > pPurchasePrice ? 'text-emerald-600' : 'text-rose-500'
+                    }`}>
+                      {pPrice > pPurchasePrice
+                        ? `✓ فائدة: ${Math.round(((pPrice - pPurchasePrice) / pPurchasePrice) * 100)}% (+${(pPrice - pPurchasePrice).toLocaleString()} دج)`
+                        : `✗ خسارة: ${Math.round(((pPurchasePrice - pPrice) / pPurchasePrice) * 100)}%`
+                      }
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -2985,18 +3332,46 @@ export default function AdminDashboard({
 
               <div className="space-y-1">
                 <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'categories')}</label>
-                <select
-                  value={pCategory}
-                  onChange={(e) => setPCategory(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan"
-                >
-                  <option value="Équipements">Équipements</option>
-                  <option value="Consommables">Consommables</option>
-                  <option value="Instruments">Instruments</option>
-                  <option value="Orthodontie">Orthodontie</option>
-                  <option value="Hygiène & Stérilisation">Hygiène & Stérilisation</option>
-                  <option value="Prothèse dentaire">Prothèse dentaire</option>
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={pCategory}
+                    onChange={(e) => setPCategory(e.target.value as any)}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan"
+                  >
+                    {customCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={newCategoryInput}
+                      onChange={(e) => setNewCategoryInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCategory(); } }}
+                      placeholder={lang === 'fr' ? 'Nouvelle catégorie...' : 'فئة جديدة...'}
+                      className="w-36 bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-hidden focus:border-brand-cyan"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCategory}
+                      disabled={savingCategory || !newCategoryInput.trim()}
+                      className="bg-brand-cyan text-white font-bold text-xs px-3 rounded-xl hover:bg-brand-cyan/90 transition-all disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {savingCategory ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                      {lang === 'fr' ? 'Ajouter' : 'أضف'}
+                    </button>
+                  </div>
+                </div>
+                {customCategories.filter(c => !['Équipements','Consommables','Instruments','Orthodontie','Hygiène & Stérilisation','Prothèse dentaire'].includes(c)).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {customCategories.filter(c => !['Équipements','Consommables','Instruments','Orthodontie','Hygiène & Stérilisation','Prothèse dentaire'].includes(c)).map(cat => (
+                      <span key={cat} className="flex items-center gap-1 bg-brand-cyan/10 text-brand-cyan text-[10px] font-bold px-2 py-0.5 rounded-md border border-brand-cyan/20">
+                        {cat}
+                        <button type="button" onClick={() => handleDeleteCategory(cat)} className="text-rose-400 hover:text-rose-600 ml-0.5"><X size={10} /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1">

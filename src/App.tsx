@@ -1,7 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import {
-  collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc,
+  collection, onSnapshot, query, where, doc, getDoc, getDocs, getDocFromServer, setDoc,
   writeBatch, addDoc, updateDoc, deleteDoc, getCountFromServer
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
@@ -38,7 +38,7 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('justsmile_theme') as 'light' | 'dark') || 'light';
   });
-  const [activeTab, setActiveTab] = useState<'browse' | 'cart' | 'dashboard' | 'admin' | 'auth' | 'favorites' | 'notifications'>('browse');
+  const [activeTab, setActiveTab] = useState<'browse' | 'routine_clinic' | 'most_requested' | 'cart' | 'dashboard' | 'admin' | 'auth' | 'favorites' | 'notifications'>('browse');
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -197,10 +197,25 @@ export default function App() {
             });
             setLoadingUser(false);
           } else {
-            // Profile not found for this Firebase Auth UID.
-            // This is normal for staff members whose Firestore UID differs from Firebase Auth UID.
-            // Do NOT sign out — they may have logged in via custom staff auth.
-            console.warn('No Firestore profile found for Firebase Auth UID:', firebaseUser.uid);
+            // Profile not found for this Firebase Auth UID. Auto-create a default doctor profile in Firestore.
+            const defaultDoctorProfile: UserProfile = {
+              uid: firebaseUser.uid,
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'طبيب',
+              email: firebaseUser.email || '',
+              role: 'doctor',
+              clinicName: 'عيادة طب الأسنان',
+              phone: '',
+              location: '',
+              allowCreditPayment: true,
+              status: 'approved',
+              createdAt: new Date().toISOString()
+            };
+            try {
+              await setDoc(doc(db, 'users', firebaseUser.uid), defaultDoctorProfile);
+              setCurrentUser(defaultDoctorProfile);
+            } catch (createErr) {
+              console.warn('Could not auto-create Firestore user profile:', createErr);
+            }
             setLoadingUser(false);
           }
         }, (error) => {
@@ -224,61 +239,69 @@ export default function App() {
     const loadShopInfo = async () => {
       try {
         const settingsRef = doc(db, 'settings', 'shop_info');
-        const snap = await getDoc(settingsRef);
-        if (snap.exists()) {
+        const snap = await getDoc(settingsRef).catch(() => null);
+        if (snap && snap.exists()) {
           setShopInfo(snap.data() as ShopInfo);
-        } else {
-          // Seed default shop info
-          await setDoc(settingsRef, defaultShopInfo);
-          console.log('Seeded default shop info into Firestore settings/shop_info');
         }
-      } catch (err) {
-        console.error('Error loading shop info:', err);
+      } catch {
+        // Silent fallback for offline mode
       }
     };
     loadShopInfo();
   }, []);
 
-  // --- 4. Synchronize Products Collection (Real-Time for Admins/Staff only, and counts for doctors) ---
+  // --- 4. Synchronize Products Collection (Real-Time + Instant Cache) ---
   useEffect(() => {
-    const isStaff = currentUser && canAccessAdmin(currentUser);
-    const isDoctor = currentUser && currentUser.role === 'doctor';
+    const q = collection(db, 'products');
 
-    if (isStaff) {
-      // Staff: Load full products list for real-time updates
-      const q = collection(db, 'products');
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+    // Instant local fetch so products load immediately on screen
+    getDocs(q).then((snapshot) => {
+      if (snapshot && !snapshot.empty) {
         const items: Product[] = [];
         snapshot.forEach((docSnap) => {
           const product = { ...(docSnap.data() as Product), id: docSnap.id };
-          // Filter out deleted products
           if (!product.isDeleted) {
             items.push(product);
           }
         });
-        setProducts(items);
-      }, (err) => {
-        console.error("Error syncing products catalog:", err);
-      });
+        if (items.length > 0) {
+          setProducts((prev) => (prev.length === 0 ? items : prev));
+        }
+      }
+    }).catch(() => {});
 
-      return () => unsubscribe();
-    } else {
-      // Non-staff (doctors, visitors & guest buyers): Load products for catalog display and cart
-      const q = query(collection(db, 'products'), where('isDeleted', '==', false));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const items: Product[] = [];
-        snapshot.forEach((docSnap) => {
-          const product = { ...(docSnap.data() as Product), id: docSnap.id };
+    // Real-time listener for ongoing updates
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: Product[] = [];
+      snapshot.forEach((docSnap) => {
+        const product = { ...(docSnap.data() as Product), id: docSnap.id };
+        if (!product.isDeleted) {
           items.push(product);
-        });
-        setProducts(items);
-      }, (err) => {
-        console.error("Error syncing products catalog for guest/doctor:", err);
+        }
       });
+      setProducts(items);
+    }, (err) => {
+      console.warn("Products sync fallback:", err);
+    });
 
-      return () => unsubscribe();
-    }
+    return () => unsubscribe();
   }, [currentUser]);
+
+  // Protective routing redirect for unauthenticated or unauthorized users to prevent blank screen
+  useEffect(() => {
+    if (!currentUser) {
+      if (['routine_clinic', 'most_requested', 'dashboard', 'admin', 'favorites'].includes(activeTab)) {
+        setActiveTab('browse');
+      }
+    } else {
+      if (activeTab === 'admin' && !canAccessAdmin(currentUser)) {
+        setActiveTab('browse');
+      }
+      if (activeTab === 'dashboard' && currentUser.role !== 'doctor') {
+        setActiveTab('admin');
+      }
+    }
+  }, [currentUser, activeTab]);
 
   // --- 4.1 Calculate product counts by category from loaded products ---
   useEffect(() => {
@@ -679,6 +702,63 @@ export default function App() {
     };
   }, [currentUser]);
 
+  // Auto-check for debt payment reminders (1 day before 15-day deadline)
+  useEffect(() => {
+    if (!userOrders || userOrders.length === 0) return;
+
+    const checkDebtReminders = async () => {
+      const today = new Date();
+
+      for (const order of userOrders) {
+        if (order.remainingBalance <= 0 || order.paymentMethod === 'cash') continue;
+        if (!order.deadlineDate) continue;
+
+        const deadline = new Date(order.deadlineDate);
+        const diffMs = deadline.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        // Trigger notification 1 day before due date
+        if (diffDays === 1) {
+          const reminderKey = `debt_reminder_sent_${order.id}`;
+          if (localStorage.getItem(reminderKey)) continue;
+
+          try {
+            const shortId = order.id ? order.id.slice(-6).toUpperCase() : 'DEBT';
+            // Send notification to Doctor
+            await addDoc(collection(db, 'notifications'), {
+              userId: order.userId,
+              titleFr: 'Rappel d\'échéance de crédit (J-1)',
+              titleAr: 'تنبيه: اقتراب موعد استحقاق الدين (بقي يوم واحد)',
+              messageFr: `Rappel: La date d'échéance de votre facture n° #${shortId} d'un montant de ${order.remainingBalance} DA est prévue demain.`,
+              messageAr: `تذكير: باقي يوم واحد فقط على موعد استحقاق الدين الخاص بالفاتورة رقم #${shortId} بمبلغ ${order.remainingBalance} دج.`,
+              type: 'payment_reminder',
+              isRead: false,
+              createdAt: new Date().toISOString()
+            });
+
+            // Send notification to Admin
+            await addDoc(collection(db, 'notifications'), {
+              userId: 'admin',
+              titleFr: 'Alerte Échéance Crédit Client (J-1)',
+              titleAr: 'تنبيه: اقتراب موعد دين طبيب (بقي يوم واحد)',
+              messageFr: `L'échéance du crédit du Dr. ${order.doctorName} (Facture #${shortId}, Reste: ${order.remainingBalance} DA) arrive à terme demain.`,
+              messageAr: `باقي يوم واحد على موعد استحقاق دين الطبيب ${order.doctorName} للفاتورة رقم #${shortId} بمبلغ باقي ${order.remainingBalance} دج.`,
+              type: 'payment_reminder',
+              isRead: false,
+              createdAt: new Date().toISOString()
+            });
+
+            localStorage.setItem(reminderKey, '1');
+          } catch (err) {
+            console.error("Error creating debt reminder notifications:", err);
+          }
+        }
+      }
+    };
+
+    checkDebtReminders();
+  }, [userOrders]);
+
   // --- 5. Cart Handlers ---
   const handleAddToCart = (product: Product, selectedVariant?: ProductVariant) => {
     const maxStock = selectedVariant ? selectedVariant.stock : product.stock;
@@ -932,8 +1012,43 @@ export default function App() {
           ) : (
             <>
               {/* Render appropriate views based on active tab state */}
-              {activeTab === 'browse' && (
+              {(activeTab === 'browse' || !['routine_clinic', 'most_requested', 'cart', 'auth', 'dashboard', 'admin', 'favorites', 'notifications'].includes(activeTab)) && (
                 <BrowseView
+                  mode="catalog"
+                  products={products}
+                  favorites={favorites}
+                  lang={lang}
+                  onAddToCart={handleAddToCart}
+                  onToggleFavorite={handleToggleFavorite}
+                  onViewProduct={handleViewProductDetails}
+                  user={currentUser}
+                  currentUser={currentUser}
+                  selectedCategory={selectedCategory}
+                  onSelectCategory={setSelectedCategory}
+                  onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                />
+              )}
+
+              {activeTab === 'routine_clinic' && currentUser && (
+                <BrowseView
+                  mode="routine_clinic"
+                  products={products}
+                  favorites={favorites}
+                  lang={lang}
+                  onAddToCart={handleAddToCart}
+                  onToggleFavorite={handleToggleFavorite}
+                  onViewProduct={handleViewProductDetails}
+                  user={currentUser}
+                  currentUser={currentUser}
+                  selectedCategory={selectedCategory}
+                  onSelectCategory={setSelectedCategory}
+                  onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                />
+              )}
+
+              {activeTab === 'most_requested' && currentUser && (
+                <BrowseView
+                  mode="most_requested"
                   products={products}
                   favorites={favorites}
                   lang={lang}

@@ -122,6 +122,7 @@ export const translations = {
     cartAdded: 'Produit ajouté au panier',
     recentSearches: 'Recherches récentes',
     clearHistory: 'Effacer l\'historique',
+    description: 'Description',
   },
   ar: {
     appName: 'JUST SMILE',
@@ -240,6 +241,7 @@ export const translations = {
     cartAdded: 'تمت إضافة المنتج إلى السلة',
     recentSearches: 'عمليات البحث الأخيرة',
     clearHistory: 'مسح السجل',
+    description: 'الوصف',
   }
 };
 

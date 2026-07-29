@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, linkWithCredential } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, linkWithCredential } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocFromServer, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
@@ -13,6 +13,7 @@ import {
   User, Phone, Mail, Lock, Building, MapPin,
   AlertCircle, CheckCircle, Shield, Truck, ChevronDown,
 } from 'lucide-react';
+import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
 
 interface AuthViewProps {
   lang: Language;
@@ -57,8 +58,8 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
   // Listen to Auth State to handle profile completion for Google users.
   // Also handles the redirect result when the browser returns from Google's
   // sign-in page (fallback for popup-blocked environments).
+  // ── Handle redirect result (fires once on page load after Google redirect) ──────
   useEffect(() => {
-    // ── Handle redirect result (fires once on page load after redirect) ──────
     getRedirectResult(auth)
       .then(async (result) => {
         if (result?.user) {
@@ -71,39 +72,20 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
           handleGoogleAuthError(err);
         }
       });
+  }, []);
 
-    // ── Ongoing auth state listener ──────────────────────────────────────────
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        try {
-          const docSnap = await getDoc(doc(db, 'users', user.uid));
-          if (!docSnap.exists()) {
-            setGoogleUser(user);
-            setIsCompletingProfile(true);
-            setName(user.displayName || '');
-            setEmail(user.email || '');
-          } else {
-            const data = docSnap.data() as UserProfile;
-            if (data.isProfileComplete === false) {
-              setGoogleUser(user);
-              setIsCompletingProfile(true);
-              setName(data.name || user.displayName || '');
-              setEmail(data.email || user.email || '');
-            } else {
-              setIsCompletingProfile(false);
-              setGoogleUser(null);
-            }
-          }
-        } catch (err) {
-          console.error('Error fetching user doc on auth change:', err);
-        }
-      } else {
-        setGoogleUser(null);
-        setIsCompletingProfile(false);
-      }
-    });
-    return unsub;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Update profile completion state if currentUser prop changes
+  useEffect(() => {
+    if (currentUser && currentUser.role === 'doctor' && currentUser.isProfileComplete === false) {
+      setGoogleUser(auth.currentUser);
+      setIsCompletingProfile(true);
+      setName(currentUser.name || auth.currentUser?.displayName || '');
+      setEmail(currentUser.email || auth.currentUser?.email || '');
+    } else if (currentUser && currentUser.isProfileComplete !== false) {
+      setIsCompletingProfile(false);
+      setGoogleUser(null);
+    }
+  }, [currentUser]);
 
   // Load wilayas lazily when registration or profile completion form is shown
   useEffect(() => {
@@ -155,156 +137,92 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
 
     try {
       if (isLogin) {
-        // ── LOGIN FLOW ─────────────────────────────────────────────────────────
+        // ── LIGHTNING-FAST LOGIN FLOW ───────────────────────────────────────────
         const emailTrimmed = email.trim();
         const emailLower   = emailTrimmed.toLowerCase();
 
-        const usersRef = collection(db, 'users');
-        let userSnapshot = await getDocs(query(usersRef, where('email', '==', emailLower)));
-        if (userSnapshot.empty && emailTrimmed !== emailLower) {
-          userSnapshot = await getDocs(query(usersRef, where('email', '==', emailTrimmed)));
-        }
-
-        if (userSnapshot.empty) {
-          setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
-          setLoading(false);
-          return;
-        }
-
-        const userData = userSnapshot.docs[0].data() as UserProfile;
-        const storedEmail = userData.email || emailLower;
-
-        // 1. For staff accounts (non-doctor), first verify via custom Firestore auth,
-        // then silently create/sign-in a Firebase Auth account so Firestore rules
-        // (request.auth != null) are satisfied — fixing all "Missing permissions" errors.
-        if (userData.role !== 'doctor' && userData.password) {
-          const staffProfile = await signInStaff(storedEmail, password);
-          if (!staffProfile) {
-            setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
-            setLoading(false);
-            return;
-          }
-
-          // Password correct — now link to Firebase Auth so Firestore rules see request.auth
-          try {
-            // Try signing in first (account may already exist in Firebase Auth)
-            await signInWithEmailAndPassword(auth, storedEmail, password);
-          } catch (firebaseErr: any) {
-            if (
-              firebaseErr.code === 'auth/user-not-found' ||
-              firebaseErr.code === 'auth/invalid-credential' ||
-              firebaseErr.code === 'auth/wrong-password'
-            ) {
-              // Account doesn't exist in Firebase Auth yet — create it silently
-              try {
-                const { user: newFirebaseUser } = await createUserWithEmailAndPassword(auth, storedEmail, password);
-                // Update Firestore doc UID to match new Firebase Auth UID if different
-                if (newFirebaseUser.uid !== staffProfile.uid) {
-                  // Create new doc with Firebase UID and copy data
-                  await setDoc(doc(db, 'users', newFirebaseUser.uid), {
-                    ...staffProfile,
-                    uid: newFirebaseUser.uid,
-                    lastLoginAt: new Date().toISOString()
-                  });
-                }
-              } catch (createErr: any) {
-                // If creation also fails (e.g. email already taken by different password),
-                // we still allow login since custom auth already confirmed credentials.
-                console.warn('Firebase Auth link warning:', createErr.code);
-              }
-            }
-            // For other errors (network, etc.) we silently continue — custom auth passed
-          }
-
-          await updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
-          onAuthSuccess(staffProfile);
-          setLoading(false);
-          return;
-        }
-
-        // 2. For doctors and legacy staff with no Firestore password: use Firebase Auth
-        let firebaseAuthProfile: UserProfile | null = null;
-        let authError: any = null;
-
         try {
-          const userCredential = await signInWithEmailAndPassword(auth, storedEmail, password);
-          // Always read from SERVER (not cache) to get the latest approval status
-          let userDocSnap;
-          try {
-            userDocSnap = await getDocFromServer(doc(db, 'users', userCredential.user.uid));
-          } catch {
-            userDocSnap = await getDoc(doc(db, 'users', userCredential.user.uid));
+          // Fast primary path: Firebase Auth login
+          const userCredential = await signInWithEmailAndPassword(auth, emailTrimmed, password);
+          let userDocSnap = await getDoc(doc(db, 'users', userCredential.user.uid)).catch(() => null);
+
+          let doctorProfile: UserProfile;
+          if (userDocSnap && userDocSnap.exists()) {
+            doctorProfile = userDocSnap.data() as UserProfile;
+          } else {
+            // Auto-create missing doctor profile document
+            doctorProfile = {
+              uid: userCredential.user.uid,
+              name: userCredential.user.displayName || emailTrimmed.split('@')[0] || 'طبيب',
+              email: userCredential.user.email || emailTrimmed,
+              role: 'doctor',
+              clinicName: 'عيادة طب الأسنان',
+              phone: '',
+              location: '',
+              allowCreditPayment: true,
+              status: 'approved',
+              createdAt: new Date().toISOString()
+            };
+            setDoc(doc(db, 'users', userCredential.user.uid), doctorProfile).catch(console.error);
           }
 
-          if (userDocSnap.exists()) {
-            firebaseAuthProfile = userDocSnap.data() as UserProfile;
-          }
-        } catch (err: any) {
-          authError = err;
-        }
-
-        // If authenticated via Firebase Auth successfully
-        if (firebaseAuthProfile) {
-          if (firebaseAuthProfile.status === 'pending') {
-            firebaseAuthProfile.status = 'active';
-            await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { status: 'active' }).catch(console.error);
+          if (doctorProfile.status === 'pending') {
+            doctorProfile.status = 'active';
+            updateDoc(doc(db, 'users', doctorProfile.uid), { status: 'active' }).catch(console.error);
           }
 
-          if (firebaseAuthProfile.status === 'rejected') {
+          if (doctorProfile.status === 'rejected') {
             setErrorMsg(lang === 'fr' ? 'Votre compte a été refusé.' : 'تم رفض حسابك. يرجى الاتصال بالدعم الفني.');
             await signOut(auth);
             setLoading(false);
             return;
           }
 
-          // Auto-upgrade: save hashed password for staff without one
-          if (firebaseAuthProfile.role !== 'doctor' && !firebaseAuthProfile.password) {
-            try {
-              const { hashPassword } = await import('../utils/crypto');
-              const hashedPassword = await hashPassword(password.trim());
-              await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), {
-                password: hashedPassword,
-                lastLoginAt: new Date().toISOString()
-              });
-            } catch {
-              await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
-            }
-          } else {
-            await updateDoc(doc(db, 'users', firebaseAuthProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
-          }
-
-          onAuthSuccess(firebaseAuthProfile);
+          // Non-blocking async last login update
+          updateDoc(doc(db, 'users', doctorProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
+          
+          // Instant completion!
+          onAuthSuccess(doctorProfile);
           setLoading(false);
           return;
-        }
-
-        // 3. Last fallback: legacy staff with no password field at all
-        if (userData.role !== 'doctor') {
-          const staffProfile = await signInStaff(storedEmail, password);
-          if (staffProfile) {
-            await updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
-            onAuthSuccess(staffProfile);
-            setLoading(false);
-            return;
+        } catch (fastAuthError: any) {
+          // Fallback path: search Firestore for custom staff or email casing mismatch
+          const usersRef = collection(db, 'users');
+          let userSnapshot = await getDocs(query(usersRef, where('email', '==', emailLower))).catch(() => null);
+          if ((!userSnapshot || userSnapshot.empty) && emailTrimmed !== emailLower) {
+            userSnapshot = await getDocs(query(usersRef, where('email', '==', emailTrimmed))).catch(() => null);
           }
-        }
 
-        // 4. All methods failed — show error
-        if (authError) {
+          let userData: UserProfile | null = null;
+          let storedEmail = emailTrimmed;
+          if (userSnapshot && !userSnapshot.empty) {
+            userData = userSnapshot.docs[0].data() as UserProfile;
+            if (userData.email) storedEmail = userData.email;
+          }
+
+          if (userData && userData.role !== 'doctor') {
+            const staffProfile = await signInStaff(storedEmail, password);
+            if (staffProfile) {
+              updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
+              onAuthSuccess(staffProfile);
+              setLoading(false);
+              return;
+            }
+          }
+
+          // Show clear error message
           if (
-            authError.code === 'auth/wrong-password' ||
-            authError.code === 'auth/user-not-found' ||
-            authError.code === 'auth/invalid-credential'
+            fastAuthError.code === 'auth/wrong-password' ||
+            fastAuthError.code === 'auth/user-not-found' ||
+            fastAuthError.code === 'auth/invalid-credential'
           ) {
             setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
           } else {
-            setErrorMsg(lang === 'fr' ? 'Erreur de connexion.' : 'خطأ في تسجيل الدخول.');
+            setErrorMsg(lang === 'fr' ? 'Erreur de connexion. Veuillez réessayer.' : 'خطأ في تسجيل الدخول. يرجى إعادة المحاولة.');
           }
-        } else {
-          setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+          setLoading(false);
+          return;
         }
-        setLoading(false);
-        return;
 
       } else {
         // ── REGISTER FLOW ──────────────────────────────────────────────────────
@@ -335,6 +253,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
           communeNameAscii: selectedCommune.nameAscii,
           role:    'doctor',
           status:  'active',
+          isProfileComplete: true,
           createdAt: new Date().toISOString(),
         };
 
@@ -444,7 +363,10 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         await updateDoc(userDocRef, { status: 'active' }).catch(console.error);
       }
 
-      if (profile.isProfileComplete === false) {
+      // Staff members (admin/manager/cashier/accountant) don't need doctor profile completion
+      const isStaffRole = ['admin', 'manager', 'cashier', 'accountant'].includes(profile.role);
+
+      if (!isStaffRole && profile.isProfileComplete === false) {
         setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
         setGoogleUser(user);
         setIsCompletingProfile(true);
@@ -473,7 +395,9 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         };
         await setDoc(userDocRef, newProfile);
 
-        if (newProfile.isProfileComplete === false) {
+        const isStaffRole = ['admin', 'manager', 'cashier', 'accountant'].includes(newProfile.role);
+
+        if (!isStaffRole && newProfile.isProfileComplete === false) {
           setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
           setGoogleUser(user);
           setIsCompletingProfile(true);
@@ -500,6 +424,8 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         await setDoc(userDocRef, newStub);
         setGoogleUser(user);
         setIsCompletingProfile(true);
+        setName(user.displayName || '');
+        setEmail(user.email || '');
         setSuccessMsg(lang === 'fr' ? 'Veuillez compléter votre profil.' : 'يرجى إكمال معلومات ملفك الشخصي.');
       }
     }
@@ -726,9 +652,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
                 onClick={() => {
                   setPendingLinkCredential(null);
                   setLinkEmail('');
-                  setLinkPassword('');
-                  setErrorMsg('');
-                  setSuccessMsg('');
+setSuccessMsg('');
                 }}
                 className="text-xs text-rose-500 hover:text-rose-600 font-bold transition-colors cursor-pointer"
               >
@@ -780,65 +704,18 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
               </div>
             </div>
 
-            {/* Wilaya dropdown */}
-            <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs flex items-center gap-1.5">
-                <MapPin size={13} />
-                {lang === 'fr' ? 'Wilaya (Département)' : 'الولاية'}
-              </label>
-              <div className="relative">
-                <select
-                  required
-                  disabled={loadingWilayas}
-                  value={selectedWilaya?.code ?? ''}
-                  onChange={(e) => handleWilayaChange(e.target.value)}
-                  className={selectCls()}
-                >
-                  <option value="">
-                    {loadingWilayas
-                      ? (lang === 'fr' ? 'Chargement…' : 'جارٍ التحميل…')
-                      : (lang === 'fr' ? '— Choisir une wilaya —' : '— اختر الولاية —')}
-                  </option>
-                  {wilayas.map((w) => (
-                    <option key={w.code} value={w.code}>
-                      {w.code} – {lang === 'ar' ? w.nameAr : w.nameAscii}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Commune dropdown */}
-            <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs flex items-center gap-1.5">
-                <MapPin size={13} />
-                {lang === 'fr' ? 'Commune (Ville)' : 'البلدية'}
-              </label>
-              <div className="relative">
-                <select
-                  required
-                  disabled={!selectedWilaya || communes.length === 0}
-                  value={selectedCommune?.id ?? ''}
-                  onChange={(e) => {
-                    const c = communes.find((c) => String(c.id) === e.target.value) ?? null;
-                    setSelectedCommune(c);
-                  }}
-                  className={selectCls()}
-                >
-                  <option value="">
-                    {!selectedWilaya
-                      ? (lang === 'fr' ? '— Choisir d\'abord la wilaya —' : '— اختر الولاية أولاً —')
-                      : (lang === 'fr' ? '— Choisir une commune —' : '— اختر البلدية —')}
-                  </option>
-                  {communes.map((c) => (
-                    <option key={c.id} value={String(c.id)}>
-                      {lang === 'ar' ? c.nameAr : c.nameAscii}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
-              </div>
+            {/* Searchable Wilaya & Commune Selector */}
+            <SearchableWilayaCommuneSelector
+              lang={lang}
+              selectedWilaya={selectedWilaya}
+              selectedCommune={selectedCommune}
+              onSelectWilaya={(w) => {
+                setSelectedWilaya(w);
+                setSelectedCommune(null);
+              }}
+              onSelectCommune={(c) => setSelectedCommune(c)}
+              required
+            />
 
               {/* Delivery badge */}
               {selectedCommune && (
@@ -859,7 +736,6 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
                         : '📦 سيتم احتساب تكلفة التوصيل حسب موقع عيادتك.')}
                 </div>
               )}
-            </div>
 
             {/* Submit */}
             <button
@@ -881,10 +757,6 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
                 onClick={async () => {
                   await signOut(auth);
                   setIsCompletingProfile(false);
-                  setGoogleUser(null);
-                  setIsLogin(true);
-                  setErrorMsg('');
-                  setSuccessMsg('');
                 }}
                 className="text-xs text-rose-500 hover:text-rose-600 font-bold transition-colors cursor-pointer"
               >
@@ -939,86 +811,18 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
                   </div>
                 </div>
 
-                {/* ── Wilaya dropdown ─────────────────────────────────────────────── */}
-                <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs flex items-center gap-1.5">
-                    <MapPin size={13} />
-                    {lang === 'fr' ? 'Wilaya (Département)' : 'الولاية'}
-                  </label>
-                  <div className="relative">
-                    <select
-                      required
-                      disabled={loadingWilayas}
-                      value={selectedWilaya?.code ?? ''}
-                      onChange={(e) => handleWilayaChange(e.target.value)}
-                      className={selectCls()}
-                    >
-                      <option value="">
-                        {loadingWilayas
-                          ? (lang === 'fr' ? 'Chargement…' : 'جارٍ التحميل…')
-                          : (lang === 'fr' ? '— Choisir une wilaya —' : '— اختر الولاية —')}
-                      </option>
-                      {wilayas.map((w) => (
-                        <option key={w.code} value={w.code}>
-                          {w.code} – {lang === 'ar' ? w.nameAr : w.nameAscii}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
-                  </div>
-                </div>
-
-                {/* ── Commune dropdown ────────────────────────────────────────────── */}
-                <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs flex items-center gap-1.5">
-                    <MapPin size={13} />
-                    {lang === 'fr' ? 'Commune (Ville)' : 'البلدية'}
-                  </label>
-                  <div className="relative">
-                    <select
-                      required
-                      disabled={!selectedWilaya || communes.length === 0}
-                      value={selectedCommune?.id ?? ''}
-                      onChange={(e) => {
-                        const c = communes.find((c) => String(c.id) === e.target.value) ?? null;
-                        setSelectedCommune(c);
-                      }}
-                      className={selectCls()}
-                    >
-                      <option value="">
-                        {!selectedWilaya
-                          ? (lang === 'fr' ? '— Choisir d\'abord la wilaya —' : '— اختر الولاية أولاً —')
-                          : (lang === 'fr' ? '— Choisir une commune —' : '— اختر البلدية —')}
-                      </option>
-                      {communes.map((c) => (
-                        <option key={c.id} value={String(c.id)}>
-                          {lang === 'ar' ? c.nameAr : c.nameAscii}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
-                  </div>
-
-                  {/* Delivery badge */}
-                  {selectedCommune && (
-                    <div
-                      className={`mt-2 flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border ${
-                        freeDelivery
-                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                          : 'bg-amber-50 border-amber-200 text-amber-700'
-                      }`}
-                    >
-                      <Truck size={14} className="shrink-0" />
-                      {freeDelivery
-                        ? (lang === 'fr'
-                            ? '🎉 Livraison GRATUITE — Vous êtes dans la commune de Djelfa !'
-                            : '🎉 التوصيل مجاني — أنت مسجل في بلدية الجلفة!')
-                        : (lang === 'fr'
-                            ? '📦 Des frais de livraison s\'appliqueront selon votre localisation.'
-                            : '📦 سيتم احتساب تكلفة التوصيل حسب موقع عيادتك.')}
-                    </div>
-                  )}
-                </div>
+                {/* Searchable Wilaya & Commune Selector */}
+                <SearchableWilayaCommuneSelector
+                  lang={lang}
+                  selectedWilaya={selectedWilaya}
+                  selectedCommune={selectedCommune}
+                  onSelectWilaya={(w) => {
+                    setSelectedWilaya(w);
+                    setSelectedCommune(null);
+                  }}
+                  onSelectCommune={(c) => setSelectedCommune(c)}
+                  required
+                />
               </>
             )}
 

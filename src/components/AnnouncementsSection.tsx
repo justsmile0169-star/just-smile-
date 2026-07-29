@@ -105,6 +105,8 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
     const unsub = onSnapshot(collection(db, 'promotions'), snap => {
       const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Promotion));
       setPromotionsList(items);
+    }, (err) => {
+      // Silent error handler for unmount interrupts
     });
     return () => unsub();
   }, []);

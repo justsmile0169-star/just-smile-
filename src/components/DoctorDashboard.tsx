@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import { useAppDialog } from '../context/AppDialogContext';
 import { getWilayas, getCommunesByWilaya, WilayaOption, CommuneOption, isFreeDelivery } from '../utils/algeriaData';
 import DoctorAnalytics from './DoctorAnalytics';
+import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
 
 interface DoctorDashboardProps {
   user: UserProfile;
@@ -696,65 +697,18 @@ export default function DoctorDashboard({
                 </div>
               </div>
 
-              {/* Wilaya dropdown */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <MapPin size={13} />
-                  {lang === 'fr' ? 'Wilaya' : 'الولاية'}
-                </label>
-                <div className="relative">
-                  <select
-                    required
-                    disabled={loadingWilayas}
-                    value={selectedWilaya?.code ?? ''}
-                    onChange={(e) => handleWilayaChange(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan text-sm appearance-none cursor-pointer"
-                  >
-                    <option value="">
-                      {loadingWilayas
-                        ? (lang === 'fr' ? 'Chargement…' : 'جارٍ التحميل…')
-                        : (lang === 'fr' ? '— Choisir une wilaya —' : '— اختر الولاية —')}
-                    </option>
-                    {wilayas.map((w) => (
-                      <option key={w.code} value={w.code}>
-                        {w.code} – {lang === 'ar' ? w.nameAr : w.nameAscii}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
-                </div>
-              </div>
-
-              {/* Commune dropdown */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <MapPin size={13} />
-                  {lang === 'fr' ? 'Commune' : 'البلدية'}
-                </label>
-                <div className="relative">
-                  <select
-                    required
-                    disabled={!selectedWilaya || communes.length === 0}
-                    value={selectedCommune?.id ?? ''}
-                    onChange={(e) => {
-                      const c = communes.find((c) => String(c.id) === e.target.value) ?? null;
-                      setSelectedCommune(c);
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan text-sm appearance-none cursor-pointer"
-                  >
-                    <option value="">
-                      {!selectedWilaya
-                        ? (lang === 'fr' ? '— Choisir d\'abord la wilaya —' : '— اختر الولاية أولاً —')
-                        : (lang === 'fr' ? '— Choisir une commune —' : '— اختر البلدية —')}
-                    </option>
-                    {communes.map((c) => (
-                      <option key={c.id} value={String(c.id)}>
-                        {lang === 'ar' ? c.nameAr : c.nameAscii}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={15} className="absolute top-1/2 -translate-y-1/2 text-slate-400 right-3 rtl:left-3 rtl:right-auto pointer-events-none" />
-                </div>
+              {/* Searchable Wilaya & Commune Selector */}
+              <SearchableWilayaCommuneSelector
+                lang={lang}
+                selectedWilaya={selectedWilaya}
+                selectedCommune={selectedCommune}
+                onSelectWilaya={(w) => {
+                  setSelectedWilaya(w);
+                  setSelectedCommune(null);
+                }}
+                onSelectCommune={(c) => setSelectedCommune(c)}
+                required
+              />
 
                 {/* Delivery badge */}
                 {selectedCommune && (
@@ -775,7 +729,6 @@ export default function DoctorDashboard({
                           : '📦 سيتم احتساب تكلفة التوصيل حسب الموقع.')}
                   </div>
                 )}
-              </div>
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4">

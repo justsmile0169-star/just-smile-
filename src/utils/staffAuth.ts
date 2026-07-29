@@ -29,8 +29,9 @@ export async function signInStaff(email: string, password: string): Promise<User
         continue;
       }
       
-      // Check if user is approved (or has no status field)
-      if (userData.status && userData.status !== 'approved') {
+      // Check if user is active/approved (or has no status field)
+      // Staff accounts use 'active' as their normal status, not 'approved'
+      if (userData.status && userData.status !== 'approved' && userData.status !== 'active') {
         continue;
       }
       

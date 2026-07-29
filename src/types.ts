@@ -49,9 +49,10 @@ export interface Product {
   id: string;
   name: string;
   price: number; // in DZD
+  purchasePrice?: number; // سعر الشراء لحساب الفائدة
   stock: number;
   description: string;
-  category: 'Équipements' | 'Consommables' | 'Instruments' | 'Orthodontie' | 'Hygiène & Stérilisation' | 'Prothèse dentaire';
+  category: string; // dynamic - can be custom category
   technicalSheet?: string; // Specifications
   image?: string; // Placeholder or generated SVG data-url
   expiryDate?: string; // Expiration alert if applicable (YYYY-MM-DD)
@@ -104,8 +105,9 @@ export interface Order {
   paidAmount: number;
   remainingBalance: number;
   createdAt: string;
-  deadlineDate: string; // createdAt + 20 days
+  deadlineDate: string; // createdAt + 15 days
   paymentMethod?: 'credit' | 'cash'; // 'credit' = 20-day debt, 'cash' = cash on delivery immediate
+  isEmergency?: boolean; // Emergency order for urgent clinic needs
   notes?: string;
   processedBy?: string; // uid of staff member who processed this order
   processedByName?: string; // name of staff member who processed this order

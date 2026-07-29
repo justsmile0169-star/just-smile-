@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Language, getTranslation } from '../translations';
 import LanguageSelector from './LanguageSelector';
-import { ShoppingCart, Heart, Bell, User, LogOut, Shield, Stethoscope, LogIn, Sun, Moon, Menu, X, UserCircle } from 'lucide-react';
+import { ShoppingCart, Heart, Bell, User, LogOut, Shield, Stethoscope, LogIn, Sun, Moon, Menu, X, UserCircle, Flame, ShoppingBag } from 'lucide-react';
 import { UserProfile } from '../types';
 import { getLogoUrl } from '../constants/brand';
 
@@ -86,9 +86,9 @@ export default function Header({
           <nav className="hidden lg:flex items-center gap-1">
             <button
               onClick={() => setActiveTab('browse')}
-              className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+              className={`px-3.5 py-2 text-sm font-semibold rounded-xl transition-all ${
                 activeTab === 'browse'
-                  ? 'bg-brand-cyan/10 text-brand-cyan'
+                  ? 'bg-brand-cyan/10 text-brand-cyan font-extrabold'
                   : 'text-slate-600 dark:text-slate-300 hover:text-brand-cyan hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
@@ -96,9 +96,37 @@ export default function Header({
             </button>
 
             {user && (
+              <>
+                <button
+                  onClick={() => setActiveTab('routine_clinic')}
+                  className={`px-3 py-2 text-sm font-semibold rounded-xl transition-all flex items-center gap-1.5 ${
+                    activeTab === 'routine_clinic'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 font-extrabold border border-emerald-200 dark:border-emerald-800'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-emerald-600 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <ShoppingBag size={15} className="text-emerald-500" />
+                  <span>{lang === 'fr' ? 'Routine Clinique' : 'عيادة روتينية'}</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('most_requested')}
+                  className={`px-3 py-2 text-sm font-semibold rounded-xl transition-all flex items-center gap-1.5 ${
+                    activeTab === 'most_requested'
+                      ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 font-extrabold border border-amber-200 dark:border-amber-800'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Flame size={15} className="text-amber-500" />
+                  <span>{lang === 'fr' ? 'Les plus demandés' : 'الأكثر طلباً'}</span>
+                </button>
+              </>
+            )}
+
+            {user && (
               <button
                 onClick={() => setActiveTab('favorites')}
-                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+                className={`px-3 py-2 text-sm font-semibold rounded-xl transition-all ${
                   activeTab === 'favorites'
                     ? 'bg-brand-cyan/10 text-brand-cyan'
                     : 'text-slate-600 dark:text-slate-300 hover:text-brand-cyan hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -262,6 +290,40 @@ export default function Header({
             >
               {getTranslation(lang, 'browse')}
             </button>
+
+            {user && (
+              <>
+                <button
+                  onClick={() => {
+                    setActiveTab('routine_clinic');
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-4 py-3 rounded-xl font-semibold transition-all flex items-center gap-3 ${
+                    activeTab === 'routine_clinic'
+                      ? 'bg-emerald-50 text-emerald-600 font-extrabold'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <ShoppingBag size={18} className="text-emerald-500" />
+                  <span>{lang === 'fr' ? 'Produits Routine Clinique' : 'منتجات العيادة الروتينية'}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setActiveTab('most_requested');
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-4 py-3 rounded-xl font-semibold transition-all flex items-center gap-3 ${
+                    activeTab === 'most_requested'
+                      ? 'bg-amber-50 text-amber-600 font-extrabold'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Flame size={18} className="text-amber-500" />
+                  <span>{lang === 'fr' ? 'Produits les plus demandés' : 'المنتجات الأكثر مبيعاً وطالباً'}</span>
+                </button>
+              </>
+            )}
 
             {user && (
               <button

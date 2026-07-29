@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, setLogLevel } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // Configuration reading from environment variables with fallback to the user's new Firebase project
@@ -18,12 +18,15 @@ const firebaseConfig = {
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with local cache for offline/low bandwidth optimization
+// Initialize Firestore with local cache for offline/low bandwidth optimization and stable connection
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
   })
 });
+
+// Silence verbose internal Firebase SDK connection logs in browser console
+setLogLevel('silent');
 
 // Initialize Firebase Authentication
 const auth = getAuth(app);

@@ -134,6 +134,97 @@ export default function ClientSituationView({
     }
   };
 
+  const handleExportFinancialStatement = () => {
+    if (!selectedClient) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html dir="${isRtl ? 'rtl' : 'ltr'}">
+      <head>
+        <title>كشف حساب مالي - ${selectedClient.name}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 30px; color: #1e293b; }
+          .header { text-align: center; border-bottom: 2px solid #0891b2; padding-bottom: 15px; margin-bottom: 25px; }
+          .header h1 { color: #0891b2; margin: 0; font-size: 24px; }
+          .header p { color: #64748b; margin: 5px 0 0 0; font-size: 13px; }
+          .info-table { width: 100%; margin-bottom: 25px; border-collapse: collapse; }
+          .info-table td { padding: 8px; font-size: 13px; }
+          .data-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+          .data-table th, .data-table td { border: 1px solid #cbd5e1; padding: 10px; text-align: ${isRtl ? 'right' : 'left'}; font-size: 12px; }
+          .data-table th { background-color: #f1f5f9; font-weight: bold; }
+          .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-top: 20px; text-align: right; }
+          .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>JUST SMILE - مستلزمات طب الأسنان</h1>
+          <p>كشف حساب مالي رسمي للعيادة - Relevé Financier</p>
+          <p>التاريخ: ${new Date().toLocaleDateString(isRtl ? 'ar-DZ' : 'fr-FR')}</p>
+        </div>
+
+        <table class="info-table">
+          <tr>
+            <td><strong>اسم الطبيب / العيادة:</strong> ${selectedClient.name} (${selectedClient.clinicName})</td>
+            <td><strong>رقم الهاتف:</strong> ${selectedClient.phone}</td>
+          </tr>
+          <tr>
+            <td><strong>البريد الإلكتروني:</strong> ${selectedClient.email || '-'}</td>
+            <td><strong>الولاية:</strong> ${selectedClient.wilayaName || '-'}</td>
+          </tr>
+        </table>
+
+        <h3>تفاصيل الطلبات والمشتريات (Factures)</h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>رقم الطلب</th>
+              <th>نوع الدفع</th>
+              <th>المبلغ الإجمالي</th>
+              <th>المبلغ المدفوع</th>
+              <th>المتبقي</th>
+              <th>الحالة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${clientOrders.map(o => `
+              <tr>
+                <td>${new Date(o.createdAt).toLocaleDateString()}</td>
+                <td>#${o.id ? o.id.slice(-8).toUpperCase() : ''}</td>
+                <td>${o.paymentMethod === 'credit' ? 'دَين (Crédit)' : 'نقداً (Cash)'}</td>
+                <td>${o.totalAfterDiscount.toLocaleString()} دج</td>
+                <td>${o.paidAmount.toLocaleString()} دج</td>
+                <td>${o.remainingBalance.toLocaleString()} دج</td>
+                <td>${o.status}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div class="summary-box">
+          <p>إجمالي المشتريات: <strong>${summary.totalPurchases.toLocaleString()} دج</strong></p>
+          <p>إجمالي المرتجعات: <strong>${summary.totalReturns.toLocaleString()} دج</strong></p>
+          <p>إجمالي المدفوعات: <strong>${summary.totalPaid.toLocaleString()} دج</strong></p>
+          <p style="font-size: 16px; color: #e11d48;">الصافي الدائن / المتبقي للعيادة: <strong>${summary.totalDebt.toLocaleString()} دج</strong></p>
+        </div>
+
+        <div class="footer">
+          تم استخراج هذا الكشف آلياً من نظام JUST SMILE لمستلزمات طب الأسنان.
+        </div>
+
+        <script>
+          window.onload = function() { window.print(); }
+        </script>
+      </body>
+      </html>
+    `;
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   return (
     <div className="space-y-6">
       <div className="border-b border-slate-50 pb-4">
@@ -149,7 +240,6 @@ export default function ClientSituationView({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Search & client list */}
         <div className="lg:col-span-1 space-y-3">
           <div className="relative">
             <Search
@@ -160,49 +250,62 @@ export default function ClientSituationView({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={getTranslation(lang, 'clientSearchPlaceholder')}
-              className={`w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 text-sm focus:outline-hidden focus:border-brand-cyan font-medium text-slate-800 ${isRtl ? 'pr-9 pl-3' : 'pl-9 pr-3'}`}
+              placeholder={
+                lang === 'fr' ? 'Rechercher un client...' : 'البحث عن طبيب...'
+              }
+              className={`w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl py-2.5 ${
+                isRtl ? 'pr-9 pl-3' : 'pl-9 pr-3'
+              } focus:outline-hidden focus:border-brand-cyan`}
             />
           </div>
 
-          <div className="max-h-[420px] overflow-y-auto space-y-2 border border-slate-100 rounded-2xl p-2">
+          <div className="max-h-[500px] overflow-y-auto space-y-1.5 pr-1">
             {matchedDoctors.length === 0 ? (
-              <p className="text-center text-xs text-slate-400 py-8 font-semibold">
-                {lang === 'fr' ? 'Aucun client trouvé.' : 'لم يتم العثور على زبون.'}
+              <p className="text-xs text-slate-400 text-center py-6">
+                {lang === 'fr' ? 'Aucun client trouvé.' : 'لم يتم العثور على أطباء.'}
               </p>
             ) : (
-              matchedDoctors.map((doc) => (
-                <button
-                  key={doc.uid}
-                  type="button"
-                  onClick={() => setSelectedClient(doc)}
-                  className={`w-full text-left rtl:text-right p-3 rounded-xl border transition-all ${
-                    selectedClient?.uid === doc.uid
-                      ? 'border-brand-cyan bg-brand-cyan/5'
-                      : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  <p className="font-extrabold text-slate-800 text-sm">{doc.name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{doc.clinicName}</p>
-                  <p className="text-[10px] text-slate-400 font-mono mt-1 truncate">ID: {doc.uid}</p>
-                  <span
-                    className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                      doc.status === 'approved'
-                        ? 'bg-emerald-50 text-emerald-600'
-                        : doc.status === 'pending'
-                          ? 'bg-amber-50 text-amber-600'
-                          : 'bg-rose-50 text-rose-600'
+              matchedDoctors.map((doc) => {
+                const isSelected = selectedClient?.uid === doc.uid;
+                return (
+                  <button
+                    key={doc.uid}
+                    type="button"
+                    onClick={() => setSelectedClient(doc)}
+                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-brand-cyan text-white border-brand-cyan shadow-sm'
+                        : 'bg-white text-slate-800 border-slate-100 hover:border-slate-300'
                     }`}
                   >
-                    {getTranslation(lang, `status_${doc.status}` as any)}
-                  </span>
-                </button>
-              ))
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-xs truncate">{doc.name}</span>
+                      {doc.role === 'doctor' && (
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded-full font-extrabold ${
+                            isSelected
+                              ? 'bg-white/20 text-white'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {doc.clinicName || 'عيادة'}
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className={`text-[10px] mt-0.5 ${
+                        isSelected ? 'text-white/80' : 'text-slate-400'
+                      }`}
+                    >
+                      {doc.phone} • {doc.wilayaName || ''}
+                    </p>
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
 
-        {/* Account statement */}
         <div className="lg:col-span-2 space-y-5">
           {!selectedClient ? (
             <div className="text-center py-16 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
@@ -215,15 +318,23 @@ export default function ClientSituationView({
             </div>
           ) : (
             <>
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                <h4 className="font-extrabold text-slate-900">{selectedClient.name}</h4>
-                <p className="text-xs text-slate-500 mt-1">
-                  {selectedClient.clinicName} • {selectedClient.phone} • {selectedClient.email}
-                </p>
-                <p className="text-[10px] text-slate-400 font-mono mt-1">UID: {selectedClient.uid}</p>
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <h4 className="font-extrabold text-slate-900">{selectedClient.name}</h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {selectedClient.clinicName} • {selectedClient.phone} • {selectedClient.email}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-mono mt-1">UID: {selectedClient.uid}</p>
+                </div>
+                <button
+                  onClick={handleExportFinancialStatement}
+                  className="px-4 py-2 bg-brand-cyan hover:bg-brand-dark text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <FileText size={16} />
+                  {lang === 'fr' ? 'Imprimer Relevé' : 'تصدير / طباعة كشف الحساب المالي 📑'}
+                </button>
               </div>
 
-              {/* Summary cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   {
