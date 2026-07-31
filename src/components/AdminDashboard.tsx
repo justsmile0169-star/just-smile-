@@ -79,7 +79,7 @@ export default function AdminDashboard({
 }: AdminDashboardProps) {
   const { alert, confirm } = useAppDialog();
   const [activeSubTab, setActiveSubTab] = useState<AdminSubTab>(
-    hasPermission(currentUser, 'view_analytics') ? 'analytics' : 'inventory'
+    hasPermission(currentUser, 'view_analytics') ? 'analytics' : 'orders'
   );
   const [loading, setLoading] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -1059,16 +1059,18 @@ export default function AdminDashboard({
             <BarChart3 size={16} />{lang === 'fr' ? 'Analytics' : 'التحليلات'}
           </button>
         )}
-        <button
-          onClick={() => setActiveSubTab('doctors')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctors'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-            }`}
-        >
-          <Stethoscope size={16} />
-          {getTranslation(lang, 'registeredDoctors')} ({allDoctors.length})
-        </button>
+        {hasPermission(currentUser, 'view_doctors') && (
+          <button
+            onClick={() => setActiveSubTab('doctors')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctors'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+              }`}
+          >
+            <Stethoscope size={16} />
+            {getTranslation(lang, 'registeredDoctors')} ({allDoctors.length})
+          </button>
+        )}
 
         {hasPermission(currentUser, 'view_client_situation') && (
           <button
@@ -1083,27 +1085,31 @@ export default function AdminDashboard({
           </button>
         )}
 
-        <button
-          onClick={() => setActiveSubTab('debts')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'debts'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-            }`}
-        >
-          <DollarSign size={16} />
-          {lang === 'fr' ? 'Suivi des Dettes' : 'متابعة الديون والمدفوعات'}
-        </button>
+        {hasPermission(currentUser, 'manage_payments') && (
+          <button
+            onClick={() => setActiveSubTab('debts')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'debts'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+              }`}
+          >
+            <DollarSign size={16} />
+            {lang === 'fr' ? 'Suivi des Dettes' : 'متابعة الديون والمدفوعات'}
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveSubTab('inventory')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'inventory'
-              ? 'bg-brand-cyan text-white shadow-xs'
-              : 'text-slate-500 hover:bg-slate-50'
-            }`}
-        >
-          <Package size={16} />
-          {getTranslation(lang, 'inventory')}
-        </button>
+        {hasPermission(currentUser, 'manage_inventory') && (
+          <button
+            onClick={() => setActiveSubTab('inventory')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'inventory'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+              }`}
+          >
+            <Package size={16} />
+            {getTranslation(lang, 'inventory')}
+          </button>
+        )}
 
         {hasPermission(currentUser, 'manage_promotions') && (
           <button onClick={() => setActiveSubTab('promotions')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'promotions' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
@@ -1344,11 +1350,13 @@ export default function AdminDashboard({
                       cancelled: { ar: 'ملغى', fr: 'Annulée' }
                     };
 
+                    const isUrgentEmergency = order.isEmergency && order.status !== 'delivered' && order.status !== 'cancelled';
+
                     return (
                       <div
                         key={order.id}
                         className={`bg-white p-5 rounded-2xl border transition-all ${
-                          order.isEmergency
+                          isUrgentEmergency
                             ? 'border-2 border-rose-500 shadow-xl ring-2 ring-rose-300 bg-rose-50/20'
                             : order.status === 'pending'
                             ? 'border-amber-200 shadow-md ring-1 ring-amber-100'
@@ -1360,9 +1368,15 @@ export default function AdminDashboard({
                           <div className="space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               {order.isEmergency && (
-                                <span className="text-xs bg-rose-600 text-white font-black px-3 py-1 rounded-full animate-pulse shadow-md flex items-center gap-1">
-                                  🚨 {lang === 'fr' ? 'URGENCE CABINET - PRIORITÉ' : 'طلب طوارئ عاجل للعيادة - أولوية قصوى!'}
-                                </span>
+                                isUrgentEmergency ? (
+                                  <span className="text-xs bg-rose-600 text-white font-black px-3 py-1 rounded-full animate-pulse shadow-md flex items-center gap-1">
+                                    🚨 {lang === 'fr' ? 'URGENCE CABINET - PRIORITÉ' : 'طلب طوارئ عاجل للعيادة - أولوية قصوى!'}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs bg-emerald-600 text-white font-bold px-3 py-1 rounded-full shadow-xs flex items-center gap-1">
+                                    ✓ {lang === 'fr' ? 'URGENCE LIVRÉE' : 'طلب طوارئ (تم التسليم)'}
+                                  </span>
+                                )
                               )}
                               <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded-md font-bold text-slate-700">
                                 #{order.id ? order.id.slice(-8).toUpperCase() : 'N/A'}

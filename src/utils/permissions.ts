@@ -27,13 +27,13 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   manager: [
     'view_analytics', 'manage_inventory', 'manage_promotions', 'manage_expenses',
-    'view_expenses', 'manage_payments', 'view_reports', 'view_activity_logs', 'sell', 'view_client_situation', 'use_scanner'
+    'view_expenses', 'manage_payments', 'view_reports', 'view_activity_logs', 'sell', 'view_client_situation', 'use_scanner', 'view_doctors'
   ],
   accountant: [
     'view_expenses', 'manage_expenses', 'manage_payments', 'edit_invoices',
-    'view_reports'
+    'view_reports', 'view_analytics', 'view_client_situation'
   ],
-  cashier: ['manage_payments', 'use_scanner'],
+  cashier: ['manage_payments', 'use_scanner', 'sell', 'manage_inventory'],
   doctor: ['sell', 'use_scanner']
 };
 
