@@ -15,7 +15,7 @@ import {
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
   History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin,
-  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw
+  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload
 } from 'lucide-react';
 
 // Lazy load heavy admin sub-components
@@ -3226,19 +3226,19 @@ export default function AdminDashboard({
                                   <Trash2 size={14} />
                                 </button>
                               </div>
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 <div>
-                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Prix (DA)' : '\u0627\u0644\u0633\u0639\u0631 (\u062f\u062c)'}</label>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Prix (DA)' : 'السعر (د.ج)'}</label>
                                   <input
                                     type="number"
                                     min="0"
                                     value={v.price ?? 0}
                                     onChange={(e) => handleUpdateVariant(v.id, 'price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold"
+                                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold font-mono text-purple-900"
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Stock' : '\u0627\u0644\u0645\u062e\u0632\u0648\u0646'}</label>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Stock' : 'المخزون'}</label>
                                   <input
                                     type="number"
                                     min="0"
@@ -3246,6 +3246,46 @@ export default function AdminDashboard({
                                     onChange={(e) => handleUpdateVariant(v.id, 'stock', e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0)}
                                     className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold"
                                   />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Image (Upload ou Lien)' : 'صورة الحجم (رفع أو رابط)'}</label>
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      placeholder="https://..."
+                                      value={v.image || ''}
+                                      onChange={(e) => handleUpdateVariant(v.id, 'image', e.target.value)}
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-mono"
+                                    />
+                                    <input
+                                      type="file"
+                                      id={`v-file-${v.id}`}
+                                      accept="image/*"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+                                        const reader = new FileReader();
+                                        reader.onload = (event) => {
+                                          if (event.target?.result) {
+                                            handleUpdateVariant(v.id, 'image', event.target.result as string);
+                                          }
+                                        };
+                                        reader.readAsDataURL(file);
+                                        e.target.value = '';
+                                      }}
+                                      className="hidden"
+                                    />
+                                    <label
+                                      htmlFor={`v-file-${v.id}`}
+                                      className="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer text-xs font-bold shrink-0 flex items-center gap-1 shadow-xs"
+                                      title={lang === 'fr' ? 'Téléverser depuis l\'appareil 📁' : 'رفع صورة من الجهاز 📁'}
+                                    >
+                                      <Upload size={12} />
+                                    </label>
+                                  </div>
+                                  {v.image && (
+                                    <img src={v.image} alt={v.name} className="w-8 h-8 rounded-lg object-cover border border-slate-200 mt-1 shadow-2xs" />
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -3269,11 +3309,18 @@ export default function AdminDashboard({
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-500 font-bold text-xs">{lang === 'fr' ? 'Prix Brut (DA)' : 'السعر الإجمالي (دج)'}</label>
+                <label className="text-slate-500 font-bold text-xs flex items-center justify-between">
+                  <span>{lang === 'fr' ? 'Prix Brut (DA)' : 'السعر الأساسي (دج)'}</span>
+                  {pIsVariable && (
+                    <span className="text-[10px] text-purple-600 font-normal">
+                      ({lang === 'fr' ? 'Optionnel: calculé depuis les variantes' : 'اختياري: سيُحسب من المتغيرات تلقائياً'})
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
-                  required
-                  min="1"
+                  required={!pIsVariable}
+                  min={pIsVariable ? "0" : "1"}
                   value={pPrice}
                   onChange={(e) => setPPrice(Number(e.target.value))}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan"

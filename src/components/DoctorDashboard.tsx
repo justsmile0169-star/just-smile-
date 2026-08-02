@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Order, Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3 } from 'lucide-react';
+import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3, Lock } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { updatePassword } from 'firebase/auth';
+import { db, auth } from '../firebase';
+import { hashPassword } from '../utils/crypto';
 import { useAppDialog } from '../context/AppDialogContext';
 import { getWilayas, getCommunesByWilaya, WilayaOption, CommuneOption, isFreeDelivery } from '../utils/algeriaData';
 import DoctorAnalytics from './DoctorAnalytics';
@@ -53,6 +55,8 @@ export default function DoctorDashboard({
   const [profileName, setProfileName] = useState(user.name);
   const [profilePhone, setProfilePhone] = useState(user.phone);
   const [profileClinic, setProfileClinic] = useState(user.clinicName);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   
   const [wilayas, setWilayas] = useState<WilayaOption[]>([]);
   const [communes, setCommunes] = useState<CommuneOption[]>([]);
@@ -109,14 +113,37 @@ export default function DoctorDashboard({
       return;
     }
 
+    if (newPassword || confirmPassword) {
+      if (newPassword !== confirmPassword) {
+        alert(lang === 'fr' ? 'Les mots de passe ne correspondent pas.' : 'كلمتا السر غير متطابقتين.', 'error');
+        return;
+      }
+      if (newPassword.length < 4) {
+        alert(lang === 'fr' ? 'Le mot de passe doit contenir au moins 4 caractères.' : 'يجب أن تحتوي كلمة السر على 4 أحرف كحد أدنى.', 'error');
+        return;
+      }
+    }
+
     setSavingProfile(true);
     try {
       const wilayaName  = lang === 'ar' ? selectedWilaya.nameAr : selectedWilaya.nameAscii;
       const communeName = lang === 'ar' ? selectedCommune.nameAr : selectedCommune.nameAscii;
       const locationStr = `${wilayaName}، ${communeName}`;
 
+      let hashedNewPassword = '';
+      if (newPassword.trim()) {
+        hashedNewPassword = await hashPassword(newPassword.trim());
+        if (auth.currentUser) {
+          try {
+            await updatePassword(auth.currentUser, newPassword.trim());
+          } catch (pErr) {
+            console.warn('Firebase Auth updatePassword notice:', pErr);
+          }
+        }
+      }
+
       const userDocRef = doc(db, 'users', user.uid);
-      await updateDoc(userDocRef, {
+      const updateFields: any = {
         name: profileName.trim(),
         phone: profilePhone.trim(),
         clinicName: profileClinic.trim(),
@@ -124,13 +151,19 @@ export default function DoctorDashboard({
         wilayaCode: selectedWilaya.code,
         wilayaName: selectedWilaya.nameAr,
         communeName: selectedCommune.nameAr,
-        communeNameAscii: selectedCommune.nameAscii
-      });
+        communeNameAscii: selectedCommune.nameAscii,
+        ...(hashedNewPassword && { password: hashedNewPassword })
+      };
+
+      await updateDoc(userDocRef, updateFields);
+
+      setNewPassword('');
+      setConfirmPassword('');
 
       alert(
         lang === 'fr' 
           ? 'Profil mis à jour avec succès!' 
-          : 'تم تحديث الملف الشخصي بنجاح!', 
+          : 'تم تحديث الملف الشخصي وكلمة المرور بنجاح!', 
         'success'
       );
       setShowProfileModal(false);
@@ -729,6 +762,34 @@ export default function DoctorDashboard({
                           : '📦 سيتم احتساب تكلفة التوصيل حسب الموقع.')}
                   </div>
                 )}
+
+              {/* Password Change Fields */}
+              <div className="space-y-3 pt-3 border-t border-slate-200">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Lock size={14} className="text-[#a82340]" />
+                  <span>{lang === 'fr' ? 'Changer le mot de passe (Optionnel) :' : 'تغيير كلمة المرور (اختياري) :'}</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <input
+                      type="password"
+                      placeholder={lang === 'fr' ? 'Nouveau mot de passe' : 'كلمة المرور الجديدة'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-mono focus:outline-hidden focus:border-brand-cyan"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="password"
+                      placeholder={lang === 'fr' ? 'Confirmer le mot de passe' : 'تأكيد كلمة المرور الجديدة'}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-mono focus:outline-hidden focus:border-brand-cyan"
+                    />
+                  </div>
+                </div>
+              </div>
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4">
