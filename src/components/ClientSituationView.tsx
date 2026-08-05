@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { Order, Payment, ProductReturn, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 import { useAppDialog } from '../context/AppDialogContext';
+import { exportFinancialStatement } from '../utils/exportFinancialStatement';
 import {
   Search, User, ShoppingBag, CreditCard, RotateCcw, FileText, Plus, X, Printer
 } from 'lucide-react';
@@ -138,93 +139,13 @@ export default function ClientSituationView({
 
   const handleExportFinancialStatement = () => {
     if (!selectedClient) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html dir="${isRtl ? 'rtl' : 'ltr'}">
-      <head>
-        <title>كشف حساب مالي - ${selectedClient.name}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 30px; color: #1e293b; }
-          .header { text-align: center; border-bottom: 2px solid #0891b2; padding-bottom: 15px; margin-bottom: 25px; }
-          .header h1 { color: #0891b2; margin: 0; font-size: 24px; }
-          .header p { color: #64748b; margin: 5px 0 0 0; font-size: 13px; }
-          .info-table { width: 100%; margin-bottom: 25px; border-collapse: collapse; }
-          .info-table td { padding: 8px; font-size: 13px; }
-          .data-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-          .data-table th, .data-table td { border: 1px solid #cbd5e1; padding: 10px; text-align: ${isRtl ? 'right' : 'left'}; font-size: 12px; }
-          .data-table th { background-color: #f1f5f9; font-weight: bold; }
-          .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-top: 20px; text-align: right; }
-          .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>JUST SMILE - مستلزمات طب الأسنان</h1>
-          <p>كشف حساب مالي رسمي للعيادة - Relevé Financier</p>
-          <p>التاريخ: ${new Date().toLocaleDateString(isRtl ? 'ar-DZ' : 'fr-FR')}</p>
-        </div>
-
-        <table class="info-table">
-          <tr>
-            <td><strong>اسم الطبيب / العيادة:</strong> ${selectedClient.name} (${selectedClient.clinicName})</td>
-            <td><strong>رقم الهاتف:</strong> ${selectedClient.phone}</td>
-          </tr>
-          <tr>
-            <td><strong>البريد الإلكتروني:</strong> ${selectedClient.email || '-'}</td>
-            <td><strong>الولاية:</strong> ${selectedClient.wilayaName || '-'}</td>
-          </tr>
-        </table>
-
-        <h3>تفاصيل الطلبات والمشتريات (Factures)</h3>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>التاريخ</th>
-              <th>رقم الطلب</th>
-              <th>نوع الدفع</th>
-              <th>المبلغ الإجمالي</th>
-              <th>المبلغ المدفوع</th>
-              <th>المتبقي</th>
-              <th>الحالة</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${clientOrders.map(o => `
-              <tr>
-                <td>${new Date(o.createdAt).toLocaleDateString()}</td>
-                <td>#${o.id ? o.id.slice(-8).toUpperCase() : ''}</td>
-                <td>${o.paymentMethod === 'credit' ? 'دَين (Crédit)' : 'نقداً (Cash)'}</td>
-                <td>${o.totalAfterDiscount.toLocaleString()} دج</td>
-                <td>${o.paidAmount.toLocaleString()} دج</td>
-                <td>${o.remainingBalance.toLocaleString()} دج</td>
-                <td>${o.status}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-
-        <div class="summary-box">
-          <p>إجمالي المشتريات: <strong>${summary.totalPurchases.toLocaleString()} دج</strong></p>
-          <p>إجمالي المرتجعات: <strong>${summary.totalReturns.toLocaleString()} دج</strong></p>
-          <p>إجمالي المدفوعات: <strong>${summary.totalPaid.toLocaleString()} دج</strong></p>
-          <p style="font-size: 16px; color: #e11d48;">الصافي الدائن / المتبقي للعيادة: <strong>${summary.totalDebt.toLocaleString()} دج</strong></p>
-        </div>
-
-        <div class="footer">
-          تم استخراج هذا الكشف آلياً من نظام JUST SMILE لمستلزمات طب الأسنان.
-        </div>
-
-        <script>
-          window.onload = function() { window.print(); }
-        </script>
-      </body>
-      </html>
-    `;
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
+    exportFinancialStatement({
+      client: selectedClient,
+      orders: clientOrders,
+      payments: clientPayments,
+      returns: clientReturns,
+      lang
+    });
   };
 
   return (

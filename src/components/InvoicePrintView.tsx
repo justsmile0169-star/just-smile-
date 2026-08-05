@@ -101,8 +101,51 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
   useEffect(() => {
     document.body.classList.remove('print-mode-a4', 'print-mode-thermal');
     document.body.classList.add(`print-mode-${printMode}`);
+
+    let styleEl = document.getElementById('dynamic-print-page-style') as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'dynamic-print-page-style';
+      document.head.appendChild(styleEl);
+    }
+
+    if (printMode === 'thermal') {
+      styleEl.innerHTML = `
+        @media print {
+          @page {
+            size: 80mm auto !important;
+            margin: 0mm !important;
+          }
+          html, body {
+            width: 80mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+          }
+        }
+      `;
+    } else {
+      styleEl.innerHTML = `
+        @media print {
+          @page {
+            size: A4 portrait !important;
+            margin: 8mm !important;
+          }
+          html, body {
+            width: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+        }
+      `;
+    }
+
     return () => {
       document.body.classList.remove('print-mode-a4', 'print-mode-thermal');
+      const existing = document.getElementById('dynamic-print-page-style');
+      if (existing) {
+        existing.remove();
+      }
     };
   }, [printMode]);
 
@@ -592,70 +635,88 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
         </div>
       ) : (
         /* Render 80mm Thermal Receipt Preview */
-        <div id="invoice-thermal-container" className="my-16 mx-auto">
+        <div id="invoice-thermal-container" className="my-12 mx-auto max-w-[320px]">
           <div
             id="invoice-thermal"
             style={{
               width: '80mm',
+              maxWidth: '320px',
               minHeight: '130mm',
               background: '#FFFFFF',
-              fontFamily: 'monospace',
-              fontSize: '8.5pt',
+              fontFamily: "'Consolas', 'Courier New', Courier, monospace",
+              fontSize: '8pt',
               color: '#000000',
-              padding: '6mm 5mm',
+              padding: '5mm 4mm',
               borderRadius: '12px',
-              boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
               margin: '0 auto',
+              lineHeight: 1.3,
               WebkitPrintColorAdjust: 'exact',
               printColorAdjust: 'exact',
             }}
           >
-            <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '13pt', color: C.navy }}>
+            {/* Header: Brand & Contact Info */}
+            <div style={{ textAlign: 'center', fontWeight: 800, fontSize: '13pt', color: C.navy, letterSpacing: '-0.2px' }}>
               {shopInfo.companyName}
             </div>
-            <div style={{ textAlign: 'center', fontSize: '7.5pt', color: '#555', marginTop: '2px' }}>
+            <div style={{ textAlign: 'center', fontSize: '7.5pt', fontWeight: 600, color: '#444', marginTop: '1px' }}>
               {shopInfo.activity}
             </div>
-            <div style={{ textAlign: 'center', fontSize: '7.5pt', color: '#666', marginTop: '2px' }}>
+            <div style={{ textAlign: 'center', fontSize: '7.5pt', color: '#555', marginTop: '2px' }}>
               Tél: {shopInfo.phone}
             </div>
+            {shopInfo.address && (
+              <div style={{ textAlign: 'center', fontSize: '7pt', color: '#666', marginTop: '1px' }}>
+                {shopInfo.address}
+              </div>
+            )}
 
+            {/* Document Title & Number */}
             <div style={{ borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '4px 0', margin: '8px 0', textAlign: 'center', fontWeight: 'bold', fontSize: '9pt' }}>
               BON DE LIVRAISON / FACTURE N° {invoiceNum}
             </div>
 
-            <div style={{ fontSize: '7.5pt', lineHeight: 1.5, marginBottom: '8px' }}>
+            {/* Receipt Metadata */}
+            <div style={{ fontSize: '7.5pt', lineHeight: 1.45, marginBottom: '8px' }}>
               <div><b>Date:</b> {invoiceDate}</div>
               <div><b>Client:</b> {order.doctorName}</div>
               <div><b>Cabinet:</b> {order.doctorClinic}</div>
               <div><b>Tél Client:</b> {order.doctorPhone}</div>
-              <div><b>Mode:</b> {isCash ? 'Comptant (COD)' : 'Crédit (15j)'}</div>
+              <div><b>Mode de Paiement:</b> {isCash ? 'Comptant (COD)' : 'Crédit (15j)'}</div>
             </div>
 
+            {/* Table of Items */}
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '7.5pt', margin: '8px 0' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #000', textAlign: 'left' }}>
                   <th style={{ padding: '3px 0' }}>Désignation</th>
                   <th style={{ textAlign: 'center', padding: '3px 0' }}>Qté</th>
+                  <th style={{ textAlign: 'right', padding: '3px 0' }}>P.U</th>
                   <th style={{ textAlign: 'right', padding: '3px 0' }}>Montant</th>
                 </tr>
               </thead>
               <tbody>
                 {order.items.map((item, i) => (
-                  <tr key={i} style={{ borderBottom: '1px dashed #eee' }}>
-                    <td style={{ padding: '3px 0', wordBreak: 'break-word' }}>
+                  <tr key={i} style={{ borderBottom: '1px dashed #ddd' }}>
+                    <td style={{ padding: '3px 0', wordBreak: 'break-word', paddingRight: '2px' }}>
                       {item.name}
-                      {item.variantName && <div style={{ fontSize: '6.5pt', color: '#666' }}>({item.variantName})</div>}
+                      {item.variantName && <div style={{ fontSize: '6.5pt', color: '#555' }}>({item.variantName})</div>}
                     </td>
                     <td style={{ textAlign: 'center', padding: '3px 0', fontWeight: 'bold' }}>x{item.quantity}</td>
+                    <td style={{ textAlign: 'right', padding: '3px 0', color: '#444' }}>{fmt(item.price)}</td>
                     <td style={{ textAlign: 'right', padding: '3px 0', fontWeight: 'bold' }}>{fmt(item.price * item.quantity)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
+            {/* Totals Section */}
             <div style={{ borderTop: '1.5px solid #000', paddingTop: '6px', marginTop: '6px', fontSize: '8.5pt' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '7.5pt', color: '#444' }}>
+                <span>Total HT:</span>
+                <span>{fmt(totalHT)} DA</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '9pt', marginTop: '2px' }}>
                 <span>NET À PAYER TTC:</span>
                 <span>{fmt(totalTTC)} DA</span>
               </div>
@@ -673,20 +734,22 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
               )}
             </div>
 
-            <div style={{ textAlign: 'center', marginTop: '12px', paddingTop: '8px', borderTop: '1px dashed #aaa' }}>
-              <div style={{ width: '76px', height: '76px', margin: '0 auto', display: 'block' }}>
+            {/* QR Code Verification */}
+            <div style={{ textAlign: 'center', marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #aaa' }}>
+              <div style={{ width: '72px', height: '72px', margin: '0 auto', display: 'block' }}>
                 {qrPngUrl ? (
                   <img
                     src={qrPngUrl}
                     alt="QR Verification"
-                    style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px' }}
+                    style={{ width: '72px', height: '72px', display: 'block', borderRadius: '6px' }}
                   />
                 ) : null}
               </div>
               <div style={{ fontSize: '6pt', marginTop: '3px', fontWeight: 'bold', color: C.navy }}>SCAN TO VERIFY 🛡️</div>
             </div>
 
-            <div style={{ textAlign: 'center', fontSize: '6.5pt', marginTop: '8px', color: '#666' }}>
+            {/* Footer Notice */}
+            <div style={{ textAlign: 'center', fontSize: '6.5pt', marginTop: '8px', color: '#555', lineHeight: 1.3 }}>
               Merci pour votre confiance !<br />www.justsmile.dz
             </div>
           </div>

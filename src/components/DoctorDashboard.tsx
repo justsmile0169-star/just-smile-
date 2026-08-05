@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Order, Product, UserProfile } from '../types';
+import { Order, Payment, Product, ProductReturn, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3, Lock } from 'lucide-react';
+import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3, Lock, Printer } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { hashPassword } from '../utils/crypto';
 import { useAppDialog } from '../context/AppDialogContext';
 import { getWilayas, getCommunesByWilaya, WilayaOption, CommuneOption, isFreeDelivery } from '../utils/algeriaData';
+import { exportFinancialStatement } from '../utils/exportFinancialStatement';
 import DoctorAnalytics from './DoctorAnalytics';
 import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
 
@@ -17,6 +18,8 @@ interface DoctorDashboardProps {
   allProducts: Product[];
   favorites: string[]; // list of product IDs
   recentlyViewed: string[]; // list of product IDs
+  paymentsList?: Payment[];
+  returnsList?: ProductReturn[];
   lang: Language;
   categoryCounts?: Record<string, number>;
   onAddToCart: (product: Product) => void;
@@ -33,6 +36,8 @@ export default function DoctorDashboard({
   allProducts,
   favorites,
   recentlyViewed,
+  paymentsList = [],
+  returnsList = [],
   lang,
   categoryCounts,
   onAddToCart,
@@ -269,6 +274,22 @@ export default function DoctorDashboard({
   const favoriteProducts = allProducts.filter((p) => favorites.includes(p.id));
   const recentlyViewedProducts = allProducts.filter((p) => recentlyViewed.includes(p.id));
 
+  const handleExportStatement = () => {
+    const userPayments = (paymentsList || []).filter(
+      (p) => p.userId === user.uid || p.userId === user.id
+    );
+    const userReturns = (returnsList || []).filter(
+      (r) => r.userId === user.uid || r.userId === user.id
+    );
+    exportFinancialStatement({
+      client: user,
+      orders,
+      payments: userPayments,
+      returns: userReturns,
+      lang
+    });
+  };
+
   return (
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
       
@@ -326,6 +347,16 @@ export default function DoctorDashboard({
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-3">
+          {/* Export Financial Statement Button */}
+          <button
+            onClick={handleExportStatement}
+            className="flex items-center gap-2 bg-brand-cyan text-white hover:bg-brand-cyan/90 px-4 py-2.5 rounded-xl font-bold text-sm transition-all shadow-xs cursor-pointer"
+            title={lang === 'fr' ? 'Imprimer le relevé financier' : 'تصدير / طباعة كشف الحساب المالي'}
+          >
+            <Printer size={16} />
+            <span>{lang === 'fr' ? 'Relevé Financier 📑' : 'تصدير كشف الحساب 📑'}</span>
+          </button>
+
           {/* Edit Profile Button */}
           <button
             onClick={handleOpenProfileModal}
@@ -338,7 +369,7 @@ export default function DoctorDashboard({
           {/* Contact Admin Button */}
           <button
             onClick={() => setShowMessageModal(true)}
-            className="flex items-center gap-2 bg-brand-cyan text-white px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-brand-cyan/90 transition-colors shadow-xs cursor-pointer"
+            className="flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-xs cursor-pointer"
           >
             <MessageSquare size={16} />
             <span>{lang === 'fr' ? 'Contacter l\'administration' : 'اتصل بالإدارة'}</span>

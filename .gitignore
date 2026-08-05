@@ -9,3 +9,4 @@ coverage/
 .aistudio/
 service-account-key*.json
 .vercel
+.env*.local

@@ -60,11 +60,6 @@ body.dark {
 
 /* High-quality print styles for invoices (A4 & Thermal 80mm) */
 @media print {
-  @page {
-    size: A4 portrait;
-    margin: 8mm;
-  }
-
   html, body {
     background-color: white !important;
     color: black;
@@ -109,10 +104,11 @@ body.dark {
     display: none !important;
   }
 
-  /* Mode Thermal */
+  /* Mode Thermal - Real 80mm receipt format without forcing A4 bounds */
   body.print-mode-thermal {
     margin: 0 !important;
     padding: 0 !important;
+    width: 80mm !important;
   }
 
   body.print-mode-thermal #invoice-a4 {
@@ -121,16 +117,20 @@ body.dark {
 
   body.print-mode-thermal #invoice-thermal-container {
     display: block !important;
-    margin: 0 !important;
+    width: 80mm !important;
+    max-width: 320px !important;
+    margin: 0 auto !important;
     padding: 0 !important;
   }
 
   body.print-mode-thermal #invoice-thermal {
-    width: 76mm !important;
+    width: 80mm !important;
+    max-width: 320px !important;
     margin: 0 auto !important;
     box-shadow: none !important;
     border-radius: 0 !important;
-    padding: 2mm !important;
-    page-break-after: always;
+    padding: 2mm 3mm !important;
+    page-break-after: avoid;
+    break-after: avoid;
   }
 }

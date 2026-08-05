@@ -1108,6 +1108,8 @@ export default function App() {
                     allProducts={products}
                     favorites={favorites}
                     recentlyViewed={recentlyViewed}
+                    paymentsList={paymentsList}
+                    returnsList={returnsList}
                     lang={lang}
                     categoryCounts={categoryCounts}
                     onAddToCart={handleAddToCart}
