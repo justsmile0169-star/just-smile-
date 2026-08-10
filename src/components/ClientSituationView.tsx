@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Order, Payment, ProductReturn, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
@@ -36,6 +36,11 @@ export default function ClientSituationView({
   const [returnReason, setReturnReason] = useState('');
   const [savingReturn, setSavingReturn] = useState(false);
 
+  const [showGeneralPaymentForm, setShowGeneralPaymentForm] = useState(false);
+  const [generalPaymentAmount, setGeneralPaymentAmount] = useState(0);
+  const [generalPaymentNotes, setGeneralPaymentNotes] = useState('');
+  const [savingPayment, setSavingPayment] = useState(false);
+
   const doctors = useMemo(
     () => usersList.filter((u) => u.role === 'doctor'),
     [usersList]
@@ -64,15 +69,48 @@ export default function ClientSituationView({
     [ordersList, selectedClient]
   );
 
-  const clientPayments = useMemo(
-    () =>
-      selectedClient
-        ? paymentsList
-            .filter((p) => p.userId === selectedClient.uid)
-            .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate))
-        : [],
-    [paymentsList, selectedClient]
-  );
+  const cancelledOrders = useMemo(() => clientOrders.filter((o) => o.status === 'cancelled'), [clientOrders]);
+  const activeOrders = useMemo(() => clientOrders.filter((o) => o.status !== 'cancelled'), [clientOrders]);
+
+  const clientPayments = useMemo(() => {
+    if (!selectedClient) return [];
+    const explicit = paymentsList.filter((p) => p.userId === selectedClient.uid);
+    const result: Payment[] = [...explicit];
+
+    let unallocatedExplicit = explicit
+      .filter((p) => !p.orderId || p.orderId.trim() === '')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    activeOrders.forEach((o) => {
+      const paidOnOrder = o.paidAmount || 0;
+      if (paidOnOrder > 0) {
+        const explicitForOrder = explicit
+          .filter((p) => p.orderId === o.id)
+          .reduce((sum, p) => sum + p.amount, 0);
+
+        let uncoveredOnOrder = Math.max(0, paidOnOrder - explicitForOrder);
+
+        if (uncoveredOnOrder > 0 && unallocatedExplicit > 0) {
+          const coveredByGeneral = Math.min(uncoveredOnOrder, unallocatedExplicit);
+          uncoveredOnOrder -= coveredByGeneral;
+          unallocatedExplicit -= coveredByGeneral;
+        }
+
+        if (uncoveredOnOrder > 0) {
+          result.push({
+            id: `synth-${o.id}`,
+            orderId: o.id,
+            userId: o.userId,
+            amount: uncoveredOnOrder,
+            paymentDate: o.createdAt,
+            notes: isRtl ? 'دفعة عند الطلب / مباشرة' : 'Paiement à la commande / Direct'
+          });
+        }
+      }
+    });
+
+    return result.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
+  }, [paymentsList, selectedClient, activeOrders, isRtl]);
 
   const clientReturns = useMemo(
     () =>
@@ -83,9 +121,6 @@ export default function ClientSituationView({
         : [],
     [returnsList, selectedClient]
   );
-
-  const cancelledOrders = clientOrders.filter((o) => o.status === 'cancelled');
-  const activeOrders = clientOrders.filter((o) => o.status !== 'cancelled');
 
   const summary = useMemo(() => {
     const totalPurchases = activeOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
@@ -106,6 +141,74 @@ export default function ClientSituationView({
     new Date(dateStr).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ');
 
   const statusLabel = (status: string) => getTranslation(lang, `status_${status}` as any) || status;
+
+  const handleRegisterGeneralPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedClient || generalPaymentAmount <= 0) {
+      alert(lang === 'fr' ? 'Montant de paiement invalide.' : 'قيمة الدفعة غير صالحة.', 'error');
+      return;
+    }
+
+    setSavingPayment(true);
+    try {
+      let remainingToDistribute = generalPaymentAmount;
+
+      const unpaidOrders = activeOrders
+        .filter((o) => o.remainingBalance > 0)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+      for (const order of unpaidOrders) {
+        if (remainingToDistribute <= 0) break;
+
+        const payForThisOrder = Math.min(order.remainingBalance, remainingToDistribute);
+        const newPaid = (order.paidAmount || 0) + payForThisOrder;
+        const newRemaining = Math.max(0, order.remainingBalance - payForThisOrder);
+        const newPaymentStatus = newRemaining <= 0 ? 'paid' : 'partial';
+
+        await updateDoc(doc(db, 'orders', order.id), {
+          paidAmount: newPaid,
+          remainingBalance: newRemaining,
+          paymentStatus: newPaymentStatus
+        });
+
+        remainingToDistribute -= payForThisOrder;
+      }
+
+      await addDoc(collection(db, 'payments'), {
+        userId: selectedClient.uid,
+        amount: generalPaymentAmount,
+        paymentDate: new Date().toISOString(),
+        notes: generalPaymentNotes.trim() || (isRtl ? 'دفعة مالية على الحساب (تسديد دين عام)' : 'Versement sur compte (Paiement général)')
+      });
+
+      await addDoc(collection(db, 'notifications'), {
+        userId: selectedClient.uid,
+        titleFr: 'Paiement enregistré !',
+        titleAr: 'تم تسجيل دفعة مالية!',
+        messageFr: `Un versement de ${formatPrice(generalPaymentAmount)} a été enregistré sur votre compte.`,
+        messageAr: `تم تسجيل دفعة بقيمة ${formatPrice(generalPaymentAmount)} لحسابكم وتخفيض رصيد الدين.`,
+        type: 'payment_reminder',
+        isRead: false,
+        createdAt: new Date().toISOString()
+      });
+
+      alert(
+        isRtl
+          ? `تم تسجيل الدفعة بقيمة ${new Intl.NumberFormat('ar-DZ').format(generalPaymentAmount)} دج بنجاح وتخفيض الدين!`
+          : `Versement de ${new Intl.NumberFormat('fr-FR').format(generalPaymentAmount)} DA enregistré avec succès !`,
+        'success'
+      );
+
+      setShowGeneralPaymentForm(false);
+      setGeneralPaymentAmount(0);
+      setGeneralPaymentNotes('');
+    } catch (err) {
+      console.error(err);
+      alert(lang === 'fr' ? 'Erreur lors de l\'enregistrement.' : 'حدث خطأ أثناء تسجيل الدفعة.', 'error');
+    } finally {
+      setSavingPayment(false);
+    }
+  };
 
   const handleRegisterReturn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -249,13 +352,22 @@ export default function ClientSituationView({
                   </p>
                   <p className="text-[10px] text-slate-400 font-mono mt-1">UID: {selectedClient.uid}</p>
                 </div>
-                <button
-                  onClick={handleExportFinancialStatement}
-                  className="px-4 py-2 bg-brand-cyan hover:bg-brand-dark text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
-                >
-                  <FileText size={16} />
-                  {lang === 'fr' ? 'Imprimer Relevé' : 'تصدير / طباعة كشف الحساب المالي 📑'}
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => setShowGeneralPaymentForm(true)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <CreditCard size={16} />
+                    {lang === 'fr' ? 'Enregistrer un versement' : 'تسجيل دفعة على الحساب 💳'}
+                  </button>
+                  <button
+                    onClick={handleExportFinancialStatement}
+                    className="px-4 py-2 bg-brand-cyan hover:bg-brand-dark text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <FileText size={16} />
+                    {lang === 'fr' ? 'Imprimer Relevé' : 'تصدير / طباعة كشف الحساب المالي 📑'}
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -422,10 +534,20 @@ export default function ClientSituationView({
 
               {/* Payments */}
               <section className="space-y-2">
-                <h5 className="text-xs font-extrabold text-slate-500 uppercase flex items-center gap-1.5">
-                  <CreditCard size={14} />
-                  {lang === 'fr' ? 'Paiements reçus' : 'المدفوعات المستلمة'}
-                </h5>
+                <div className="flex items-center justify-between">
+                  <h5 className="text-xs font-extrabold text-slate-500 uppercase flex items-center gap-1.5">
+                    <CreditCard size={14} />
+                    {lang === 'fr' ? 'Paiements reçus' : 'المدفوعات المستلمة'}
+                  </h5>
+                  <button
+                    type="button"
+                    onClick={() => setShowGeneralPaymentForm(true)}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus size={14} />
+                    {lang === 'fr' ? 'Nouveau versement' : 'تسجيل دفعة جديدة 💳'}
+                  </button>
+                </div>
                 <div className="overflow-x-auto border border-slate-100 rounded-2xl">
                   <table className="w-full text-sm min-w-[500px]">
                     <thead>
@@ -448,7 +570,7 @@ export default function ClientSituationView({
                           <tr key={payment.id} className="hover:bg-slate-50/50">
                             <td className="py-2 px-3 text-xs text-slate-500">{formatDate(payment.paymentDate)}</td>
                             <td className="py-2 px-3 font-mono text-xs">
-                              #{payment.orderId.slice(-6).toUpperCase()}
+                              {payment.orderId ? `#${payment.orderId.slice(-6).toUpperCase()}` : (isRtl ? 'دفعة عامة' : 'Versement général')}
                             </td>
                             <td className="py-2 px-3 font-bold text-emerald-600">{formatPrice(payment.amount)}</td>
                             <td className="py-2 px-3 text-xs text-slate-500">{payment.notes || '-'}</td>
@@ -463,6 +585,106 @@ export default function ClientSituationView({
           )}
         </div>
       </div>
+
+      {/* Register General Payment modal */}
+      {showGeneralPaymentForm && selectedClient && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleRegisterGeneralPayment}
+            className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden"
+          >
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <CreditCard size={18} className="text-emerald-600" />
+                <span className="font-extrabold text-slate-800 text-base">
+                  {lang === 'fr' ? 'Versement sur compte' : 'تسجيل دفعة مالية على الحساب'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGeneralPaymentForm(false)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 space-y-1">
+                <p className="text-slate-700 font-bold text-sm">{selectedClient.name}</p>
+                <p className="text-slate-500 text-xs">{selectedClient.clinicName || ''}</p>
+                <div className="flex justify-between items-center pt-2 border-t border-emerald-200/60 mt-2">
+                  <span className="text-slate-600 font-bold">
+                    {lang === 'fr' ? 'Solde débiteur actuel :' : 'إجمالي الدين الحالي :'}
+                  </span>
+                  <span className="text-rose-600 font-extrabold text-sm">
+                    {formatPrice(summary.totalDebt)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-extrabold text-slate-700 text-xs flex items-center gap-1">
+                  {lang === 'fr' ? 'Montant du versement (DA) *' : 'مبلغ الدفعة المقبوضة (دج) *'}
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="1"
+                  value={generalPaymentAmount || ''}
+                  onChange={(e) => setGeneralPaymentAmount(Number(e.target.value))}
+                  placeholder="ex: 16000"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-base font-extrabold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-extrabold text-slate-700 text-xs">
+                  {lang === 'fr' ? 'Notes / Mode de paiement' : 'ملاحظات / طريقة الدفع'}
+                </label>
+                <input
+                  type="text"
+                  value={generalPaymentNotes}
+                  onChange={(e) => setGeneralPaymentNotes(e.target.value)}
+                  placeholder={
+                    lang === 'fr'
+                      ? 'ex: Espèces, Virement CCP, Chèque...'
+                      : 'مثال: نقداً، تحويل CCP، إيصال تسديد...'
+                  }
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3.5 text-xs font-semibold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">
+                💡 {isRtl
+                  ? 'سيتم خصم مبلغ الدفعة تلقائياً من إجمالي دين الطبيب وتطبيقه على الفواتير المتبقية بدءاً من الفاتورة الأقدم.'
+                  : 'Ce versement réduira le solde débiteur global et sera automatiquement affecté aux factures en souffrance de la plus ancienne à la plus récente.'}
+              </p>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowGeneralPaymentForm(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+              </button>
+              <button
+                type="submit"
+                disabled={savingPayment || generalPaymentAmount <= 0}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl transition-all flex items-center gap-2 shadow-xs cursor-pointer"
+              >
+                <CreditCard size={16} />
+                {savingPayment
+                  ? (lang === 'fr' ? 'Enregistrement...' : 'جاري التسجيل...')
+                  : (lang === 'fr' ? 'Valider le versement' : 'تأكيد تسجيل الدفعة')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Register return modal */}
       {showReturnForm && selectedClient && (

@@ -31,11 +31,48 @@ export function exportFinancialStatement({
   const cancelledOrders = orders.filter((o) => o.status === 'cancelled');
   const activeOrders = orders.filter((o) => o.status !== 'cancelled');
 
+  const explicitPayments = payments || [];
+  const effectivePayments: Payment[] = [...explicitPayments];
+
+  let unallocatedExplicit = explicitPayments
+    .filter((p) => !p.orderId || p.orderId.trim() === '')
+    .reduce((sum, p) => sum + p.amount, 0);
+
+  activeOrders.forEach((o) => {
+    const paidOnOrder = o.paidAmount || 0;
+    if (paidOnOrder > 0) {
+      const explicitForOrder = explicitPayments
+        .filter((p) => p.orderId === o.id)
+        .reduce((sum, p) => sum + p.amount, 0);
+
+      let uncoveredOnOrder = Math.max(0, paidOnOrder - explicitForOrder);
+
+      if (uncoveredOnOrder > 0 && unallocatedExplicit > 0) {
+        const coveredByGeneral = Math.min(uncoveredOnOrder, unallocatedExplicit);
+        uncoveredOnOrder -= coveredByGeneral;
+        unallocatedExplicit -= coveredByGeneral;
+      }
+
+      if (uncoveredOnOrder > 0) {
+        effectivePayments.push({
+          id: `synth-${o.id}`,
+          orderId: o.id,
+          userId: o.userId,
+          amount: uncoveredOnOrder,
+          paymentDate: o.createdAt,
+          notes: isRtl ? 'دفعة عند الطلب / مباشرة' : 'Paiement à la commande / Direct'
+        });
+      }
+    }
+  });
+
+  effectivePayments.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
+
   const totalPurchases = activeOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
   const totalReturns =
     returns.reduce((s, r) => s + r.totalAmount, 0) +
     cancelledOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
-  const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+  const totalPaid = effectivePayments.reduce((s, p) => s + p.amount, 0);
   const totalDebt = activeOrders.reduce((s, o) => s + o.remainingBalance, 0);
 
   const reportDate = new Date().toLocaleDateString(isRtl ? 'ar-DZ' : 'fr-FR', {
@@ -414,9 +451,9 @@ export function exportFinancialStatement({
           </tr>
         </thead>
         <tbody>
-          ${payments.length === 0 ? `
+          ${effectivePayments.length === 0 ? `
             <tr><td colSpan="4" style="text-align: center; color: #94a3b8;">${L.noPayments}</td></tr>
-          ` : payments.map((p) => `
+          ` : effectivePayments.map((p) => `
             <tr>
               <td>${new Date(p.paymentDate).toLocaleDateString(isRtl ? 'ar-DZ' : 'fr-FR')}</td>
               <td>#${p.orderId ? p.orderId.slice(-8).toUpperCase() : '-'}</td>
