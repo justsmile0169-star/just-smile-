@@ -15,7 +15,7 @@ import {
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
   History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin,
-  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload
+  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload, Pencil
 } from 'lucide-react';
 
 // Lazy load heavy admin sub-components
@@ -107,13 +107,20 @@ export default function AdminDashboard({
   const [editingOrderItems, setEditingOrderItems] = useState<Order['items']>([]);
   const [editingPaymentMethod, setEditingPaymentMethod] = useState<'cash' | 'credit'>('credit');
   const [editingDeliveryCost, setEditingDeliveryCost] = useState<number>(0);
+  const [editingOrderPaidAmount, setEditingOrderPaidAmount] = useState<number>(0);
   const [yalidineSubmitting, setYalidineSubmitting] = useState(false);
+
+  // --- Edit Order Payment from Debts Monitor State ---
+  const [selectedOrderForEditPayment, setSelectedOrderForEditPayment] = useState<Order | null>(null);
+  const [editOrderPaidAmount, setEditOrderPaidAmount] = useState<number>(0);
+  const [savingEditOrderPayment, setSavingEditOrderPayment] = useState(false);
 
   const handleStartEditOrder = (order: Order) => {
     setEditingOrder(order);
     setEditingOrderItems(order.items.map((item) => ({ ...item })));
     setEditingPaymentMethod(order.paymentMethod || 'credit');
     setEditingDeliveryCost(order.deliveryCost || 0);
+    setEditingOrderPaidAmount(order.paidAmount || 0);
   };
 
   const handleItemPriceChange = (index: number, newPrice: number) => {
@@ -143,7 +150,7 @@ export default function AdminDashboard({
     );
     const delivery = Number(editingDeliveryCost) || 0;
     const netTotal = totalBefore + delivery;
-    const paid = editingOrder?.paidAmount || 0;
+    const paid = Math.max(0, Number(editingOrderPaidAmount) || 0);
     const remaining = Math.max(0, netTotal - paid);
     return { totalBefore, delivery, netTotal, paid, remaining };
   };
@@ -168,6 +175,7 @@ export default function AdminDashboard({
         totalBeforeDiscount: totalBefore,
         totalAfterDiscount: netTotal,
         deliveryCost: delivery,
+        paidAmount: paid,
         remainingBalance: remaining,
         paymentStatus: newPaymentStatus,
       };
@@ -178,7 +186,7 @@ export default function AdminDashboard({
         currentUser,
         'order_edit',
         'order',
-        `Edited order #${editingOrder.id.slice(-6).toUpperCase()}: paymentMethod=${editingPaymentMethod}, total=${netTotal} DA`,
+        `Edited order #${editingOrder.id.slice(-6).toUpperCase()}: paymentMethod=${editingPaymentMethod}, total=${netTotal} DA, paid=${paid} DA`,
         editingOrder.id
       );
 
@@ -192,6 +200,40 @@ export default function AdminDashboard({
       alert(lang === 'fr' ? 'Erreur lors de la modification du produit.' : 'حدث خطأ أثناء تعديل الطلب.', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveOrderPaymentFromDebts = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedOrderForEditPayment || editOrderPaidAmount < 0) return;
+    setSavingEditOrderPayment(true);
+    try {
+      const newPaid = editOrderPaidAmount;
+      const newRemaining = Math.max(0, selectedOrderForEditPayment.totalAfterDiscount - newPaid);
+      const newPaymentStatus = newRemaining <= 0 ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
+
+      await updateDoc(doc(db, 'orders', selectedOrderForEditPayment.id), {
+        paidAmount: newPaid,
+        remainingBalance: newRemaining,
+        paymentStatus: newPaymentStatus
+      });
+
+      await logActivity(
+        currentUser,
+        'order_payment_edit',
+        'order',
+        `Modifié le montant payé pour la commande #${selectedOrderForEditPayment.id.slice(-6).toUpperCase()} : ${selectedOrderForEditPayment.paidAmount} DA -> ${newPaid} DA`,
+        selectedOrderForEditPayment.id
+      );
+
+      alert(lang === 'fr' ? 'Montant payé mis à jour !' : 'تم تحديث المبلغ المدفوع بنجاح!', 'success');
+      setSelectedOrderForEditPayment(null);
+      onRefreshData();
+    } catch (err) {
+      console.error(err);
+      alert(lang === 'fr' ? 'Erreur lors de la mise à jour.' : 'حدث خطأ أثناء التحديث.', 'error');
+    } finally {
+      setSavingEditOrderPayment(false);
     }
   };
 
@@ -2041,6 +2083,7 @@ export default function AdminDashboard({
               paymentsList={paymentsList}
               returnsList={returnsList}
               onPrintInvoice={onPrintInvoice}
+              currentUser={currentUser}
             />
           </Suspense>
         </div>
@@ -2222,6 +2265,16 @@ export default function AdminDashboard({
                                 title={lang === 'fr' ? 'Imprimer Facture' : 'طباعة الفاتورة'}
                               >
                                 <FileText size={14} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSelectedOrderForEditPayment(order);
+                                  setEditOrderPaidAmount(order.paidAmount || 0);
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                title={lang === 'fr' ? 'Modifier le montant payé' : 'تعديل المبلغ المدفوع'}
+                              >
+                                <Pencil size={14} />
                               </button>
                               {order.remainingBalance > 0 ? (
                                 <button
@@ -2870,6 +2923,271 @@ export default function AdminDashboard({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Edit Order Paid Amount Modal (Debts Monitor) */}
+      {selectedOrderForEditPayment && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveOrderPaymentFromDebts}
+            className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-fade-in"
+          >
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Pencil size={18} className="text-emerald-600" />
+                <span className="font-extrabold text-slate-800 text-base">
+                  {lang === 'fr' ? 'Modifier le montant payé' : 'تعديل المبلغ المدفوع للطلب'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedOrderForEditPayment(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-bold">{lang === 'fr' ? 'N° Commande :' : 'رقم الطلب :'}</span>
+                  <span className="font-mono font-bold text-slate-800">
+                    #{selectedOrderForEditPayment.id ? selectedOrderForEditPayment.id.slice(-6).toUpperCase() : 'UNKNOWN'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-bold">{lang === 'fr' ? 'Médecin :' : 'الطبيب :'}</span>
+                  <span className="font-bold text-slate-800">{selectedOrderForEditPayment.doctorName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-bold">{lang === 'fr' ? 'Total Facture :' : 'إجمالي الفاتورة :'}</span>
+                  <span className="font-extrabold text-slate-900">{formatPrice(selectedOrderForEditPayment.totalAfterDiscount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-bold">{lang === 'fr' ? 'Payé actuellement :' : 'المدفوع حالياً :'}</span>
+                  <span className="font-bold text-emerald-600">{formatPrice(selectedOrderForEditPayment.paidAmount)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-extrabold text-slate-700 text-xs">
+                  {lang === 'fr' ? 'Nouveau montant payé (DA) *' : 'المبلغ المدفوع الجديد (دج) *'}
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="1"
+                  value={editOrderPaidAmount}
+                  onChange={(e) => setEditOrderPaidAmount(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-base font-extrabold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed bg-emerald-50/60 p-3 rounded-xl border border-emerald-100">
+                💡 {lang === 'ar'
+                  ? 'سيتم خصم هذا المبلغ من إجمالي الطلب، وإعادة حساب الدين المتبقي وتغيير حالة الفاتورة تلقائياً.'
+                  : 'Le reste à payer et le statut de paiement seront automatiquement mis à jour.'}
+              </p>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedOrderForEditPayment(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+              </button>
+              <button
+                type="submit"
+                disabled={savingEditOrderPayment}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl transition-all flex items-center gap-2 shadow-xs cursor-pointer"
+              >
+                <Pencil size={16} />
+                {savingEditOrderPayment
+                  ? (lang === 'fr' ? 'Enregistrement...' : 'جاري الحفظ...')
+                  : (lang === 'fr' ? 'Valider la modification' : 'تأكيد الحفظ')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Order Edit Modal Overlay */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-8 animate-fade-in">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Edit3 size={18} className="text-amber-600" />
+                <span className="font-extrabold text-slate-800 text-base">
+                  {lang === 'fr'
+                    ? `Modifier Commande #${editingOrder.id ? editingOrder.id.slice(-6).toUpperCase() : 'UNKNOWN'}`
+                    : `تعديل الطلب #${editingOrder.id ? editingOrder.id.slice(-6).toUpperCase() : 'UNKNOWN'}`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingOrder(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 text-xs max-h-[70vh] overflow-y-auto">
+              {/* Doctor info summary */}
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 flex justify-between items-center">
+                <div>
+                  <p className="font-bold text-slate-800 text-sm">{editingOrder.doctorName}</p>
+                  <p className="text-slate-500 text-xs">{editingOrder.doctorClinic} • {editingOrder.doctorPhone}</p>
+                </div>
+                <span className="bg-slate-200 text-slate-700 font-extrabold text-[10px] px-2.5 py-1 rounded-lg">
+                  #{editingOrder.id ? editingOrder.id.slice(-6).toUpperCase() : ''}
+                </span>
+              </div>
+
+              {/* Items List */}
+              <div className="space-y-2">
+                <label className="font-extrabold text-slate-700 text-xs uppercase block">
+                  {lang === 'fr' ? 'Produits de la commande' : 'منتجات الطلب'}
+                </label>
+                <div className="space-y-2">
+                  {editingOrderItems.map((item, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                      <div className="flex-1">
+                        <p className="font-bold text-slate-800">{item.name}</p>
+                        <p className="text-[10px] text-slate-400">{item.category}</p>
+                      </div>
+                      <div className="w-24">
+                        <label className="text-[9px] font-bold text-slate-400 block">{lang === 'fr' ? 'Prix (DA)' : 'السعر (دج)'}</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.price}
+                          onChange={(e) => handleItemPriceChange(idx, Number(e.target.value))}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs"
+                        />
+                      </div>
+                      <div className="w-16">
+                        <label className="text-[9px] font-bold text-slate-400 block">{lang === 'fr' ? 'Qté' : 'الكمية'}</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => handleItemQuantityChange(idx, Number(e.target.value))}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs text-center"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveItemFromEdit(idx)}
+                        className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg mt-3"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Delivery cost & Payment Method & Paid Amount */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                <div className="space-y-1">
+                  <label className="font-extrabold text-slate-700 text-xs">
+                    {lang === 'fr' ? 'Frais de livraison (DA)' : 'تكلفة التوصيل (دج)'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editingDeliveryCost}
+                    onChange={(e) => setEditingDeliveryCost(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-extrabold text-slate-700 text-xs">
+                    {lang === 'fr' ? 'Montant Payé (DA)' : 'المبلغ المدفوع (دج)'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editingOrderPaidAmount}
+                    onChange={(e) => setEditingOrderPaidAmount(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-extrabold text-emerald-600 focus:outline-hidden focus:border-brand-cyan"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-extrabold text-slate-700 text-xs">
+                    {lang === 'fr' ? 'Mode de paiement' : 'طريقة الدفع'}
+                  </label>
+                  <select
+                    value={editingPaymentMethod}
+                    onChange={(e) => setEditingPaymentMethod(e.target.value as 'cash' | 'credit')}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                  >
+                    <option value="credit">{lang === 'fr' ? 'Crédit (Dette 20j)' : 'آجل (دين 20 يوم)'}</option>
+                    <option value="cash">{lang === 'fr' ? 'Comptant / Cash' : 'نقداً عند التسليم'}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Totals Preview */}
+              {(() => {
+                const totals = calculateEditingTotals();
+                return (
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-1.5 font-bold">
+                    <div className="flex justify-between text-slate-600">
+                      <span>{lang === 'fr' ? 'Sous-total :' : 'المجموع الفرعي :'}</span>
+                      <span>{formatPrice(totals.totalBefore)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>{lang === 'fr' ? 'Livraison :' : 'التوصيل :'}</span>
+                      <span>+{formatPrice(totals.delivery)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-900 font-extrabold text-sm border-t border-slate-200 pt-1.5">
+                      <span>{lang === 'fr' ? 'Nouveau Net :' : 'الصافي الجديد :'}</span>
+                      <span>{formatPrice(totals.netTotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-emerald-600">
+                      <span>{lang === 'fr' ? 'Montant payé :' : 'المبلغ المدفوع :'}</span>
+                      <span>{formatPrice(totals.paid)}</span>
+                    </div>
+                    <div className="flex justify-between text-rose-600 font-extrabold">
+                      <span>{lang === 'fr' ? 'Reste à payer :' : 'المتبقي (الدين) :'}</span>
+                      <span>{formatPrice(totals.remaining)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setEditingOrder(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={handleSaveOrderEdit}
+                className="px-5 py-2 bg-brand-cyan hover:bg-brand-cyan/90 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl transition-all flex items-center gap-2 shadow-xs cursor-pointer"
+              >
+                <Save size={16} />
+                {loading
+                  ? (lang === 'fr' ? 'Enregistrement...' : 'جاري الحفظ...')
+                  : (lang === 'fr' ? 'Enregistrer les modifications' : 'حفظ التعديلات')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
