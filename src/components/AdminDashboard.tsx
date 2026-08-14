@@ -636,6 +636,7 @@ export default function AdminDashboard({
         name: variantName,
         attributes: combo,
         price: pPrice > 0 ? pPrice : 0,
+        purchasePrice: pPurchasePrice > 0 ? pPurchasePrice : 0,
         stock: pStock > 0 ? pStock : 10,
         barcode: '',
         image: pImage || ''
@@ -767,13 +768,18 @@ export default function AdminDashboard({
     setLoading(true);
     try {
       // Prepare clean variants and calculate total stock
-      let finalVariants = pVariants;
-      const initialVariantSum = pVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+      let finalVariants = pVariants.map(v => ({
+        ...v,
+        price: Number(v.price) || 0,
+        purchasePrice: v.purchasePrice !== undefined && Number(v.purchasePrice) > 0 ? Number(v.purchasePrice) : undefined,
+        stock: Number(v.stock) || 0,
+      }));
+      const initialVariantSum = finalVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
 
       // If user entered a main stock > 0 but variants sum is 0, assign stock to variants
-      if (pIsVariable && pVariants.length > 0 && initialVariantSum === 0 && Number(pStock) > 0) {
-        const stockPerVar = Math.max(1, Math.floor(Number(pStock) / pVariants.length));
-        finalVariants = pVariants.map((v) => ({ ...v, stock: stockPerVar }));
+      if (pIsVariable && finalVariants.length > 0 && initialVariantSum === 0 && Number(pStock) > 0) {
+        const stockPerVar = Math.max(1, Math.floor(Number(pStock) / finalVariants.length));
+        finalVariants = finalVariants.map((v) => ({ ...v, stock: stockPerVar }));
       }
 
       const finalVariantSum = finalVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
@@ -3535,7 +3541,18 @@ export default function AdminDashboard({
                           {pVariants.map((v) => (
                             <div key={v.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
                               <div className="flex items-center justify-between">
-                                <span className="font-extrabold text-slate-800">{v.name}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-extrabold text-slate-800">{v.name}</span>
+                                  {v.purchasePrice !== undefined && v.purchasePrice > 0 && v.price > 0 && (
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                      v.price > v.purchasePrice ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                    }`}>
+                                      {v.price > v.purchasePrice
+                                        ? `+${Math.round(((v.price - v.purchasePrice) / v.purchasePrice) * 100)}%`
+                                        : `-${Math.round(((v.purchasePrice - v.price) / v.purchasePrice) * 100)}%`}
+                                    </span>
+                                  )}
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveVariant(v.id)}
@@ -3544,7 +3561,7 @@ export default function AdminDashboard({
                                   <Trash2 size={14} />
                                 </button>
                               </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                                 <div>
                                   <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Prix (DA)' : 'السعر (د.ج)'}</label>
                                   <input
@@ -3553,6 +3570,17 @@ export default function AdminDashboard({
                                     value={v.price ?? 0}
                                     onChange={(e) => handleUpdateVariant(v.id, 'price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
                                     className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold font-mono text-purple-900"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-emerald-700 font-bold block">{lang === 'fr' ? 'Prix d\'achat' : 'سعر الشراء'}</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={v.purchasePrice ?? 0}
+                                    onChange={(e) => handleUpdateVariant(v.id, 'purchasePrice', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                                    className="w-full bg-white border border-emerald-200 rounded-lg px-2 py-1 text-xs font-bold font-mono text-emerald-900"
+                                    placeholder="0"
                                   />
                                 </div>
                                 <div>
@@ -3566,7 +3594,7 @@ export default function AdminDashboard({
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Image (Upload ou Lien)' : 'صورة الحجم (رفع أو رابط)'}</label>
+                                  <label className="text-[10px] text-slate-400 font-bold block">{lang === 'fr' ? 'Image (Upload/Lien)' : 'صورة الحجم'}</label>
                                   <div className="flex items-center gap-1.5">
                                     <input
                                       type="text"

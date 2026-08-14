@@ -45,7 +45,15 @@ export default function ExpenseManager({ lang, expenses, ordersList, productsLis
     activeOrders.forEach((o) => {
       o.items.forEach((item) => {
         const prod = productsMap.get(item.productId);
-        const purchasePrice = Number((item as any).purchasePrice ?? prod?.purchasePrice ?? 0);
+        let purchasePrice = Number((item as any).purchasePrice ?? 0);
+        if (!purchasePrice && prod) {
+          if (item.variantId && prod.variants) {
+            const matchedVar = prod.variants.find((v) => v.id === item.variantId);
+            purchasePrice = Number(matchedVar?.purchasePrice ?? prod.purchasePrice ?? 0);
+          } else {
+            purchasePrice = Number(prod.purchasePrice ?? 0);
+          }
+        }
         purchaseCosts += purchasePrice * (Number(item.quantity) || 1);
       });
     });

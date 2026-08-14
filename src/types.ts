@@ -34,6 +34,7 @@ export interface ProductVariant {
   name: string; // e.g. "Size 4g - Color A1"
   attributes: Record<string, string>; // e.g. { "Taille": "4g", "Couleur": "A1" }
   price: number; // Specific price for this variant
+  purchasePrice?: number; // Specific purchase cost for this variant
   stock: number; // Specific stock for this variant
   barcode?: string;
   image?: string;
@@ -96,6 +97,7 @@ export interface Order {
     variantId?: string;
     variantName?: string;
     variantAttributes?: Record<string, string>;
+    purchasePrice?: number;
   }[];
   totalBeforeDiscount: number;
   discountAmount: number; // Total combined discounts

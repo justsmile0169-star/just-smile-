@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { Order, Expense, Product } from '../../types';
 import { Language, getTranslation } from '../../translations';
-import { TrendingUp, Package, Calendar, DollarSign, ShoppingBag, Scale } from 'lucide-react';
+import { TrendingUp, Package, Calendar, DollarSign, ShoppingBag, Scale, CreditCard } from 'lucide-react';
 
 interface AnalyticsDashboardProps {
   lang: Language;
@@ -48,13 +48,29 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
         : 0;
 
     const totalSales = activeOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
+
+    // Calculate total volume of unpaid debts
+    const totalUnpaidDebts = activeOrders.reduce((sum, order) => {
+      const remaining = order.remainingBalance !== undefined
+        ? Math.max(0, order.remainingBalance)
+        : Math.max(0, order.totalAfterDiscount - (order.paidAmount || 0));
+      return sum + remaining;
+    }, 0);
     
     // Calculate total cost of goods sold (COGS / purchase costs)
     let totalPurchaseCost = 0;
     activeOrders.forEach((o) => {
       o.items.forEach((item) => {
         const prod = productsMap.get(item.productId);
-        const purchasePrice = Number((item as any).purchasePrice ?? prod?.purchasePrice ?? 0);
+        let purchasePrice = Number((item as any).purchasePrice ?? 0);
+        if (!purchasePrice && prod) {
+          if (item.variantId && prod.variants) {
+            const matchedVar = prod.variants.find((v) => v.id === item.variantId);
+            purchasePrice = Number(matchedVar?.purchasePrice ?? prod.purchasePrice ?? 0);
+          } else {
+            purchasePrice = Number(prod.purchasePrice ?? 0);
+          }
+        }
         totalPurchaseCost += purchasePrice * (Number(item.quantity) || 1);
       });
     });
@@ -102,7 +118,7 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
       }
     ];
 
-    return { totalSales, totalPurchaseCost, grossProfit, totalExpenses, netProfit, monthChange, topProducts, peakDays, monthCompare, currentMonthSales, previousMonthSales };
+    return { totalSales, totalPurchaseCost, grossProfit, totalExpenses, netProfit, totalUnpaidDebts, monthChange, topProducts, peakDays, monthCompare, currentMonthSales, previousMonthSales };
   }, [ordersList, expensesList, productsList, lang]);
 
   return (
@@ -119,13 +135,14 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
         </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
           { label: lang === 'fr' ? 'Ventes totales' : 'إجمالي المبيعات', value: stats.totalSales, icon: DollarSign, color: 'text-brand-cyan' },
           { label: lang === 'fr' ? 'Coût d\'achat (COGS)' : 'تكلفة الشراء (البضاعة)', value: stats.totalPurchaseCost, icon: ShoppingBag, color: 'text-slate-600' },
           { label: lang === 'fr' ? 'Marge brute' : 'الربح الإجمالي للمبيعات', value: stats.grossProfit, icon: Scale, color: 'text-blue-600' },
           { label: lang === 'fr' ? 'Dépenses' : 'المصروفات التشغيلية', value: stats.totalExpenses, icon: Calendar, color: 'text-amber-600' },
-          { label: lang === 'fr' ? 'Profit net réel' : 'صافي الربح الصافي النهائي', value: stats.netProfit, icon: TrendingUp, color: stats.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600' }
+          { label: lang === 'fr' ? 'Profit net réel' : 'صافي الربح الصافي النهائي', value: stats.netProfit, icon: TrendingUp, color: stats.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600' },
+          { label: lang === 'fr' ? 'Dettes non payées' : 'الحجم الكلي للديون الغير مسددة', value: stats.totalUnpaidDebts, icon: CreditCard, color: 'text-rose-600' }
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-xs">
             <div className="flex items-center gap-1.5 mb-1">

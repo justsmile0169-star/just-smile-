@@ -288,6 +288,10 @@ export default function CartView({
           if (item.selectedVariant?.id) orderItem.variantId = item.selectedVariant.id;
           if (item.selectedVariant?.name) orderItem.variantName = item.selectedVariant.name;
           if (item.selectedVariant?.attributes) orderItem.variantAttributes = item.selectedVariant.attributes;
+          const itemPurchasePrice = item.selectedVariant?.purchasePrice ?? item.product.purchasePrice;
+          if (itemPurchasePrice !== undefined && Number(itemPurchasePrice) > 0) {
+            orderItem.purchasePrice = Number(itemPurchasePrice);
+          }
           return orderItem;
         }),
         totalBeforeDiscount: totals.grossTotal,

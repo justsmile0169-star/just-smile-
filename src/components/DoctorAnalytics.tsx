@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Order, Product } from '../types';
 import { Language, getTranslation } from '../translations';
-import { BarChart3, TrendingUp, Package, DollarSign, Calendar } from 'lucide-react';
+import { BarChart3, TrendingUp, Package, DollarSign, Calendar, CreditCard } from 'lucide-react';
 
 interface DoctorAnalyticsProps {
   orders: Order[];
@@ -56,12 +56,23 @@ export default function DoctorAnalytics({ orders, lang }: DoctorAnalyticsProps) 
     const totalOrders = deliveredOrders.length;
     const totalRevenue = deliveredOrders.reduce((sum, order) => sum + order.totalAfterDiscount, 0);
 
+    // Calculate total unpaid debts for non-cancelled orders
+    const totalUnpaidDebts = orders
+      .filter(o => o.status !== 'cancelled')
+      .reduce((sum, order) => {
+        const remaining = order.remainingBalance !== undefined
+          ? Math.max(0, order.remainingBalance)
+          : Math.max(0, order.totalAfterDiscount - (order.paidAmount || 0));
+        return sum + remaining;
+      }, 0);
+
     return {
       topProducts,
       monthlyData,
       avgMonthlySpending,
       totalOrders,
-      totalRevenue
+      totalRevenue,
+      totalUnpaidDebts
     };
   }, [orders]);
 
@@ -79,7 +90,7 @@ export default function DoctorAnalytics({ orders, lang }: DoctorAnalyticsProps) 
   return (
     <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-500 rounded-xl">
@@ -123,6 +134,22 @@ export default function DoctorAnalytics({ orders, lang }: DoctorAnalyticsProps) 
               </p>
               <p className="text-2xl font-black text-purple-900 dark:text-purple-100">
                 {formatPrice(analytics.avgMonthlySpending)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/20 dark:to-rose-800/20 p-4 rounded-2xl border border-rose-200 dark:border-rose-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-rose-500 rounded-xl">
+              <CreditCard size={20} className="text-white" />
+            </div>
+            <div>
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-bold">
+                {lang === 'fr' ? 'Dettes non payées' : 'إجمالي الديون غير المسددة'}
+              </p>
+              <p className="text-2xl font-black text-rose-900 dark:text-rose-100">
+                {formatPrice(analytics.totalUnpaidDebts)}
               </p>
             </div>
           </div>

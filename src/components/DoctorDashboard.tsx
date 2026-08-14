@@ -275,11 +275,12 @@ export default function DoctorDashboard({
   const recentlyViewedProducts = allProducts.filter((p) => recentlyViewed.includes(p.id));
 
   const handleExportStatement = () => {
+    const userId = user.uid || (user as any).id;
     const userPayments = (paymentsList || []).filter(
-      (p) => p.userId === user.uid || p.userId === user.id
+      (p) => p.userId === userId
     );
     const userReturns = (returnsList || []).filter(
-      (r) => r.userId === user.uid || r.userId === user.id
+      (r) => r.userId === userId
     );
     exportFinancialStatement({
       client: user,
