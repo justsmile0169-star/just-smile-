@@ -681,10 +681,10 @@ export default function AdminDashboard({
           i === 0 ? { ...v, stock: Math.max(0, v.stock + delta) } : v
         );
         const computedStock = updatedVariants.reduce((sum, v) => sum + v.stock, 0);
-        await updateDoc(doc(db, 'products', product.id), {
+        await updateDoc(doc(db, 'products', product.id), cleanFirestoreData({
           stock: computedStock,
           variants: updatedVariants
-        });
+        }));
       } else {
         await updateDoc(doc(db, 'products', product.id), { stock: newStock });
       }

@@ -1,8 +1,38 @@
-/** Remove undefined values — Firestore rejects undefined fields. */
-export function cleanFirestoreData<T extends Record<string, unknown>>(data: T): T {
-  return Object.fromEntries(
-    Object.entries(data).filter(([, value]) => value !== undefined)
-  ) as T;
+/** Remove undefined values recursively — Firestore rejects undefined fields at any depth. */
+export function cleanFirestoreData<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => cleanFirestoreData(item)) as unknown as T;
+  }
+
+  if (typeof data === 'object') {
+    const isPlainObject =
+      data.constructor === Object ||
+      Object.getPrototypeOf(data) === null ||
+      !data.constructor;
+
+    if (!isPlainObject) {
+      return data;
+    }
+
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      if (value !== undefined) {
+        const cleanedValue = cleanFirestoreData(value);
+        if (cleanedValue !== undefined) {
+          cleaned[key] = cleanedValue;
+        }
+      }
+    }
+    return cleaned as T;
+  }
+
+  return data;
 }
 
 /** Firestore batch writes are limited to 500 operations per commit. */
