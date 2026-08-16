@@ -1,22 +1,27 @@
-/** Remove undefined values recursively — Firestore rejects undefined fields at any depth. */
+/** Remove undefined and NaN values recursively — Firestore rejects undefined fields at any depth. */
 export function cleanFirestoreData<T>(data: T): T {
   if (data === null || data === undefined) {
     return data;
   }
 
+  if (typeof data === 'number' && Number.isNaN(data)) {
+    return undefined as unknown as T;
+  }
+
   if (Array.isArray(data)) {
     return data
-      .filter((item) => item !== undefined)
-      .map((item) => cleanFirestoreData(item)) as unknown as T;
+      .map((item) => cleanFirestoreData(item))
+      .filter((item) => item !== undefined && !(typeof item === 'number' && Number.isNaN(item))) as unknown as T;
   }
 
   if (typeof data === 'object') {
-    const isPlainObject =
-      data.constructor === Object ||
-      Object.getPrototypeOf(data) === null ||
-      !data.constructor;
+    // Preserve Firestore special sentinel objects (Timestamp, FieldValue, DocumentReference, Blob)
+    const isFirestoreSpecial =
+      typeof (data as any).toDate === 'function' ||
+      (data as any)._methodName !== undefined ||
+      typeof (data as any).toBase64 === 'function';
 
-    if (!isPlainObject) {
+    if (isFirestoreSpecial) {
       return data;
     }
 
@@ -24,7 +29,7 @@ export function cleanFirestoreData<T>(data: T): T {
     for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
       if (value !== undefined) {
         const cleanedValue = cleanFirestoreData(value);
-        if (cleanedValue !== undefined) {
+        if (cleanedValue !== undefined && !(typeof cleanedValue === 'number' && Number.isNaN(cleanedValue))) {
           cleaned[key] = cleanedValue;
         }
       }

@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { useAppDialog } from '../context/AppDialogContext';
 
+import { cleanFirestoreData } from '../utils/firestoreHelpers';
+
 interface ExpiryScannerProps {
   lang: Language;
   productsList: Product[];
@@ -81,9 +83,9 @@ export default function ExpiryScanner({
     if (!liquidateProduct) return;
     setSavingDiscount(true);
     try {
-      await updateDoc(doc(db, 'products', liquidateProduct.id), {
-        discountPercent: discountValue
-      });
+      await updateDoc(doc(db, 'products', liquidateProduct.id), cleanFirestoreData({
+        discountPercent: Number(discountValue) || 0
+      }));
       alert(
         lang === 'fr' 
           ? `Remise de ${discountValue}% appliquée avec succès à ${liquidateProduct.name} !` 

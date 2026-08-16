@@ -12,6 +12,7 @@ import {
 } from '../utils/algeriaData';
 
 import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
+import { cleanFirestoreData } from '../utils/firestoreHelpers';
 
 interface CartViewProps {
   cart: CartItem[];
@@ -332,23 +333,25 @@ export default function CartView({
         const lowStockAlertsToCreate: { product: Product; newStock: number }[] = [];
         cart.forEach((item) => {
           const prodRef = doc(db, 'products', item.product.id);
-          const newStock = Math.max(0, item.product.stock - item.quantity);
+          const currentStock = typeof item.product.stock === 'number' && !isNaN(item.product.stock) ? item.product.stock : 0;
+          const newStock = Math.max(0, currentStock - item.quantity);
           const newSalesCount = (item.product.salesCount || 0) + item.quantity;
 
           if (item.product.isVariable && item.selectedVariant && item.product.variants) {
-            const updatedVariants = item.product.variants.map((v) =>
-              v.id === item.selectedVariant!.id ? { ...v, stock: Math.max(0, v.stock - item.quantity) } : v
-            );
-            batch.update(prodRef, {
+            const updatedVariants = item.product.variants.map((v) => {
+              const vStock = typeof v.stock === 'number' && !isNaN(v.stock) ? v.stock : 0;
+              return v.id === item.selectedVariant!.id ? { ...v, stock: Math.max(0, vStock - item.quantity) } : v;
+            });
+            batch.update(prodRef, cleanFirestoreData({
               stock: newStock,
               salesCount: newSalesCount,
               variants: updatedVariants
-            });
+            }));
           } else {
-            batch.update(prodRef, {
+            batch.update(prodRef, cleanFirestoreData({
               stock: newStock,
               salesCount: newSalesCount
-            });
+            }));
           }
 
           const threshold = item.product.lowStockAlert ?? 5;

@@ -674,19 +674,21 @@ export default function AdminDashboard({
   };
 
   const handleQuickStockUpdate = async (product: Product, delta: number) => {
-    const newStock = Math.max(0, product.stock + delta);
+    const currentStock = typeof product.stock === 'number' && !isNaN(product.stock) ? product.stock : 0;
+    const newStock = Math.max(0, currentStock + delta);
     try {
       if (product.isVariable && product.variants && product.variants.length > 0) {
-        const updatedVariants = product.variants.map((v, i) =>
-          i === 0 ? { ...v, stock: Math.max(0, v.stock + delta) } : v
-        );
-        const computedStock = updatedVariants.reduce((sum, v) => sum + v.stock, 0);
+        const updatedVariants = product.variants.map((v, i) => {
+          const vStock = typeof v.stock === 'number' && !isNaN(v.stock) ? v.stock : 0;
+          return i === 0 ? { ...v, stock: Math.max(0, vStock + delta) } : v;
+        });
+        const computedStock = updatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
         await updateDoc(doc(db, 'products', product.id), cleanFirestoreData({
           stock: computedStock,
           variants: updatedVariants
         }));
       } else {
-        await updateDoc(doc(db, 'products', product.id), { stock: newStock });
+        await updateDoc(doc(db, 'products', product.id), cleanFirestoreData({ stock: newStock }));
       }
       alert(
         lang === 'fr'
