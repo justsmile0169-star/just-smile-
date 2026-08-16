@@ -1,7 +1,7 @@
 import React from 'react';
 import { Product, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
-import { Heart, ShoppingCart, Award, Calendar, Flame } from 'lucide-react';
+import { Heart, ShoppingCart, Award, Calendar } from 'lucide-react';
 
 interface ProductCardProps {
   key?: any;
@@ -75,18 +75,13 @@ export default function ProductCard({
         </button>
       )}
 
-      {/* Discount Badge or Most Requested Sales Badge */}
-      {hasProductDiscount && product.discountPercent > 0 ? (
+      {/* Discount Badge */}
+      {hasProductDiscount && product.discountPercent > 0 && (
         <span className={`absolute top-1.5 sm:top-3 ${isRtl ? 'right-1.5 sm:right-3' : 'left-1.5 sm:left-3'} z-10 bg-red-600 text-white font-extrabold text-[9px] sm:text-[11px] md:text-xs px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md sm:rounded-lg flex items-center gap-0.5 sm:gap-1 shadow-sm border border-red-500`}>
           <Award size={8} className="shrink-0 hidden sm:block" />
           <span>-{product.discountPercent}%</span>
         </span>
-      ) : (product.salesCount && product.salesCount > 0) ? (
-        <span className={`absolute top-1.5 sm:top-3 ${isRtl ? 'right-1.5 sm:right-3' : 'left-1.5 sm:left-3'} z-10 bg-amber-500 text-white font-extrabold text-[9px] sm:text-[10px] px-2 py-0.5 rounded-md sm:rounded-lg flex items-center gap-1 shadow-sm border border-amber-400`}>
-          <Flame size={10} className="shrink-0" />
-          <span>{lang === 'fr' ? `Demandé ${product.salesCount}x` : `مطلوب ${product.salesCount} مرة`}</span>
-        </span>
-      ) : null}
+      )}
 
       {/* Product Image */}
       <div
