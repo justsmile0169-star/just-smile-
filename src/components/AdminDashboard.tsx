@@ -15,7 +15,7 @@ import {
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
   History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin,
-  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload, Pencil
+  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload, Pencil, Clock
 } from 'lucide-react';
 
 // Lazy load heavy admin sub-components
@@ -93,6 +93,11 @@ export default function AdminDashboard({
   const allDoctors = usersList.filter((u) => u.role === 'doctor');
 
   const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
+
+  // --- Doctor Debt Grace Extension State ---
+  const [selectedDoctorForGrace, setSelectedDoctorForGrace] = useState<UserProfile | null>(null);
+  const [graceDaysInput, setGraceDaysInput] = useState<number>(0);
+  const [extendUnpaidOrders, setExtendUnpaidOrders] = useState<boolean>(true);
 
   // --- 2. Debt Management ---
   const [selectedOrderForPayment, setSelectedOrderForPayment] = useState<Order | null>(null);
@@ -1008,6 +1013,53 @@ export default function AdminDashboard({
     } catch (err) {
       console.error(err);
       alert('Erreur.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveDoctorGraceDays = async () => {
+    if (!selectedDoctorForGrace) return;
+    setLoading(true);
+    try {
+      const addedDays = Math.max(0, Number(graceDaysInput) || 0);
+      await updateDoc(doc(db, 'users', selectedDoctorForGrace.uid), {
+        extraGraceDays: addedDays
+      });
+
+      if (extendUnpaidOrders && addedDays > 0) {
+        const doctorUnpaidOrders = ordersList.filter(
+          o => o.userId === selectedDoctorForGrace.uid && o.remainingBalance > 0 && o.paymentMethod !== 'cash'
+        );
+        for (const order of doctorUnpaidOrders) {
+          const currentDeadline = new Date(order.deadlineDate || order.createdAt);
+          currentDeadline.setDate(currentDeadline.getDate() + addedDays);
+          await updateDoc(doc(db, 'orders', order.id), {
+            deadlineDate: currentDeadline.toISOString()
+          });
+        }
+      }
+
+      await logActivity(
+        currentUser,
+        'doctor_grace_extended',
+        'doctor',
+        `Extended debt grace period for doctor ${selectedDoctorForGrace.name} (+${addedDays} days)`,
+        selectedDoctorForGrace.uid
+      );
+
+      alert(
+        lang === 'fr'
+          ? `Délai de grâce de +${addedDays} jours appliqué à ${selectedDoctorForGrace.name} !`
+          : `تم تمديد مهلة الدين لـ ${selectedDoctorForGrace.name} بـ +${addedDays} أيام بنجاح!`,
+        'success'
+      );
+
+      setSelectedDoctorForGrace(null);
+      onRefreshData();
+    } catch (err: any) {
+      console.error(err);
+      alert('Erreur: ' + (err.message || err), 'error');
     } finally {
       setLoading(false);
     }
@@ -2027,6 +2079,7 @@ export default function AdminDashboard({
                     <th className="pb-3">{getTranslation(lang, 'location')}</th>
                     <th className="pb-3">{getTranslation(lang, 'status')}</th>
                     <th className="pb-3">{lang === 'fr' ? 'Paiement Crédit' : 'البيع بالدين'}</th>
+                    <th className="pb-3">{lang === 'fr' ? 'Grâce dette' : 'مهلة الدين الإضافية'}</th>
                     <th className="pb-3">ID</th>
                   </tr>
                 </thead>
@@ -2067,6 +2120,30 @@ export default function AdminDashboard({
                               ? (lang === 'fr' ? 'Activé' : 'مفعّل')
                               : (lang === 'fr' ? 'Désactivé' : 'معطّل')}
                           </button>
+                        </td>
+                        <td className="py-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
+                              docProfile.extraGraceDays && docProfile.extraGraceDays > 0
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {docProfile.extraGraceDays && docProfile.extraGraceDays > 0
+                                ? `+${docProfile.extraGraceDays} ${lang === 'fr' ? 'j' : 'أيام'}`
+                                : (lang === 'fr' ? '15j' : '15 يوم')}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setSelectedDoctorForGrace(docProfile);
+                                setGraceDaysInput(docProfile.extraGraceDays || 0);
+                                setExtendUnpaidOrders(true);
+                              }}
+                              className="p-1 text-slate-500 hover:text-brand-cyan hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                              title={lang === 'fr' ? 'Prolonger la grâce' : 'تمديد مهلة الدين'}
+                            >
+                              <Clock size={14} />
+                            </button>
+                          </div>
                         </td>
                         <td className="py-3 font-mono text-[10px] text-slate-400 max-w-[120px] truncate">
                           {docProfile.uid}
@@ -2212,12 +2289,23 @@ export default function AdminDashboard({
                   </thead>
                   <tbody className="divide-y divide-slate-50 text-sm">
                     {filteredOrders.map((order) => {
-                      const isOverdue = order.paymentMethod !== 'cash' && new Date() > new Date(order.deadlineDate);
+                      const orderDocProfile = usersList.find((u) => u.uid === order.userId);
+                      const extraDays = orderDocProfile?.extraGraceDays || 0;
+                      const deadlineDateObj = new Date(order.deadlineDate);
+                      if (extraDays > 0) {
+                        deadlineDateObj.setDate(deadlineDateObj.getDate() + extraDays);
+                      }
+                      const isOverdue = order.paymentMethod !== 'cash' && new Date() > deadlineDateObj;
                       return (
                         <tr key={order.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="py-4">
                             <p className="font-bold text-slate-900">{order.doctorName}</p>
                             <p className="text-xs text-slate-400">{order.doctorClinic}</p>
+                            {extraDays > 0 && (
+                              <span className="inline-block mt-0.5 text-[10px] font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                                {lang === 'fr' ? `+${extraDays}j de grâce` : `+${extraDays} أيام مهلة`}
+                              </span>
+                            )}
                           </td>
                           <td className="py-4">
                             <p className="font-mono font-bold">#{order.id ? order.id.slice(-6).toUpperCase() : 'UNKNOWN'}</p>
@@ -2249,7 +2337,7 @@ export default function AdminDashboard({
                               </span>
                             ) : (
                               <span className={`text-xs font-bold ${isOverdue ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg' : 'text-slate-600'}`}>
-                                {new Date(order.deadlineDate).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}
+                                {deadlineDateObj.toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}
                                 {isOverdue && ' (' + getTranslation(lang, 'overdueBadge') + ')'}
                               </span>
                             )}
@@ -2259,6 +2347,19 @@ export default function AdminDashboard({
                           <td className="py-4 text-rose-600 font-black">{formatPrice(order.remainingBalance)}</td>
                           <td className="py-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              {orderDocProfile && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedDoctorForGrace(orderDocProfile);
+                                    setGraceDaysInput(orderDocProfile.extraGraceDays || 0);
+                                    setExtendUnpaidOrders(true);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                                  title={lang === 'fr' ? 'Prolonger la grâce du médecin' : 'تمديد مهلة الدين للطبيب'}
+                                >
+                                  <Clock size={14} />
+                                </button>
+                              )}
                               {/* View Details + Yalidine button */}
                               <button
                                 onClick={() => setSelectedOrderForDetail(order)}
@@ -4032,6 +4133,142 @@ export default function AdminDashboard({
                 ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Modal for Extending Doctor Debt Grace Period */}
+      {selectedDoctorForGrace && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-slate-100 space-y-6 animate-scale-up">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-brand-cyan/10 text-brand-cyan rounded-2xl">
+                  <Clock size={24} />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base md:text-lg">
+                    {lang === 'fr' ? 'Prolonger la grâce du crédit' : 'تمديد مهلة سداد الدين للطبيب'}
+                  </h3>
+                  <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                    {selectedDoctorForGrace.name} — {selectedDoctorForGrace.clinicName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedDoctorForGrace(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Doctor Info card */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">{lang === 'fr' ? 'Téléphone' : 'رقم الهاتف'}:</span>
+                <span className="font-bold text-slate-800">{selectedDoctorForGrace.phone || '-'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">{lang === 'fr' ? 'Délai actuel' : 'المهلة الإضافية الحالية'}:</span>
+                <span className="font-extrabold text-brand-cyan">
+                  {selectedDoctorForGrace.extraGraceDays && selectedDoctorForGrace.extraGraceDays > 0
+                    ? `+${selectedDoctorForGrace.extraGraceDays} ${lang === 'fr' ? 'jours' : 'أيام إضافية'}`
+                    : (lang === 'fr' ? 'Aucune (Standard 15j)' : 'بدون تمديد (الافتراضية 15 يوم)')}
+                </span>
+              </div>
+            </div>
+
+            {/* Preset Chips */}
+            <div className="space-y-2">
+              <label className="text-xs font-extrabold text-slate-700 block">
+                {lang === 'fr' ? 'Sélection rapide d\'extension (jours)' : 'خيارات التمديد السريعة (بالأيام)'}:
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {[5, 7, 10, 15, 30].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    onClick={() => setGraceDaysInput(days)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all border cursor-pointer ${
+                      graceDaysInput === days
+                        ? 'bg-brand-cyan text-white border-brand-cyan shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    +{days} {lang === 'fr' ? 'Jours' : 'يوم'}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setGraceDaysInput(0)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all border cursor-pointer ${
+                    graceDaysInput === 0
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                      : 'bg-white text-rose-600 border-rose-200 hover:bg-rose-50'
+                  }`}
+                >
+                  {lang === 'fr' ? 'Réinitialiser (0)' : 'إلغاء المهلة (0)'}
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Input */}
+            <div className="space-y-2">
+              <label className="text-xs font-extrabold text-slate-700 block">
+                {lang === 'fr' ? 'Nombre de jours d\'extension' : 'حدد عدد الأيام الإضافية كمهلة'}:
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  max="180"
+                  value={graceDaysInput}
+                  onChange={(e) => setGraceDaysInput(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 text-sm font-black text-slate-900 focus:outline-hidden focus:border-brand-cyan"
+                  placeholder="0"
+                />
+                <span className="absolute left-3 md:right-3 top-2.5 text-xs font-bold text-slate-400">
+                  {lang === 'fr' ? 'Jours' : 'يوم'}
+                </span>
+              </div>
+            </div>
+
+            {/* Checkbox for updating existing unpaid orders */}
+            <label className="flex items-center gap-3 p-3 bg-amber-50/70 border border-amber-200 rounded-2xl cursor-pointer">
+              <input
+                type="checkbox"
+                checked={extendUnpaidOrders}
+                onChange={(e) => setExtendUnpaidOrders(e.target.checked)}
+                className="w-4 h-4 rounded text-brand-cyan focus:ring-brand-cyan"
+              />
+              <span className="text-xs font-bold text-amber-900 leading-snug">
+                {lang === 'fr'
+                  ? 'Repousser également la date d\'échéance des factures en cours pour ce médecin'
+                  : 'تحديث وتأخير تاريخ الاستحقاق الفعلي للطلبات المتبقية حالياً لهذا الطبيب'}
+              </span>
+            </label>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setSelectedDoctorForGrace(null)}
+                className="px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+              >
+                {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDoctorGraceDays}
+                disabled={loading}
+                className="flex items-center gap-2 bg-brand-cyan hover:bg-brand-cyan/90 text-white font-extrabold text-xs px-6 py-2.5 rounded-xl shadow-md transition-all cursor-pointer disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                <span>{lang === 'fr' ? 'Enregistrer la grâce' : 'حفظ المهلة وتطبيق التغييرات'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

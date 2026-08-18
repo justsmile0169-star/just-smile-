@@ -24,6 +24,7 @@ export interface UserProfile {
   discountPercent?: number; // per-doctor custom discount (applied to invoice level)
   commercialName?: string; // assigned sales representative
   allowCreditPayment?: boolean; // if true, doctor can pay by credit (20 days debt). if false, only cash payment allowed
+  extraGraceDays?: number; // extra grace period days added by admin for debt payment
   password?: string; // for staff accounts login
   lastLoginAt?: string; // track last login time
   isProfileComplete?: boolean; // check if Google Auth user has completed profile details

@@ -264,6 +264,10 @@ export default function DoctorDashboard({
     if (order.remainingBalance <= 0) return false;
     if (order.paymentMethod === 'cash') return false; // cash on delivery is not on credit
     const deadline = new Date(order.deadlineDate);
+    const extraDays = user?.extraGraceDays || 0;
+    if (extraDays > 0) {
+      deadline.setDate(deadline.getDate() + extraDays);
+    }
     const today = new Date();
     return today > deadline;
   });
@@ -377,6 +381,19 @@ export default function DoctorDashboard({
           </button>
         </div>
       </div>
+
+      {user.extraGraceDays && user.extraGraceDays > 0 ? (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-2xl flex items-center justify-between text-xs font-bold shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <Clock size={18} className="text-emerald-600 shrink-0" />
+            <span>
+              {lang === 'fr'
+                ? `Privilège accordé par l'administration: +${user.extraGraceDays} jours de délai de grâce supplémentaire pour le règlement de vos créances.`
+                : `امتياز خاص من الإدارة: تم منحك مهلة سداد إضافية قدرها +${user.extraGraceDays} أيام لتسوية الديون.`}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {/* Credit Status Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -517,7 +534,12 @@ export default function DoctorDashboard({
                   <tbody className="divide-y divide-slate-50">
                     {orders.map((order) => {
                       // Check order level overdue state
-                      const isOrderOverdue = order.remainingBalance > 0 && order.paymentMethod !== 'cash' && new Date() > new Date(order.deadlineDate);
+                      const deadline = new Date(order.deadlineDate);
+                      const extraDays = user?.extraGraceDays || 0;
+                      if (extraDays > 0) {
+                        deadline.setDate(deadline.getDate() + extraDays);
+                      }
+                      const isOrderOverdue = order.remainingBalance > 0 && order.paymentMethod !== 'cash' && new Date() > deadline;
 
                       return (
                         <tr key={order.id} className="text-sm hover:bg-slate-50/50 transition-colors">

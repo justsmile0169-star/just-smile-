@@ -198,6 +198,10 @@ export default function CartView({
     if (order.remainingBalance <= 0) return false;
     if (order.paymentMethod === 'cash') return false;
     const deadline = new Date(order.deadlineDate);
+    const extraDays = user?.extraGraceDays || 0;
+    if (extraDays > 0) {
+      deadline.setDate(deadline.getDate() + extraDays);
+    }
     const today = new Date();
     return today > deadline;
   });

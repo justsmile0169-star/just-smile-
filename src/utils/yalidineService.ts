@@ -31,8 +31,12 @@ export async function getYalidineConfig(): Promise<YalidineConfig> {
     if (docSnap.exists()) {
       return { ...DEFAULT_CONFIG, ...docSnap.data() } as YalidineConfig;
     }
-  } catch (error) {
-    console.error('Error fetching Yalidine config:', error);
+  } catch (error: any) {
+    if (error?.code === 'unavailable' || error?.message?.includes('offline')) {
+      console.warn('Yalidine config: offline mode fallback applied.');
+    } else {
+      console.error('Error fetching Yalidine config:', error);
+    }
   }
   return DEFAULT_CONFIG;
 }

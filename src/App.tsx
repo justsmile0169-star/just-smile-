@@ -42,6 +42,18 @@ export default function App() {
   });
   const [activeTab, setActiveTab] = useState<'browse' | 'routine_clinic' | 'most_requested' | 'cart' | 'dashboard' | 'admin' | 'auth' | 'favorites' | 'notifications'>('browse');
 
+  // Ensure scroll to top on initial page load / refresh and on tab changes
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+    window.scrollTo(0, 0);
+  }, []);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeTab]);
+
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -719,6 +731,10 @@ export default function App() {
         if (!order.deadlineDate) continue;
 
         const deadline = new Date(order.deadlineDate);
+        const extraDays = currentUser?.extraGraceDays || 0;
+        if (extraDays > 0) {
+          deadline.setDate(deadline.getDate() + extraDays);
+        }
         const diffMs = deadline.getTime() - today.getTime();
         const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
