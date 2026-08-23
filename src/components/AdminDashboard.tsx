@@ -81,6 +81,23 @@ export default function AdminDashboard({
   const [activeSubTab, setActiveSubTab] = useState<AdminSubTab>(
     hasPermission(currentUser, 'view_analytics') ? 'analytics' : 'orders'
   );
+
+  // Scroll to top when switching between admin tabs/sections
+  useEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    };
+    scrollToTop();
+    const raf = requestAnimationFrame(scrollToTop);
+    const timeout = setTimeout(scrollToTop, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, [activeSubTab]);
+
   const [loading, setLoading] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const isRtl = lang === 'ar';

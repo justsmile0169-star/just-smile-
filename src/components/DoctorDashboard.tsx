@@ -50,6 +50,23 @@ export default function DoctorDashboard({
   const isRtl = lang === 'ar';
   const { alert, confirm } = useAppDialog();
   const [activeTab, setActiveTab] = useState<'orders' | 'analytics'>('orders');
+
+  // Scroll to top when switching between doctor tabs/views
+  useEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    };
+    scrollToTop();
+    const raf = requestAnimationFrame(scrollToTop);
+    const timeout = setTimeout(scrollToTop, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, [activeTab]);
+
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);

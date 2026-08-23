@@ -28,6 +28,21 @@ export default function InvoiceVerificationView({
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    };
+    scrollToTop();
+    const raf = requestAnimationFrame(scrollToTop);
+    const timeout = setTimeout(scrollToTop, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, []);
+
+  useEffect(() => {
     async function fetchOrder() {
       setLoading(true);
       setError(false);

@@ -55,6 +55,22 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
 
   const isRtl = lang === 'ar';
 
+  // Scroll to top when opening Auth view or toggling between Login / Register
+  useEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    };
+    scrollToTop();
+    const raf = requestAnimationFrame(scrollToTop);
+    const timeout = setTimeout(scrollToTop, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, [isLogin]);
+
   // Listen to Auth State to handle profile completion for Google users.
   // Also handles the redirect result when the browser returns from Google's
   // sign-in page (fallback for popup-blocked environments).

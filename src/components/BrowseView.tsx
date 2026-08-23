@@ -60,6 +60,22 @@ export default function BrowseView({
       .catch(() => {}); // Silent catch for offline mode
   }, []);
 
+  // Scroll to top when browsing mode changes
+  useEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    };
+    scrollToTop();
+    const raf = requestAnimationFrame(scrollToTop);
+    const timeout = setTimeout(scrollToTop, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, [mode]);
+
 
   // Virtual local pagination for instant rendering without network requests
   const [displayLimit, setDisplayLimit] = useState(24);

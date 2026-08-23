@@ -43,6 +43,23 @@ export default function CartView({
 }: CartViewProps) {
   const { alert } = useAppDialog();
   const [loading, setLoading] = useState(false);
+
+  // Scroll to top when navigating to Cart
+  useEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    };
+    scrollToTop();
+    const raf = requestAnimationFrame(scrollToTop);
+    const timeout = setTimeout(scrollToTop, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, []);
+
   const [notes, setNotes] = useState('');
   const [success, setSuccess] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'credit' | 'cash'>('cash');
