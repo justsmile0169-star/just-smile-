@@ -255,7 +255,7 @@ export default function BrowseView({
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
       
       {/* Search and Category Filter Jumbotron Hero */}
-      <div className="bg-gradient-to-br from-brand-dark to-[#164e63] rounded-2xl md:rounded-3xl p-4 sm:p-6 md:p-10 text-white relative shadow-md">
+      <div className="bg-gradient-to-br from-brand-dark to-[#164e63] rounded-2xl md:rounded-3xl p-4 sm:p-6 md:p-10 text-white relative z-30 shadow-md">
         {/* Abstract dental glow circles wrapped to prevent overflow without clipping children */}
         <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
           <div className="absolute top-0 right-0 w-80 h-80 bg-brand-cyan/20 rounded-full blur-3xl translate-x-1/2 -translate-y-1/2" />
@@ -296,7 +296,7 @@ export default function BrowseView({
           </p>
 
           {/* Smart Search Bar & Category Dropdown */}
-          <div className="relative pt-2">
+          <div className="relative z-20 pt-2">
             <div className="flex flex-col md:flex-row gap-3 max-w-2xl">
               <div className="relative flex-1">
                 <button
@@ -335,7 +335,7 @@ export default function BrowseView({
               </div>
 
               {/* Category Selector Control Button */}
-              <div className="relative shrink-0" ref={dropdownRef}>
+              <div className="relative shrink-0 z-50" ref={dropdownRef}>
                 <button
                   type="button"
                   onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
@@ -352,7 +352,7 @@ export default function BrowseView({
 
                 {isCategoryDropdownOpen && (
                   /* Dropdown Menu */
-                  <div className={`absolute top-full mt-2 ${isRtl ? 'right-0' : 'left-0 md:right-0 md:left-auto'} w-64 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-40 divide-y divide-slate-50 dark:divide-slate-800 text-slate-700 dark:text-slate-200 py-1.5 animate-in fade-in slide-in-from-top-2 duration-150`}>
+                  <div className={`absolute top-full mt-2 ${isRtl ? 'right-0' : 'left-0 md:right-0 md:left-auto'} w-64 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-50 divide-y divide-slate-50 dark:divide-slate-800 text-slate-700 dark:text-slate-200 py-1.5 animate-in fade-in slide-in-from-top-2 duration-150`}>
                     <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 px-4 py-2 uppercase tracking-widest">
                       {lang === 'fr' ? 'Sélectionner une catégorie' : 'اختر فئة المنتجات'}
                     </p>
@@ -402,7 +402,7 @@ export default function BrowseView({
 
             {/* Smart Suggestions Box */}
             {showSuggestions && searchSuggestions.length > 0 && (
-              <div className="absolute left-0 right-0 max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-2xl mt-2 overflow-hidden z-20 divide-y divide-slate-50 dark:divide-slate-800 text-slate-700 dark:text-slate-200 text-sm">
+              <div className="absolute left-0 right-0 max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-2xl mt-2 overflow-hidden z-50 divide-y divide-slate-50 dark:divide-slate-800 text-slate-700 dark:text-slate-200 text-sm">
                 {searchSuggestions.map((p) => (
                   <div
                     key={p.id}

@@ -1043,7 +1043,7 @@ export default function AdminDashboard({
       await logActivity(
         currentUser,
         'doctor_grace_extended',
-        'doctor',
+        'user',
         `Extended debt grace period for doctor ${selectedDoctorForGrace.name} (+${addedDays} days)`,
         selectedDoctorForGrace.uid
       );

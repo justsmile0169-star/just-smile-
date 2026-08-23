@@ -6,6 +6,7 @@ import { Language, getTranslation } from '../translations';
 import { useAppDialog } from '../context/AppDialogContext';
 import { exportFinancialStatement } from '../utils/exportFinancialStatement';
 import { logActivity } from '../utils/activityLogger';
+import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import {
   Search, User, ShoppingBag, CreditCard, RotateCcw, FileText, Plus, X, Printer, Pencil, Trash2, Edit3
 } from 'lucide-react';
@@ -102,10 +103,10 @@ export default function ClientSituationView({
       } else {
         const delta = editPaymentAmount - editingPayment.amount;
 
-        await updateDoc(doc(db, 'payments', editingPayment.id), {
+        await updateDoc(doc(db, 'payments', editingPayment.id), cleanFirestoreData({
           amount: editPaymentAmount,
-          notes: editPaymentNotes.trim() || undefined
-        });
+          notes: editPaymentNotes.trim() || ''
+        }));
 
         if (editingPayment.orderId) {
           const targetOrder = ordersList.find((o) => o.id === editingPayment.orderId);
@@ -433,14 +434,14 @@ export default function ClientSituationView({
 
     setSavingReturn(true);
     try {
-      await addDoc(collection(db, 'returns'), {
+      await addDoc(collection(db, 'returns'), cleanFirestoreData({
         userId: selectedClient.uid,
         doctorName: selectedClient.name,
         orderId: returnOrderId || undefined,
         totalAmount: returnAmount,
         reason: returnReason.trim() || undefined,
         createdAt: new Date().toISOString()
-      });
+      }));
       alert(lang === 'fr' ? 'Retour enregistré.' : 'تم تسجيل المرتجع.', 'success');
       setShowReturnForm(false);
       setReturnOrderId('');

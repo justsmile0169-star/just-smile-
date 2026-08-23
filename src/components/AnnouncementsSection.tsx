@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { Announcement, Promotion, UserProfile } from '../types';
 import { Language } from '../translations';
 import { useAppDialog } from '../context/AppDialogContext';
+import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { Megaphone, Plus, X, Pencil, Trash2, EyeOff, Eye, ChevronLeft, ChevronRight, ExternalLink, Sliders, Upload, Tag } from 'lucide-react';
 
 interface Props { lang: Language; currentUser: UserProfile | null; }
@@ -173,21 +174,23 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
     }
     setLoading(true);
     try {
-      const payload = { 
+      const rawPayload = { 
         titleFr: titleFr.trim(), 
         titleAr: titleAr.trim(), 
-        descriptionFr: descFr.trim()||undefined, 
-        descriptionAr: descAr.trim()||undefined, 
-        imageUrl: imgUrl||undefined, 
-        linkUrl: linkUrl.trim()||undefined, 
+        descriptionFr: descFr.trim() || (editId ? '' : undefined), 
+        descriptionAr: descAr.trim() || (editId ? '' : undefined), 
+        imageUrl: imgUrl || (editId ? '' : undefined), 
+        linkUrl: linkUrl.trim() || (editId ? '' : undefined), 
         isActive: true, 
         createdBy: currentUser!.uid, 
         createdByName: currentUser!.name, 
         createdAt: editId ? list.find(a=>a.id===editId)?.createdAt||new Date().toISOString() : new Date().toISOString(), 
-        expiresAt: expAt?new Date(expAt).toISOString():undefined, 
+        expiresAt: expAt ? new Date(expAt).toISOString() : (editId ? '' : undefined), 
         order: editId ? list.find(a=>a.id===editId)?.order ?? list.length : list.length 
       };
       
+      const payload = cleanFirestoreData(rawPayload);
+
       if (editId) { 
         await updateDoc(doc(db,'announcements',editId), payload as Record<string,unknown>); 
         alert(lang==='fr'?'Mis à jour avec succès !':'تم تحديث الإعلان بنجاح!','success'); 

@@ -22,7 +22,8 @@ const app = initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
-  })
+  }),
+  ignoreUndefinedProperties: true
 });
 
 // Silence verbose internal Firebase SDK connection logs in browser console
