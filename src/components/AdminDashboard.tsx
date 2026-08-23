@@ -1,7 +1,7 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { collection, updateDoc, doc, addDoc, setDoc, getDoc, getDocs, query, where, writeBatch, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Order, Product, ProductVariant, ProductAttribute, OrderStatus, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage } from '../types';
+import { Order, Product, ProductVariant, ProductAttribute, OrderStatus, UserProfile, ShopInfo, Payment, ProductReturn, Promotion, Expense, ActivityLog, AdminMessage, Supplier, PurchaseInvoice, SupplierPayment, ProfileUpdateRequest } from '../types';
 import { Language, getTranslation } from '../translations';
 import { getLogoUrl } from '../constants/brand';
 import { useAppDialog } from '../context/AppDialogContext';
@@ -15,7 +15,7 @@ import {
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
   History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin,
-  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload, Pencil, Clock
+  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload, Pencil, Clock, CheckCircle2, XCircle
 } from 'lucide-react';
 
 // Lazy load heavy admin sub-components
@@ -31,6 +31,7 @@ const BackupManager = lazy(() => import('./admin/BackupManager'));
 const AnnouncementsSection = lazy(() => import('./AnnouncementsSection'));
 const CatalogGenerator = lazy(() => import('./CatalogGenerator'));
 const DoctorMap = lazy(() => import('./DoctorMap'));
+const SupplierManager = lazy(() => import('./admin/SupplierManager'));
 
 interface AdminDashboardProps {
   lang: Language;
@@ -44,6 +45,10 @@ interface AdminDashboardProps {
   activityLogsList: ActivityLog[];
   productsList: Product[];
   adminMessagesList: AdminMessage[];
+  suppliersList?: Supplier[];
+  purchasesList?: PurchaseInvoice[];
+  supplierPaymentsList?: SupplierPayment[];
+  profileUpdateRequestsList?: ProfileUpdateRequest[];
   shopInfo: ShopInfo;
   onShopInfoChange: (info: ShopInfo) => void;
   onRefreshData: () => void;
@@ -54,8 +59,8 @@ interface AdminDashboardProps {
 }
 
 type AdminSubTab =
-  | 'orders' | 'analytics' | 'doctors' | 'clientSituation' | 'debts' | 'inventory'
-  | 'promotions' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages' | 'announcements';
+  | 'orders' | 'analytics' | 'doctors' | 'clientSituation' | 'debts' | 'inventory' | 'suppliers'
+  | 'promotions' | 'catalog' | 'doctorsMap' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages' | 'announcements';
 
 export default function AdminDashboard({
   lang,
@@ -69,6 +74,10 @@ export default function AdminDashboard({
   activityLogsList,
   productsList,
   adminMessagesList,
+  suppliersList = [],
+  purchasesList = [],
+  supplierPaymentsList = [],
+  profileUpdateRequestsList = [],
   shopInfo,
   onShopInfoChange,
   onRefreshData,
@@ -110,6 +119,144 @@ export default function AdminDashboard({
   const allDoctors = usersList.filter((u) => u.role === 'doctor');
 
   const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
+
+  // --- Doctor Profile Update Requests State ---
+  const [doctorSubView, setDoctorSubView] = useState<'all' | 'requests'>('all');
+  const [profileRequestFilter, setProfileRequestFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [profileRequestSearch, setProfileRequestSearch] = useState('');
+  const [processingProfileRequestId, setProcessingProfileRequestId] = useState<string | null>(null);
+  const [rejectingRequest, setRejectingRequest] = useState<ProfileUpdateRequest | null>(null);
+  const [rejectionReasonText, setRejectionReasonText] = useState('');
+
+  const pendingProfileRequestsCount = useMemo(() => {
+    return (profileUpdateRequestsList || []).filter((r) => r.status === 'pending').length;
+  }, [profileUpdateRequestsList]);
+
+  const handleApproveProfileRequest = async (req: ProfileUpdateRequest) => {
+    const confirmed = await confirm(
+      lang === 'fr'
+        ? `Voulez-vous vraiment approuver les modifications demandées pour le Dr. ${req.doctorName} ?`
+        : `هل أنت متأكد من قبول التعديلات وتحديث بيانات الحساب للطبيب ${req.doctorName}؟`
+    );
+    if (!confirmed) return;
+
+    setProcessingProfileRequestId(req.id);
+    try {
+      // 1. Update doctor profile document in `users`
+      await updateDoc(doc(db, 'users', req.doctorId), cleanFirestoreData({
+        name: req.requestedChanges.name,
+        phone: req.requestedChanges.phone,
+        clinicName: req.requestedChanges.clinicName,
+        location: req.requestedChanges.location,
+        wilayaCode: req.requestedChanges.wilayaCode,
+        wilayaName: req.requestedChanges.wilayaName,
+        communeName: req.requestedChanges.communeName,
+        communeNameAscii: req.requestedChanges.communeNameAscii
+      }));
+
+      // 2. Mark request as approved
+      await updateDoc(doc(db, 'profile_update_requests', req.id), {
+        status: 'approved',
+        reviewedAt: new Date().toISOString(),
+        reviewedBy: currentUser.uid,
+        reviewedByName: currentUser.name
+      });
+
+      // 3. Send notification to doctor
+      await addDoc(collection(db, 'notifications'), {
+        userId: req.doctorId,
+        titleFr: 'Demande de modification acceptée !',
+        titleAr: 'تمت الموافقة على طلب تعديل الملف الشخصي!',
+        messageFr: 'Votre demande de modification de coordonnées a été validée et votre profil est maintenant mis à jour.',
+        messageAr: 'تمت مراجعة وقبول طلب تعديل بيانات ملفك الشخصي من قبل الإدارة، وتم تحديث بياناتك بنجاح.',
+        type: 'profile_request',
+        isRead: false,
+        createdAt: new Date().toISOString()
+      }).catch(console.error);
+
+      // 4. Log activity
+      await logActivity(
+        currentUser,
+        'Approbation modification profil médecin',
+        'profile_request',
+        `Approbation des modifications pour le Dr. ${req.doctorName} (UID: ${req.doctorId})`,
+        req.id
+      );
+
+      alert(
+        lang === 'fr'
+          ? 'Modifications approuvées et profil mis à jour avec succès !'
+          : 'تم قبول التعديلات وتحديث الملف الشخصي للطبيب بنجاح!',
+        'success'
+      );
+    } catch (err) {
+      console.error('Approve profile request error:', err);
+      alert(
+        lang === 'fr'
+          ? 'Erreur lors de l\'approbation de la demande.'
+          : 'حدث خطأ أثناء الموافقة على طلب التعديل.',
+        'error'
+      );
+    } finally {
+      setProcessingProfileRequestId(null);
+    }
+  };
+
+  const handleConfirmRejectProfileRequest = async () => {
+    if (!rejectingRequest) return;
+    setProcessingProfileRequestId(rejectingRequest.id);
+    try {
+      const reason = rejectionReasonText.trim();
+      // 1. Mark request as rejected
+      await updateDoc(doc(db, 'profile_update_requests', rejectingRequest.id), {
+        status: 'rejected',
+        rejectionReason: reason || null,
+        reviewedAt: new Date().toISOString(),
+        reviewedBy: currentUser.uid,
+        reviewedByName: currentUser.name
+      });
+
+      // 2. Send notification to doctor
+      await addDoc(collection(db, 'notifications'), {
+        userId: rejectingRequest.doctorId,
+        titleFr: 'Demande de modification refusée',
+        titleAr: 'تم رفض طلب تعديل الملف الشخصي',
+        messageFr: `Votre demande de modification de profil n'a pas été acceptée.${reason ? ` Motif : ${reason}` : ''}`,
+        messageAr: `نأسف، لم تتم الموافقة على طلب تعديل بيانات حسابك.${reason ? ` السبب: ${reason}` : ''}`,
+        type: 'profile_request',
+        isRead: false,
+        createdAt: new Date().toISOString()
+      }).catch(console.error);
+
+      // 3. Log activity
+      await logActivity(
+        currentUser,
+        'Rejet modification profil médecin',
+        'profile_request',
+        `Rejet des modifications pour le Dr. ${rejectingRequest.doctorName}. Motif: ${reason || 'Non spécifié'}`,
+        rejectingRequest.id
+      );
+
+      setRejectingRequest(null);
+      setRejectionReasonText('');
+      alert(
+        lang === 'fr'
+          ? 'Demande rejetée et médecin notifié.'
+          : 'تم رفض الطلب وإشعار الطبيب بنجاح.',
+        'success'
+      );
+    } catch (err) {
+      console.error('Reject profile request error:', err);
+      alert(
+        lang === 'fr'
+          ? 'Erreur lors du rejet de la demande.'
+          : 'حدث خطأ أثناء رفض الطلب.',
+        'error'
+      );
+    } finally {
+      setProcessingProfileRequestId(null);
+    }
+  };
 
   // --- Doctor Debt Grace Extension State ---
   const [selectedDoctorForGrace, setSelectedDoctorForGrace] = useState<UserProfile | null>(null);
@@ -1152,6 +1299,17 @@ export default function AdminDashboard({
     }
   };
 
+  const suppliersWithDebtCount = useMemo(() => {
+    return suppliersList.filter((s) => {
+      const initial = Number(s.initialDebt || 0);
+      const sInvoices = purchasesList.filter((p) => p.supplierId === s.id);
+      const sPayments = supplierPaymentsList.filter((p) => p.supplierId === s.id);
+      const totalPurchases = initial + sInvoices.reduce((sum, inv) => sum + (Number(inv.totalAmount) || 0), 0);
+      const totalPayments = sPayments.reduce((sum, pay) => sum + (Number(pay.amount) || 0), 0);
+      return (totalPurchases - totalPayments) > 0;
+    }).length;
+  }, [suppliersList, purchasesList, supplierPaymentsList]);
+
   return (
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
 
@@ -1181,13 +1339,18 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'view_doctors') && (
           <button
             onClick={() => setActiveSubTab('doctors')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctors'
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'doctors'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
           >
             <Stethoscope size={16} />
             {getTranslation(lang, 'registeredDoctors')} ({allDoctors.length})
+            {pendingProfileRequestsCount > 0 && (
+              <span className="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
+                {pendingProfileRequestsCount} {lang === 'fr' ? 'demandes' : 'طلبات'}
+              </span>
+            )}
           </button>
         )}
 
@@ -1220,13 +1383,31 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'manage_inventory') && (
           <button
             onClick={() => setActiveSubTab('inventory')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'inventory'
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'inventory'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
           >
             <Package size={16} />
             {getTranslation(lang, 'inventory')}
+          </button>
+        )}
+
+        {hasPermission(currentUser, 'view_suppliers') && (
+          <button
+            onClick={() => setActiveSubTab('suppliers')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'suppliers'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+              }`}
+          >
+            <Truck size={16} />
+            {getTranslation(lang, 'suppliers')}
+            {suppliersWithDebtCount > 0 && (
+              <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
+                {suppliersWithDebtCount}
+              </span>
+            )}
           </button>
         )}
 
@@ -2016,6 +2197,22 @@ export default function AdminDashboard({
         </div>
       )}
 
+      {activeSubTab === 'suppliers' && hasPermission(currentUser, 'view_suppliers') && (
+        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <SupplierManager
+              lang={lang}
+              suppliers={suppliersList}
+              purchases={purchasesList}
+              supplierPayments={supplierPaymentsList}
+              productsList={productsList}
+              currentUser={currentUser}
+              shopInfo={shopInfo}
+            />
+          </Suspense>
+        </div>
+      )}
+
       {activeSubTab === 'expenses' && hasPermission(currentUser, 'view_expenses') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
           <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
@@ -2057,120 +2254,479 @@ export default function AdminDashboard({
       )}
 
 
-      {/* 1b. All registered doctors */}
+      {/* 1b. All registered doctors & Profile Update Requests */}
       {activeSubTab === 'doctors' && hasPermission(currentUser, 'view_doctors') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
-          <div className="border-b border-slate-50 pb-4">
-            <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <Stethoscope size={20} className="text-brand-cyan" />
-              {getTranslation(lang, 'registeredDoctors')}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1">
-              {lang === 'fr'
-                ? 'Liste complète des praticiens inscrits sur la plateforme (depuis Firestore).'
-                : 'قائمة كاملة بالأطباء المسجلين على المنصة (من قاعدة البيانات).'}
-            </p>
+          
+          {/* Header & Sub-view Switcher */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <Stethoscope size={20} className="text-brand-cyan" />
+                {lang === 'fr' ? 'Gestion des Praticiens' : 'إدارة الأطباء المسجلين'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {lang === 'fr'
+                  ? 'Consultez la liste des praticiens et gérez les demandes de modification de profil.'
+                  : 'استعراض قائمة الأطباء وإدارة ومراجعة طلبات تعديل البيانات الشخصية.'}
+              </p>
+            </div>
+
+            {/* Toggle Pills */}
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-2xl shrink-0">
+              <button
+                onClick={() => setDoctorSubView('all')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  doctorSubView === 'all'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Stethoscope size={14} />
+                <span>{getTranslation(lang, 'registeredDoctors')} ({allDoctors.length})</span>
+              </button>
+
+              <button
+                onClick={() => setDoctorSubView('requests')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  doctorSubView === 'requests'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Edit3 size={14} />
+                <span>{lang === 'fr' ? 'Demandes de modification' : 'طلبات تعديل الملف'}</span>
+                {pendingProfileRequestsCount > 0 && (
+                  <span className="bg-amber-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
+                    {pendingProfileRequestsCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
 
-          <input
-            type="text"
-            value={doctorSearchQuery}
-            onChange={(e) => setDoctorSearchQuery(e.target.value)}
-            placeholder={getTranslation(lang, 'clientSearchPlaceholder')}
-            className="w-full max-w-md bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3.5 text-sm focus:outline-hidden focus:border-brand-cyan font-medium text-slate-800"
-          />
+          {/* VIEW 1: All Registered Doctors */}
+          {doctorSubView === 'all' && (
+            <div className="space-y-4">
+              <input
+                type="text"
+                value={doctorSearchQuery}
+                onChange={(e) => setDoctorSearchQuery(e.target.value)}
+                placeholder={getTranslation(lang, 'clientSearchPlaceholder')}
+                className="w-full max-w-md bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3.5 text-sm focus:outline-hidden focus:border-brand-cyan font-medium text-slate-800"
+              />
 
-          {allDoctors.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 font-semibold text-sm">
-              {lang === 'fr' ? 'Aucun praticien inscrit.' : 'لا يوجد أطباء مسجلون.'}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left md:rtl:text-right border-collapse text-sm min-w-[700px]">
-                <thead>
-                  <tr className="text-xs font-extrabold text-slate-400 uppercase border-b border-slate-100">
-                    <th className="pb-3">{getTranslation(lang, 'name')}</th>
-                    <th className="pb-3">{getTranslation(lang, 'clinicName')}</th>
-                    <th className="pb-3">{getTranslation(lang, 'phone')}</th>
-                    <th className="pb-3">{getTranslation(lang, 'email')}</th>
-                    <th className="pb-3">{getTranslation(lang, 'location')}</th>
-                    <th className="pb-3">{getTranslation(lang, 'status')}</th>
-                    <th className="pb-3">{lang === 'fr' ? 'Paiement Crédit' : 'البيع بالدين'}</th>
-                    <th className="pb-3">{lang === 'fr' ? 'Grâce dette' : 'مهلة الدين الإضافية'}</th>
-                    <th className="pb-3">ID</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {allDoctors
-                    .filter((d) => {
-                      const q = doctorSearchQuery.trim().toLowerCase();
-                      if (!q) return true;
-                      return (
-                        d.name.toLowerCase().includes(q) ||
-                        d.uid.toLowerCase().includes(q) ||
-                        d.clinicName.toLowerCase().includes(q) ||
-                        d.email.toLowerCase().includes(q)
-                      );
-                    })
-                    .map((docProfile) => (
-                      <tr key={docProfile.uid} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="py-3 font-bold text-slate-800">{docProfile.name}</td>
-                        <td className="py-3 text-slate-600 text-xs">{docProfile.clinicName}</td>
-                        <td className="py-3 text-slate-500 text-xs">{docProfile.phone}</td>
-                        <td className="py-3 text-slate-500 text-xs">{docProfile.email}</td>
-                        <td className="py-3 text-slate-500 text-xs">{docProfile.location}</td>
-                        <td className="py-3">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600">
-                            {lang === 'fr' ? 'Actif' : 'مفعّل'}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          <button
-                            onClick={() => handleToggleDoctorCredit(docProfile)}
-                            disabled={loading}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${docProfile.allowCreditPayment !== false
-                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                                : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
-                              }`}
-                          >
-                            {docProfile.allowCreditPayment !== false
-                              ? (lang === 'fr' ? 'Activé' : 'مفعّل')
-                              : (lang === 'fr' ? 'Désactivé' : 'معطّل')}
-                          </button>
-                        </td>
-                        <td className="py-3">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
-                              docProfile.extraGraceDays && docProfile.extraGraceDays > 0
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : 'bg-slate-100 text-slate-500'
-                            }`}>
-                              {docProfile.extraGraceDays && docProfile.extraGraceDays > 0
-                                ? `+${docProfile.extraGraceDays} ${lang === 'fr' ? 'j' : 'أيام'}`
-                                : (lang === 'fr' ? '15j' : '15 يوم')}
-                            </span>
-                            <button
-                              onClick={() => {
-                                setSelectedDoctorForGrace(docProfile);
-                                setGraceDaysInput(docProfile.extraGraceDays || 0);
-                                setExtendUnpaidOrders(true);
-                              }}
-                              className="p-1 text-slate-500 hover:text-brand-cyan hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                              title={lang === 'fr' ? 'Prolonger la grâce' : 'تمديد مهلة الدين'}
-                            >
-                              <Clock size={14} />
-                            </button>
-                          </div>
-                        </td>
-                        <td className="py-3 font-mono text-[10px] text-slate-400 max-w-[120px] truncate">
-                          {docProfile.uid}
-                        </td>
+              {allDoctors.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 font-semibold text-sm">
+                  {lang === 'fr' ? 'Aucun praticien inscrit.' : 'لا يوجد أطباء مسجلون.'}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left md:rtl:text-right border-collapse text-sm min-w-[700px]">
+                    <thead>
+                      <tr className="text-xs font-extrabold text-slate-400 uppercase border-b border-slate-100">
+                        <th className="pb-3">{getTranslation(lang, 'name')}</th>
+                        <th className="pb-3">{getTranslation(lang, 'clinicName')}</th>
+                        <th className="pb-3">{getTranslation(lang, 'phone')}</th>
+                        <th className="pb-3">{getTranslation(lang, 'email')}</th>
+                        <th className="pb-3">{getTranslation(lang, 'location')}</th>
+                        <th className="pb-3">{getTranslation(lang, 'status')}</th>
+                        <th className="pb-3">{lang === 'fr' ? 'Paiement Crédit' : 'البيع بالدين'}</th>
+                        <th className="pb-3">{lang === 'fr' ? 'Grâce dette' : 'مهلة الدين الإضافية'}</th>
+                        <th className="pb-3">ID</th>
                       </tr>
-                    ))}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {allDoctors
+                        .filter((d) => {
+                          const q = doctorSearchQuery.trim().toLowerCase();
+                          if (!q) return true;
+                          return (
+                            d.name.toLowerCase().includes(q) ||
+                            d.uid.toLowerCase().includes(q) ||
+                            d.clinicName.toLowerCase().includes(q) ||
+                            d.email.toLowerCase().includes(q)
+                          );
+                        })
+                        .map((docProfile) => (
+                          <tr key={docProfile.uid} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 font-bold text-slate-800">{docProfile.name}</td>
+                            <td className="py-3 text-slate-600 text-xs">{docProfile.clinicName}</td>
+                            <td className="py-3 text-slate-500 text-xs">{docProfile.phone}</td>
+                            <td className="py-3 text-slate-500 text-xs">{docProfile.email}</td>
+                            <td className="py-3 text-slate-500 text-xs">{docProfile.location}</td>
+                            <td className="py-3">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600">
+                                {lang === 'fr' ? 'Actif' : 'مفعّل'}
+                              </span>
+                            </td>
+                            <td className="py-3">
+                              <button
+                                onClick={() => handleToggleDoctorCredit(docProfile)}
+                                disabled={loading}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${docProfile.allowCreditPayment !== false
+                                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                    : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+                                  }`}
+                              >
+                                {docProfile.allowCreditPayment !== false
+                                  ? (lang === 'fr' ? 'Activé' : 'مفعّل')
+                                  : (lang === 'fr' ? 'Désactivé' : 'معطّل')}
+                              </button>
+                            </td>
+                            <td className="py-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
+                                  docProfile.extraGraceDays && docProfile.extraGraceDays > 0
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {docProfile.extraGraceDays && docProfile.extraGraceDays > 0
+                                    ? `+${docProfile.extraGraceDays} ${lang === 'fr' ? 'j' : 'أيام'}`
+                                    : (lang === 'fr' ? '15j' : '15 يوم')}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setSelectedDoctorForGrace(docProfile);
+                                    setGraceDaysInput(docProfile.extraGraceDays || 0);
+                                    setExtendUnpaidOrders(true);
+                                  }}
+                                  className="p-1 text-slate-500 hover:text-brand-cyan hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                  title={lang === 'fr' ? 'Prolonger la grâce' : 'تمديد مهلة الدين'}
+                                >
+                                  <Clock size={14} />
+                                </button>
+                              </div>
+                            </td>
+                            <td className="py-3 font-mono text-[10px] text-slate-400 max-w-[120px] truncate">
+                              {docProfile.uid}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
+
+          {/* VIEW 2: Profile Update Requests Review */}
+          {doctorSubView === 'requests' && (
+            <div className="space-y-6">
+              {/* Controls: Search and Filter Chips */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <input
+                  type="text"
+                  value={profileRequestSearch}
+                  onChange={(e) => setProfileRequestSearch(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Rechercher par nom, clinique, téléphone...' : 'البحث بالاسم، العيادة، رقم الهاتف...'}
+                  className="w-full max-w-sm bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3.5 text-xs focus:outline-hidden focus:border-brand-cyan font-medium text-slate-800"
+                />
+
+                <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-100">
+                  <button
+                    onClick={() => setProfileRequestFilter('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                      profileRequestFilter === 'all'
+                        ? 'bg-brand-cyan text-white shadow-2xs'
+                        : 'text-slate-600 hover:bg-slate-200/60'
+                    }`}
+                  >
+                    {lang === 'fr' ? 'Tous' : 'الكل'} ({(profileUpdateRequestsList || []).length})
+                  </button>
+                  <button
+                    onClick={() => setProfileRequestFilter('pending')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      profileRequestFilter === 'pending'
+                        ? 'bg-amber-500 text-white shadow-2xs'
+                        : 'text-amber-700 hover:bg-amber-100/60'
+                    }`}
+                  >
+                    <span>{lang === 'fr' ? 'En attente' : 'قيد المراجعة'}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${profileRequestFilter === 'pending' ? 'bg-amber-600 text-white' : 'bg-amber-200 text-amber-900'}`}>
+                      {pendingProfileRequestsCount}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setProfileRequestFilter('approved')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                      profileRequestFilter === 'approved'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-emerald-700 hover:bg-emerald-100/60'
+                    }`}
+                  >
+                    {lang === 'fr' ? 'Approuvées' : 'المقبولة'} ({(profileUpdateRequestsList || []).filter(r => r.status === 'approved').length})
+                  </button>
+                  <button
+                    onClick={() => setProfileRequestFilter('rejected')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                      profileRequestFilter === 'rejected'
+                        ? 'bg-rose-600 text-white shadow-2xs'
+                        : 'text-rose-700 hover:bg-rose-100/60'
+                    }`}
+                  >
+                    {lang === 'fr' ? 'Rejetées' : 'المرفوضة'} ({(profileUpdateRequestsList || []).filter(r => r.status === 'rejected').length})
+                  </button>
+                </div>
+              </div>
+
+              {/* Requests List */}
+              {(() => {
+                const filtered = (profileUpdateRequestsList || []).filter((req) => {
+                  if (profileRequestFilter !== 'all' && req.status !== profileRequestFilter) return false;
+                  if (!profileRequestSearch.trim()) return true;
+                  const q = profileRequestSearch.trim().toLowerCase();
+                  return (
+                    (req.doctorName || '').toLowerCase().includes(q) ||
+                    (req.doctorEmail || '').toLowerCase().includes(q) ||
+                    (req.doctorPhone || '').toLowerCase().includes(q) ||
+                    (req.requestedChanges.name || '').toLowerCase().includes(q) ||
+                    (req.requestedChanges.clinicName || '').toLowerCase().includes(q) ||
+                    (req.requestedChanges.location || '').toLowerCase().includes(q)
+                  );
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="text-center py-16 border border-dashed border-slate-200 rounded-3xl bg-slate-50/50 space-y-3">
+                      <Edit3 className="mx-auto text-slate-300" size={40} />
+                      <p className="text-sm font-bold text-slate-500">
+                        {lang === 'fr' ? 'Aucune demande de modification trouvée.' : 'لا توجد طلبات تعديل ملف شخصي في هذه القائمة.'}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    {filtered.map((req) => {
+                      const isPending = req.status === 'pending';
+                      const isApproved = req.status === 'approved';
+                      const isRejected = req.status === 'rejected';
+
+                      const nameChanged = req.currentData?.name !== req.requestedChanges?.name;
+                      const phoneChanged = req.currentData?.phone !== req.requestedChanges?.phone;
+                      const clinicChanged = req.currentData?.clinicName !== req.requestedChanges?.clinicName;
+                      const locationChanged = req.currentData?.location !== req.requestedChanges?.location;
+
+                      return (
+                        <div
+                          key={req.id}
+                          className={`rounded-3xl border p-5 md:p-6 transition-all ${
+                            isPending
+                              ? 'border-amber-200 bg-amber-50/20 shadow-xs'
+                              : isApproved
+                              ? 'border-emerald-150 bg-emerald-50/15'
+                              : 'border-rose-150 bg-rose-50/15'
+                          }`}
+                        >
+                          {/* Top Row: Doctor Info & Status */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-base font-black text-slate-900">
+                                  {req.doctorName}
+                                </h4>
+                                <span className="text-xs text-slate-400 font-mono">({req.doctorEmail})</span>
+                              </div>
+                              <p className="text-xs text-slate-500 font-medium flex items-center gap-2">
+                                <span>{lang === 'fr' ? 'Date de la demande :' : 'تاريخ تقديم الطلب :'}</span>
+                                <span className="font-bold text-slate-700">
+                                  {new Date(req.createdAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}
+                                </span>
+                              </p>
+                            </div>
+
+                            {/* Status Badge */}
+                            <div>
+                              {isPending && (
+                                <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 text-xs font-black px-3 py-1 rounded-full border border-amber-200 animate-pulse">
+                                  <Clock size={12} />
+                                  {lang === 'fr' ? 'En attente de révision' : 'قيد مراجعة الإدارة'}
+                                </span>
+                              )}
+                              {isApproved && (
+                                <span className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-xs font-black px-3 py-1 rounded-full border border-emerald-200">
+                                  <CheckCircle2 size={12} />
+                                  {lang === 'fr' ? 'Approuvée' : 'تمت الموافقة'}
+                                </span>
+                              )}
+                              {isRejected && (
+                                <span className="inline-flex items-center gap-1.5 bg-rose-100 text-rose-800 text-xs font-black px-3 py-1 rounded-full border border-rose-200">
+                                  <XCircle size={12} />
+                                  {lang === 'fr' ? 'Rejetée' : 'مرفوضة'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Comparison Grid: Current vs Requested */}
+                          <div className="my-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                            <table className="w-full text-xs text-left md:rtl:text-right">
+                              <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-extrabold uppercase">
+                                  <th className="py-2.5 px-3.5 w-1/4">{lang === 'fr' ? 'Champ' : 'الحقل'}</th>
+                                  <th className="py-2.5 px-3.5 w-3/8 text-slate-400">{lang === 'fr' ? 'Valeur Actuelle' : 'البيانات الحالية'}</th>
+                                  <th className="py-2.5 px-3.5 w-3/8 text-brand-dark">{lang === 'fr' ? 'Nouvelle Valeur Demandée' : 'التعديل المطلوب'}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {/* Name */}
+                                <tr className={nameChanged ? 'bg-amber-50/40' : ''}>
+                                  <td className="py-2 px-3.5 font-bold text-slate-700">{getTranslation(lang, 'name')}</td>
+                                  <td className="py-2 px-3.5 text-slate-500">{req.currentData?.name || '—'}</td>
+                                  <td className="py-2 px-3.5">
+                                    <span className={`font-bold ${nameChanged ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200' : 'text-slate-800'}`}>
+                                      {req.requestedChanges.name}
+                                    </span>
+                                  </td>
+                                </tr>
+                                {/* Phone */}
+                                <tr className={phoneChanged ? 'bg-amber-50/40' : ''}>
+                                  <td className="py-2 px-3.5 font-bold text-slate-700">{getTranslation(lang, 'phone')}</td>
+                                  <td className="py-2 px-3.5 text-slate-500">{req.currentData?.phone || '—'}</td>
+                                  <td className="py-2 px-3.5">
+                                    <span className={`font-bold ${phoneChanged ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200' : 'text-slate-800'}`}>
+                                      {req.requestedChanges.phone}
+                                    </span>
+                                  </td>
+                                </tr>
+                                {/* Clinic */}
+                                <tr className={clinicChanged ? 'bg-amber-50/40' : ''}>
+                                  <td className="py-2 px-3.5 font-bold text-slate-700">{getTranslation(lang, 'clinicName')}</td>
+                                  <td className="py-2 px-3.5 text-slate-500">{req.currentData?.clinicName || '—'}</td>
+                                  <td className="py-2 px-3.5">
+                                    <span className={`font-bold ${clinicChanged ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200' : 'text-slate-800'}`}>
+                                      {req.requestedChanges.clinicName}
+                                    </span>
+                                  </td>
+                                </tr>
+                                {/* Location */}
+                                <tr className={locationChanged ? 'bg-amber-50/40' : ''}>
+                                  <td className="py-2 px-3.5 font-bold text-slate-700">{getTranslation(lang, 'location')}</td>
+                                  <td className="py-2 px-3.5 text-slate-500">{req.currentData?.location || '—'}</td>
+                                  <td className="py-2 px-3.5">
+                                    <span className={`font-bold ${locationChanged ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200' : 'text-slate-800'}`}>
+                                      {req.requestedChanges.location}
+                                    </span>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Rejection / Reviewer Notes */}
+                          {req.rejectionReason && (
+                            <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs mb-3">
+                              <span className="font-bold">{lang === 'fr' ? 'Motif du refus :' : 'سبب الرفض :'} </span>
+                              <span>{req.rejectionReason}</span>
+                            </div>
+                          )}
+
+                          {req.reviewedBy && (
+                            <p className="text-[11px] text-slate-400 mb-3 font-medium">
+                              {lang === 'fr' ? 'Traité par :' : 'تمت المعالجة بواسطة :'} <span className="font-bold text-slate-600">{req.reviewedByName || req.reviewedBy}</span>
+                              {req.reviewedAt && ` • ${new Date(req.reviewedAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'ar-DZ')}`}
+                            </p>
+                          )}
+
+                          {/* Action Buttons for Pending Requests */}
+                          {isPending && (
+                            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                              <button
+                                onClick={() => handleApproveProfileRequest(req)}
+                                disabled={processingProfileRequestId === req.id}
+                                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                              >
+                                <Check size={14} />
+                                <span>{lang === 'fr' ? 'Accepter & Mettre à jour' : 'الموافقة وتحديث الحساب'}</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setRejectingRequest(req);
+                                  setRejectionReasonText('');
+                                }}
+                                disabled={processingProfileRequestId === req.id}
+                                className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                <X size={14} />
+                                <span>{lang === 'fr' ? 'Rejeter la demande' : 'رفض الطلب'}</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* Reject Request Reason Modal */}
+      {rejectingRequest && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-rose-50/50">
+              <h3 className="font-extrabold text-rose-800 text-base flex items-center gap-2">
+                <XCircle size={18} className="text-rose-600" />
+                {lang === 'fr' ? 'Refuser la demande de modification' : 'رفض طلب تعديل الملف الشخصي'}
+              </h3>
+              <button
+                onClick={() => setRejectingRequest(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                {lang === 'fr'
+                  ? `Vous êtes sur le point de rejeter la demande de modification pour le Dr. ${rejectingRequest.doctorName}.`
+                  : `أنت على وشك رفض طلب تعديل البيانات المقدم من الطبيب ${rejectingRequest.doctorName}.`}
+              </p>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">
+                  {lang === 'fr' ? 'Motif du refus (optionnel) :' : 'سبب الرفض الموجه للطبيب (اختياري) :'}
+                </label>
+                <textarea
+                  value={rejectionReasonText}
+                  onChange={(e) => setRejectionReasonText(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Ex: Coordonnées de localisation imprécises...' : 'مثال: يرجى كتابة عنوان العيادة بدقة أو رقم هاتف متاح...'}
+                  rows={3}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs focus:outline-hidden focus:border-rose-400 resize-none font-medium text-slate-800"
+                />
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRejectingRequest(null)}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmRejectProfileRequest}
+                  disabled={processingProfileRequestId === rejectingRequest.id}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-rose-600 hover:bg-rose-700 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  {processingProfileRequestId === rejectingRequest.id ? (
+                    <span>{lang === 'fr' ? 'En cours...' : 'جاري الرفض...'}</span>
+                  ) : (
+                    <span>{lang === 'fr' ? 'Confirmer le rejet' : 'تأكيد الرفض'}</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

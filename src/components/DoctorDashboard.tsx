@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Order, Payment, Product, ProductReturn, UserProfile } from '../types';
+import { Order, Payment, Product, ProductReturn, UserProfile, ProfileUpdateRequest } from '../types';
 import { Language, getTranslation } from '../translations';
-import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3, Lock, Printer } from 'lucide-react';
-import { collection, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
+import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3, Lock, Printer, Key, Edit3 } from 'lucide-react';
+import { collection, addDoc, serverTimestamp, updateDoc, doc, query, where, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { hashPassword } from '../utils/crypto';
@@ -72,8 +72,11 @@ export default function DoctorDashboard({
   const [sendingMessage, setSendingMessage] = useState(false);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
 
-  // --- Profile Edit State ---
+  // --- Profile Edit & Password Change State ---
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [pendingProfileRequest, setPendingProfileRequest] = useState<ProfileUpdateRequest | null>(null);
+
   const [profileName, setProfileName] = useState(user.name);
   const [profilePhone, setProfilePhone] = useState(user.phone);
   const [profileClinic, setProfileClinic] = useState(user.clinicName);
@@ -86,6 +89,25 @@ export default function DoctorDashboard({
   const [selectedCommune, setSelectedCommune] = useState<CommuneOption | null>(null);
   const [loadingWilayas, setLoadingWilayas] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  // Sync real-time pending profile update requests for this doctor
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'profile_update_requests'),
+      where('doctorId', '==', user.uid)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const list: ProfileUpdateRequest[] = [];
+      snap.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<ProfileUpdateRequest, 'id'>) });
+      });
+      const pending = list.find((r) => r.status === 'pending') || null;
+      setPendingProfileRequest(pending);
+    });
+    return () => unsub();
+  }, [user?.uid]);
 
   // Update edit form values when user prop changes (e.g. after database load/update)
   useEffect(() => {
@@ -95,6 +117,16 @@ export default function DoctorDashboard({
   }, [user]);
 
   const handleOpenProfileModal = async () => {
+    if (pendingProfileRequest) {
+      alert(
+        lang === 'fr'
+          ? 'Vous avez déjà une demande de modification en cours d\'examen par l\'administration.'
+          : 'لديك طلب تعديل بيانات قيد المراجعة حالياً من قبل الإدارة، يرجى انتظار قرار الإدارة أو إلغاء الطلب الحالي أولاً.',
+        'info'
+      );
+      return;
+    }
+
     setShowProfileModal(true);
     setLoadingWilayas(true);
     try {
@@ -128,22 +160,65 @@ export default function DoctorDashboard({
     }
   };
 
-  const handleUpdateProfile = async (e: React.FormEvent) => {
+  // 1. Direct Password Change (Instant without admin approval)
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || !confirmPassword) {
+      alert(lang === 'fr' ? 'Veuillez saisir le nouveau mot de passe.' : 'يرجى إدخال وتأكيد كلمة المرور الجديدة.', 'error');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      alert(lang === 'fr' ? 'Les mots de passe ne correspondent pas.' : 'كلمتا المرور غير متطابقتين.', 'error');
+      return;
+    }
+    if (newPassword.length < 4) {
+      alert(lang === 'fr' ? 'Le mot de passe doit contenir au moins 4 caractères.' : 'يجب أن تحتوي كلمة المرور على 4 أحرف كحد أدنى.', 'error');
+      return;
+    }
+
+    setSavingPassword(true);
+    try {
+      const hashed = await hashPassword(newPassword.trim());
+      if (auth.currentUser) {
+        try {
+          await updatePassword(auth.currentUser, newPassword.trim());
+        } catch (pErr) {
+          console.warn('Firebase Auth updatePassword notice:', pErr);
+        }
+      }
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        password: hashed
+      });
+
+      setNewPassword('');
+      setConfirmPassword('');
+      setShowPasswordModal(false);
+      alert(
+        lang === 'fr'
+          ? 'Mot de passe mis à jour avec succès !'
+          : 'تم تغيير كلمة المرور بنجاح!',
+        'success'
+      );
+    } catch (error) {
+      console.error('Error updating password:', error);
+      alert(
+        lang === 'fr'
+          ? 'Erreur lors du changement de mot de passe.'
+          : 'حدث خطأ أثناء تغيير كلمة المرور.',
+        'error'
+      );
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  // 2. Submit Profile Update Request (Sent to Admin for review)
+  const handleSubmitProfileRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profileName.trim() || !profilePhone.trim() || !profileClinic.trim() || !selectedWilaya || !selectedCommune) {
       alert(lang === 'fr' ? 'Tous les champs sont requis.' : 'جميع الحقول مطلوبة.', 'error');
       return;
-    }
-
-    if (newPassword || confirmPassword) {
-      if (newPassword !== confirmPassword) {
-        alert(lang === 'fr' ? 'Les mots de passe ne correspondent pas.' : 'كلمتا السر غير متطابقتين.', 'error');
-        return;
-      }
-      if (newPassword.length < 4) {
-        alert(lang === 'fr' ? 'Le mot de passe doit contenir au moins 4 caractères.' : 'يجب أن تحتوي كلمة السر على 4 أحرف كحد أدنى.', 'error');
-        return;
-      }
     }
 
     setSavingProfile(true);
@@ -152,53 +227,88 @@ export default function DoctorDashboard({
       const communeName = lang === 'ar' ? selectedCommune.nameAr : selectedCommune.nameAscii;
       const locationStr = `${wilayaName}، ${communeName}`;
 
-      let hashedNewPassword = '';
-      if (newPassword.trim()) {
-        hashedNewPassword = await hashPassword(newPassword.trim());
-        if (auth.currentUser) {
-          try {
-            await updatePassword(auth.currentUser, newPassword.trim());
-          } catch (pErr) {
-            console.warn('Firebase Auth updatePassword notice:', pErr);
-          }
-        }
-      }
+      await addDoc(collection(db, 'profile_update_requests'), {
+        doctorId: user.uid,
+        doctorName: user.name || '',
+        doctorEmail: user.email || '',
+        doctorPhone: user.phone || '',
+        currentData: {
+          name: user.name || '',
+          phone: user.phone || '',
+          clinicName: user.clinicName || '',
+          location: user.location || '',
+          wilayaCode: user.wilayaCode || '',
+          wilayaName: user.wilayaName || '',
+          communeName: user.communeName || '',
+          communeNameAscii: user.communeNameAscii || ''
+        },
+        requestedChanges: {
+          name: profileName.trim(),
+          phone: profilePhone.trim(),
+          clinicName: profileClinic.trim(),
+          location: locationStr,
+          wilayaCode: selectedWilaya.code,
+          wilayaName: selectedWilaya.nameAr,
+          communeName: selectedCommune.nameAr,
+          communeNameAscii: selectedCommune.nameAscii
+        },
+        status: 'pending',
+        createdAt: new Date().toISOString()
+      });
 
-      const userDocRef = doc(db, 'users', user.uid);
-      const updateFields: any = {
-        name: profileName.trim(),
-        phone: profilePhone.trim(),
-        clinicName: profileClinic.trim(),
-        location: locationStr,
-        wilayaCode: selectedWilaya.code,
-        wilayaName: selectedWilaya.nameAr,
-        communeName: selectedCommune.nameAr,
-        communeNameAscii: selectedCommune.nameAscii,
-        ...(hashedNewPassword && { password: hashedNewPassword })
-      };
+      await addDoc(collection(db, 'notifications'), {
+        userId: 'admin',
+        titleFr: 'Demande de modification de profil',
+        titleAr: 'طلب تعديل ملف شخصي لطبيب',
+        messageFr: `Le Dr. ${user.name} a envoyé une demande de modification de son profil pour validation.`,
+        messageAr: `أرسل الطبيب ${user.name} طلباً لتعديل معلومات حسابه الشخصي للمراجعة والاعتماد.`,
+        type: 'profile_request',
+        isRead: false,
+        createdAt: new Date().toISOString()
+      }).catch(console.error);
 
-      await updateDoc(userDocRef, updateFields);
-
-      setNewPassword('');
-      setConfirmPassword('');
-
+      setShowProfileModal(false);
       alert(
         lang === 'fr' 
-          ? 'Profil mis à jour avec succès!' 
-          : 'تم تحديث الملف الشخصي وكلمة المرور بنجاح!', 
+          ? 'Votre demande de modification a été transmise à l\'administration avec succès. Les modifications seront appliquées dès approbation.' 
+          : 'تم إرسال طلب تعديل البيانات إلى الإدارة بنجاح! سيتم تطبيق التعديلات فور مراجعتها وقبولها من الإدارة.', 
         'success'
       );
-      setShowProfileModal(false);
     } catch (error) {
-      console.error('Error updating profile:', error);
+      console.error('Error submitting profile request:', error);
       alert(
         lang === 'fr' 
-          ? 'Erreur lors de la mise à jour du profil.' 
-          : 'حدث خطأ أثناء تحديث الملف الشخصي.', 
+          ? 'Erreur lors de l\'envoi de la demande.' 
+          : 'حدث خطأ أثناء إرسال طلب التعديل.', 
         'error'
       );
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  // 3. Cancel Pending Request
+  const handleCancelProfileRequest = async () => {
+    if (!pendingProfileRequest) return;
+    const confirmed = await confirm(
+      lang === 'fr'
+        ? 'Voulez-vous vraiment annuler votre demande de modification en attente ?'
+        : 'هل أنت متأكد من إلغاء طلب تعديل البيانات المعلق؟'
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteDoc(doc(db, 'profile_update_requests', pendingProfileRequest.id));
+      alert(
+        lang === 'fr' ? 'Demande annulée avec succès.' : 'تم إلغاء طلب التعديل بنجاح.',
+        'success'
+      );
+    } catch (err) {
+      console.error('Error cancelling profile request:', err);
+      alert(
+        lang === 'fr' ? 'Erreur lors de l\'annulation de la demande.' : 'حدث خطأ أثناء إلغاء الطلب.',
+        'error'
+      );
     }
   };
 
@@ -379,13 +489,34 @@ export default function DoctorDashboard({
             <span>{lang === 'fr' ? 'Relevé Financier 📑' : 'تصدير كشف الحساب 📑'}</span>
           </button>
 
-          {/* Edit Profile Button */}
+          {/* Change Password Button (Direct & Instant) */}
+          <button
+            onClick={() => {
+              setNewPassword('');
+              setConfirmPassword('');
+              setShowPasswordModal(true);
+            }}
+            className="flex items-center gap-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-xs cursor-pointer"
+            title={lang === 'fr' ? 'Changer mon mot de passe' : 'تغيير كلمة المرور مباشرة'}
+          >
+            <Key size={16} className="text-amber-500" />
+            <span>{lang === 'fr' ? 'Mot de passe' : 'تغيير كلمة المرور'}</span>
+          </button>
+
+          {/* Request Profile Edit Button (Requires Admin Approval) */}
           <button
             onClick={handleOpenProfileModal}
-            className="flex items-center gap-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-xs cursor-pointer"
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-xs cursor-pointer ${
+              pendingProfileRequest
+                ? 'bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100'
+                : 'border border-slate-200 text-slate-700 bg-white hover:bg-slate-50'
+            }`}
           >
-            <User size={16} className="text-slate-500" />
-            <span>{lang === 'fr' ? 'Modifier le profil' : 'تعديل الملف الشخصي'}</span>
+            <Edit3 size={16} className={pendingProfileRequest ? 'text-amber-600' : 'text-slate-500'} />
+            <span>{lang === 'fr' ? 'Demander modification profil' : 'طلب تعديل البيانات'}</span>
+            {pendingProfileRequest && (
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            )}
           </button>
 
           {/* Contact Admin Button */}
@@ -398,6 +529,33 @@ export default function DoctorDashboard({
           </button>
         </div>
       </div>
+
+      {/* Pending Profile Update Request Alert Banner */}
+      {pendingProfileRequest && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-bold shadow-2xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+              <Clock size={20} className="animate-spin" />
+            </div>
+            <div>
+              <span className="block font-black text-sm text-amber-900">
+                {lang === 'fr' ? '⏳ Demande de modification du profil en cours d\'examen par l\'administration' : '⏳ طلب تعديل معلومات الملف الشخصي قيد مراجعة الإدارة'}
+              </span>
+              <span className="text-xs text-amber-700 font-medium">
+                {lang === 'fr'
+                  ? `Demande envoyée le ${new Date(pendingProfileRequest.createdAt).toLocaleDateString('fr-FR')}. Vos nouvelles coordonnées seront mises à jour dès validation par l'administration.`
+                  : `أُرسل طلب التعديل بتاريخ ${new Date(pendingProfileRequest.createdAt).toLocaleDateString('ar-DZ')}. ستُحدّث معلوماتك مباشرة فور مراجعة وقبول الإدارة للطلب.`}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={handleCancelProfileRequest}
+            className="text-rose-700 bg-rose-50 hover:bg-rose-100 px-3.5 py-2 rounded-xl border border-rose-200 text-xs font-bold transition-all cursor-pointer shrink-0"
+          >
+            {lang === 'fr' ? 'Annuler la demande' : 'إلغاء الطلب'}
+          </button>
+        </div>
+      )}
 
       {user.extraGraceDays && user.extraGraceDays > 0 ? (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-2xl flex items-center justify-between text-xs font-bold shadow-2xs">
@@ -729,14 +887,14 @@ export default function DoctorDashboard({
 
       </div>
 
-      {/* Profile Edit Modal */}
+      {/* 1. Request Profile Update Modal (Requires Admin Approval) */}
       {showProfileModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
               <h3 className="font-extrabold text-slate-800 text-base md:text-lg flex items-center gap-2">
-                <User size={20} className="text-brand-cyan" />
-                {lang === 'fr' ? 'Modifier mon Profil' : 'تعديل ملفي الشخصي'}
+                <Edit3 size={20} className="text-brand-cyan" />
+                {lang === 'fr' ? 'Demande de modification du profil' : 'طلب تعديل معلومات الملف الشخصي'}
               </h3>
               <button
                 onClick={() => setShowProfileModal(false)}
@@ -746,7 +904,14 @@ export default function DoctorDashboard({
               </button>
             </div>
 
-            <form onSubmit={handleUpdateProfile} className="p-6 space-y-4">
+            <form onSubmit={handleSubmitProfileRequest} className="p-6 space-y-4">
+              {/* Notice Box */}
+              <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3.5 rounded-2xl text-xs font-semibold leading-relaxed">
+                {lang === 'fr'
+                  ? 'ℹ️ Note : Les modifications apportées à vos coordonnées (nom, téléphone, clinique, wilaya) seront soumises à l\'administration pour révision et validation avant d\'être appliquées.'
+                  : 'ℹ️ تنبيه: تعديلات بيانات الحساب (الاسم، الهاتف، العيادة، العنوان) تُرسل كطلب رسمي للإدارة لمراجعتها والموافقة عليها قبل اعتمادها في حسابك.'}
+              </div>
+
               {/* Doctor Name */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -814,56 +979,28 @@ export default function DoctorDashboard({
                 required
               />
 
-                {/* Delivery badge */}
-                {selectedCommune && (
-                  <div
-                    className={`mt-2 flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border ${
-                      freeDelivery
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                        : 'bg-amber-50 border-amber-200 text-amber-700'
-                    }`}
-                  >
-                    <Truck size={14} className="shrink-0" />
-                    {freeDelivery
-                      ? (lang === 'fr'
-                          ? '🎉 Livraison GRATUITE — Commune de Djelfa !'
-                          : '🎉 التوصيل مجاني — بلدية الجلفة!')
-                      : (lang === 'fr'
-                          ? '📦 Des frais de livraison s\'appliqueront selon la localisation.'
-                          : '📦 سيتم احتساب تكلفة التوصيل حسب الموقع.')}
-                  </div>
-                )}
-
-              {/* Password Change Fields */}
-              <div className="space-y-3 pt-3 border-t border-slate-200">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Lock size={14} className="text-[#a82340]" />
-                  <span>{lang === 'fr' ? 'Changer le mot de passe (Optionnel) :' : 'تغيير كلمة المرور (اختياري) :'}</span>
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <input
-                      type="password"
-                      placeholder={lang === 'fr' ? 'Nouveau mot de passe' : 'كلمة المرور الجديدة'}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-mono focus:outline-hidden focus:border-brand-cyan"
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="password"
-                      placeholder={lang === 'fr' ? 'Confirmer le mot de passe' : 'تأكيد كلمة المرور الجديدة'}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-mono focus:outline-hidden focus:border-brand-cyan"
-                    />
-                  </div>
+              {/* Delivery badge */}
+              {selectedCommune && (
+                <div
+                  className={`mt-2 flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border ${
+                    freeDelivery
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : 'bg-amber-50 border-amber-200 text-amber-700'
+                  }`}
+                >
+                  <Truck size={14} className="shrink-0" />
+                  {freeDelivery
+                    ? (lang === 'fr'
+                        ? '🎉 Livraison GRATUITE — Commune de Djelfa !'
+                        : '🎉 التوصيل مجاني — بلدية الجلفة!')
+                    : (lang === 'fr'
+                        ? '📦 Des frais de livraison s\'appliqueront selon la localisation.'
+                        : '📦 سيتم احتساب تكلفة التوصيل حسب الموقع.')}
                 </div>
-              </div>
+              )}
 
               {/* Action Buttons */}
-              <div className="flex gap-3 pt-4">
+              <div className="flex gap-3 pt-4 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowProfileModal(false)}
@@ -874,12 +1011,95 @@ export default function DoctorDashboard({
                 <button
                   type="submit"
                   disabled={savingProfile}
-                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white bg-brand-cyan hover:bg-brand-cyan/90 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white bg-brand-cyan hover:bg-brand-cyan/90 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                 >
                   {savingProfile ? (
-                    <span>{lang === 'fr' ? 'Enregistrement...' : 'جاري الحفظ...'}</span>
+                    <span>{lang === 'fr' ? 'Envoi en cours...' : 'جاري الإرسال...'}</span>
                   ) : (
-                    <span>{lang === 'fr' ? 'Enregistrer' : 'حفظ التعديلات'}</span>
+                    <span>{lang === 'fr' ? 'Envoyer la demande' : 'إرسال طلب التعديل للإدارة'}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Direct Password Change Modal (Instant) */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-extrabold text-slate-800 text-base md:text-lg flex items-center gap-2">
+                <Key size={20} className="text-amber-500" />
+                {lang === 'fr' ? 'Changer mon mot de passe' : 'تغيير كلمة المرور'}
+              </h3>
+              <button
+                onClick={() => setShowPasswordModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdatePassword} className="p-6 space-y-4">
+              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                {lang === 'fr'
+                  ? 'Vous pouvez modifier votre mot de passe directement sans avoir besoin de l\'approbation de l\'administration.'
+                  : 'يمكنك تغيير وتحديث كلمة المرور لحسابك بشكل فوري ومباشر دون الحاجة لموافقة الإدارة.'}
+              </p>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  {lang === 'fr' ? 'Nouveau mot de passe' : 'كلمة المرور الجديدة'}
+                </label>
+                <div className="relative">
+                  <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-10 text-sm focus:outline-hidden focus:border-brand-cyan font-mono ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  {lang === 'fr' ? 'Confirmer le mot de passe' : 'تأكيد كلمة المرور الجديدة'}
+                </label>
+                <div className="relative">
+                  <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
+                  <input
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-10 text-sm focus:outline-hidden focus:border-brand-cyan font-mono ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPassword}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-sm text-white bg-amber-500 hover:bg-amber-600 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                >
+                  {savingPassword ? (
+                    <span>{lang === 'fr' ? 'Mise à jour...' : 'جاري التحديث...'}</span>
+                  ) : (
+                    <span>{lang === 'fr' ? 'Mettre à jour' : 'تحديث كلمة المرور'}</span>
                   )}
                 </button>
               </div>

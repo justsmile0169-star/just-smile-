@@ -37,35 +37,41 @@ service cloud.firestore {
 
     // User Profiles
     match /users/{userId} {
-      // Allow get for authenticated users (own profile only) or staff
+      // Allow get for own profile only or staff (strictly forbidden for unauthenticated visitors or other users)
       allow get: if isStaff() || (isAuthenticated() && request.auth.uid == userId);
-      // Allow list queries for all users (needed for login system)
-      allow list: if true;
-      // Allow create for doctors (self-registration) — auto-activated (status: active)
+      // Allow list queries for staff only (strictly forbidden for public visitors and doctors)
+      allow list: if isStaff();
+
+      // Allow self-registration for doctors only (status active or pending, role MUST be doctor)
+      // Normal users CANNOT create admin or staff accounts!
       allow create: if isAuthenticated() && request.auth.uid == userId &&
                       request.resource.data.role == 'doctor' &&
                       request.resource.data.status in ['pending', 'active'];
-      // Allow create for any authenticated user creating their own document
-      // (covers Google Sign-in profile migration for staff accounts)
-      allow create: if isAuthenticated() && request.auth.uid == userId &&
-                      request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'] &&
-                      request.resource.data.status in ['pending', 'active'];
-      // Allow admin to create staff accounts
+
+      // Only Admin can create staff accounts (admin, manager, cashier, accountant)
       allow create: if isAdmin() &&
                       request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];
+
       // Allow update:
-      // - Admin can update any user profile (including doctor approval/rejection)
-      // - Any authenticated user can update their own profile
-      // - Staff (manager, cashier, accountant) can update their own profile
-      // NOTE: isAdmin() checks request.auth.uid's Firestore doc for role=='admin'.
-      //       If the admin's Firebase Auth UID differs from their original Firestore UID,
-      //       the setDoc in AuthView.tsx creates a new doc at the Firebase Auth UID — ensure that runs.
-      allow update: if isAdmin() || isManagerOrAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      // 1. Admin can update any profile (including role, credit status, grace days, etc.)
+      // 2. Manager can update doctor profiles
+      // 3. Doctor completing profile initial setup after first Google Sign-in
+      // 4. Authenticated Doctor updating their own password or last login ONLY (cannot touch role, name, phone, clinic, location, credit permissions!)
+      // 5. Staff updating their own password or last login
+      allow update: if isAdmin() ||
+                      (isManagerOrAdmin() && resource.data.role == 'doctor') ||
+                      (isAuthenticated() && request.auth.uid == userId && resource.data.role == 'doctor' &&
+                       resource.data.isProfileComplete == false &&
+                       request.resource.data.role == 'doctor' &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'clinicName', 'location', 'wilayaCode', 'wilayaName', 'communeName', 'communeNameAscii', 'isProfileComplete', 'lastLoginAt'])) ||
+                      (isAuthenticated() && request.auth.uid == userId &&
+                       request.resource.data.role == resource.data.role &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['password', 'lastLoginAt']));
+
       // Allow delete for admins only
       allow delete: if isAdmin();
+
       // ── Bootstrap: allow setting password for accounts that have none yet ──
-      // This allows the first-time admin setup without authentication.
-      // Only allows updating the single 'password' field when it doesn't exist.
       allow update: if !('password' in resource.data) &&
                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['password']) &&
                       request.resource.data.password is string &&
@@ -76,8 +82,10 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true;
       allow create, delete: if isManagerOrAdmin();
+      // Only manager/admin can update product prices/details.
+      // Customer orders can ONLY decrement/increment stock, salesCount, and variants.
       allow update: if isManagerOrAdmin() || (
-        request.resource.data.diff(resource.data).affectedKeys().hasAny(['stock', 'salesCount', 'variants'])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'salesCount', 'variants'])
       );
     }
     
@@ -86,7 +94,13 @@ service cloud.firestore {
       allow get: if true;
       allow list: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow create: if true;
-      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.status == resource.data.status);
+      // Staff can update orders. Doctors can only cancel their own order (cannot modify financial totals)
+      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (
+        isAuthenticated() && resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'cancelled' &&
+        request.resource.data.totalAmount == resource.data.totalAmount &&
+        request.resource.data.paidAmount == resource.data.paidAmount
+      );
       allow delete: if isAdmin();
     }
     
@@ -129,11 +143,29 @@ service cloud.firestore {
       allow read: if isStaff();
       allow write: if isManagerOrAdmin() || userRole() == 'accountant';
     }
+
+    // Suppliers (Fournisseurs)
+    match /suppliers/{supplierId} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
+
+    // Purchases / Purchase Invoices (Achats)
+    match /purchases/{purchaseId} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
+
+    // Supplier Payments (Paiements Fournisseurs)
+    match /supplier_payments/{paymentId} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
     
     // Activity Logs
     match /activity_logs/{logId} {
       allow read: if isStaff();
-      allow create: if isStaff();
+      allow create: if isStaff() || isAuthenticated();
       allow update, delete: if isAdmin();
     }
     
@@ -155,6 +187,14 @@ service cloud.firestore {
     match /announcements/{announcementId} {
       allow read: if true;
       allow create, update, delete: if isManagerOrAdmin() || (isAuthenticated() && userExists() && userRole() == 'cashier');
+    }
+
+    // Profile Update Requests (from doctors to admin)
+    match /profile_update_requests/{requestId} {
+      allow read: if isStaff() || (isAuthenticated() && resource.data.doctorId == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.doctorId == request.auth.uid && request.resource.data.status == 'pending';
+      allow update: if isStaff();
+      allow delete: if isStaff() || (isAuthenticated() && resource.data.doctorId == request.auth.uid && resource.data.status == 'pending');
     }
   }
 }

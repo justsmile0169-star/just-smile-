@@ -260,3 +260,102 @@ export interface Announcement {
   expiresAt?: string;     // Optional expiry date ISO string
   order?: number;         // Display order (lower = first)
 }
+
+// ── Suppliers & Purchases (Fournisseurs & Achats) ──────────────────────────────
+export interface Supplier {
+  id: string;
+  name: string;
+  companyName?: string;
+  phone: string;
+  phone2?: string;
+  email?: string;
+  address?: string;
+  wilaya?: string;
+  initialDebt?: number; // Previous/Opening balance (الرصيد الافتتاحي أو مشتريات سابقة غير مسجلة تفصيلياً)
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PurchaseItem {
+  productId?: string;
+  productName: string;
+  quantity: number;
+  purchasePrice: number;
+  salePrice?: number;
+  totalPrice: number;
+  expiryDate?: string;
+  barcode?: string;
+  variantId?: string;
+  variantName?: string;
+}
+
+export interface PurchaseInvoice {
+  id: string;
+  invoiceNumber?: string; // N° de bon / facture fournisseur
+  supplierId: string;
+  supplierName: string;
+  date: string;
+  items: PurchaseItem[];
+  totalAmount: number;
+  paidAmount: number;
+  remainingDebt: number;
+  paymentStatus: 'paid' | 'partial' | 'unpaid';
+  paymentMethod?: 'cash' | 'check' | 'bank_transfer' | 'credit';
+  checkNumber?: string;
+  updateStock?: boolean;
+  notes?: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface SupplierPayment {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  purchaseId?: string; // Optional link to specific purchase invoice
+  amount: number;
+  paymentDate: string;
+  paymentMethod: 'cash' | 'check' | 'bank_transfer' | 'other';
+  checkNumber?: string;
+  notes?: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface ProfileUpdateRequest {
+  id: string;
+  doctorId: string;
+  doctorName: string;
+  doctorEmail: string;
+  doctorPhone: string;
+  currentData: {
+    name: string;
+    phone: string;
+    clinicName: string;
+    location: string;
+    wilayaCode?: string;
+    wilayaName?: string;
+    communeName?: string;
+    communeNameAscii?: string;
+  };
+  requestedChanges: {
+    name: string;
+    phone: string;
+    clinicName: string;
+    location: string;
+    wilayaCode?: string;
+    wilayaName?: string;
+    communeName?: string;
+    communeNameAscii?: string;
+  };
+  status: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+}
+

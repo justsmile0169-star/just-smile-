@@ -62,6 +62,27 @@ export default function CartView({
 
   const [notes, setNotes] = useState('');
   const [success, setSuccess] = useState(false);
+
+  // Scroll to top immediately when order success / thank you screen is shown
+  useEffect(() => {
+    if (success) {
+      const scrollToTop = () => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      };
+      scrollToTop();
+      const raf = requestAnimationFrame(scrollToTop);
+      const t1 = setTimeout(scrollToTop, 30);
+      const t2 = setTimeout(scrollToTop, 100);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [success]);
+
   const [paymentMethod, setPaymentMethod] = useState<'credit' | 'cash'>('cash');
   const [deliveryOption, setDeliveryOption] = useState<'to_office' | 'to_clinic'>('to_clinic');
   const [scheduledDeliveryDate, setScheduledDeliveryDate] = useState<string>('');
@@ -415,6 +436,9 @@ export default function CartView({
         }).catch(console.error);
       }
 
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
       setSuccess(true);
       onClearCart();
     } catch (err) {
@@ -461,6 +485,9 @@ export default function CartView({
           <div className="pt-3">
             <button
               onClick={() => {
+                window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+                document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+                document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
                 setSuccess(false);
                 onCheckoutSuccess();
                 setActiveTab('browse');

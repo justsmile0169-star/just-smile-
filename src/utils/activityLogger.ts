@@ -10,7 +10,11 @@ export type ActivityEntity =
   | 'promotion'
   | 'user'
   | 'backup'
-  | 'invoice';
+  | 'invoice'
+  | 'supplier'
+  | 'purchase'
+  | 'supplier_payment'
+  | 'profile_request';
 
 export async function logActivity(
   user: UserProfile | null,

@@ -7,7 +7,7 @@ import {
 import { auth, db } from './firebase';
 import {
   UserProfile, Product, ProductVariant, CartItem, Order, AppNotification, ShopInfo, Payment, ProductReturn,
-  Promotion, Expense, ActivityLog, AdminMessage
+  Promotion, Expense, ActivityLog, AdminMessage, Supplier, PurchaseInvoice, SupplierPayment, ProfileUpdateRequest
 } from './types';
 import { canAccessAdmin } from './utils/permissions';
 import { Language, getTranslation } from './translations';
@@ -102,6 +102,10 @@ export default function App() {
   const [expensesList, setExpensesList] = useState<Expense[]>([]);
   const [activityLogsList, setActivityLogsList] = useState<ActivityLog[]>([]);
   const [adminMessagesList, setAdminMessagesList] = useState<AdminMessage[]>([]);
+  const [suppliersList, setSuppliersList] = useState<Supplier[]>([]);
+  const [purchasesList, setPurchasesList] = useState<PurchaseInvoice[]>([]);
+  const [supplierPaymentsList, setSupplierPaymentsList] = useState<SupplierPayment[]>([]);
+  const [profileUpdateRequestsList, setProfileUpdateRequestsList] = useState<ProfileUpdateRequest[]>([]);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [showBarcodePrint, setShowBarcodePrint] = useState(false);
   const [productToPrint, setProductToPrint] = useState<Product | null>(null);
@@ -679,6 +683,46 @@ export default function App() {
         setActivityLogsList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200));
       });
 
+      // Sync suppliers
+      const suppliersQuery = collection(db, 'suppliers');
+      const unsubscribeSuppliers = onSnapshot(suppliersQuery, (snapshot) => {
+        const items: Supplier[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Supplier, 'id'>) });
+        });
+        setSuppliersList(items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+      });
+
+      // Sync purchase invoices
+      const purchasesQuery = collection(db, 'purchases');
+      const unsubscribePurchases = onSnapshot(purchasesQuery, (snapshot) => {
+        const items: PurchaseInvoice[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<PurchaseInvoice, 'id'>) });
+        });
+        setPurchasesList(items.sort((a, b) => b.date.localeCompare(a.date)));
+      });
+
+      // Sync supplier payments
+      const supplierPaymentsQuery = collection(db, 'supplier_payments');
+      const unsubscribeSupplierPayments = onSnapshot(supplierPaymentsQuery, (snapshot) => {
+        const items: SupplierPayment[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<SupplierPayment, 'id'>) });
+        });
+        setSupplierPaymentsList(items.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)));
+      });
+
+      // Sync doctor profile update requests
+      const profileRequestsQuery = collection(db, 'profile_update_requests');
+      const unsubscribeProfileRequests = onSnapshot(profileRequestsQuery, (snapshot) => {
+        const items: ProfileUpdateRequest[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ProfileUpdateRequest, 'id'>) });
+        });
+        setProfileUpdateRequestsList(items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+      });
+
       // Sync admin messages (only for admin role)
       let unsubscribeMessages = () => { };
       if (currentUser.role === 'admin') {
@@ -716,6 +760,10 @@ export default function App() {
         unsubscribePromotions();
         unsubscribeExpenses();
         unsubscribeLogs();
+        unsubscribeSuppliers();
+        unsubscribePurchases();
+        unsubscribeSupplierPayments();
+        unsubscribeProfileRequests();
         unsubscribeMessages();
         unsubscribeNotifications();
       };
@@ -1162,6 +1210,10 @@ export default function App() {
                     activityLogsList={activityLogsList}
                     productsList={products}
                     adminMessagesList={adminMessagesList}
+                    suppliersList={suppliersList}
+                    purchasesList={purchasesList}
+                    supplierPaymentsList={supplierPaymentsList}
+                    profileUpdateRequestsList={profileUpdateRequestsList}
                     shopInfo={shopInfo}
                     onShopInfoChange={setShopInfo}
                     onRefreshData={() => { }}
