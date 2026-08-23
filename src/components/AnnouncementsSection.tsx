@@ -15,8 +15,8 @@ const isVideoSource = (src?: string) => {
   return src.startsWith('data:video/') || src.match(/\.(mp4|webm|ogg|mov|avi)($|\?)/i) != null;
 };
 
-// Compress image function using HTML Canvas to stay under 150KB (safe for Firestore's 1MB limit)
-const compressImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.6): Promise<string> => {
+// Compress image function using HTML Canvas to strictly stay under 400KB (safe for Firestore's 1MB document limit)
+const compressImage = (file: File, maxWidth = 1000, maxHeight = 1000, initialQuality = 0.75): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -24,7 +24,6 @@ const compressImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.
       const img = new Image();
       img.src = event.target?.result as string;
       img.onload = () => {
-        const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
 
@@ -40,6 +39,7 @@ const compressImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.
           }
         }
 
+        const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
 
@@ -50,7 +50,28 @@ const compressImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.
         }
 
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+        // Iteratively reduce quality if needed to ensure base64 is well under 500KB
+        let quality = initialQuality;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+        while (dataUrl.length > 500000 && quality > 0.15) {
+          quality -= 0.1;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+
+        // If still large, downscale dimensions
+        if (dataUrl.length > 500000) {
+          const scaledCanvas = document.createElement('canvas');
+          scaledCanvas.width = Math.round(width * 0.65);
+          scaledCanvas.height = Math.round(height * 0.65);
+          const scaledCtx = scaledCanvas.getContext('2d');
+          if (scaledCtx) {
+            scaledCtx.drawImage(img, 0, 0, scaledCanvas.width, scaledCanvas.height);
+            dataUrl = scaledCanvas.toDataURL('image/jpeg', 0.5);
+          }
+        }
+
         resolve(dataUrl);
       };
       img.onerror = (err) => reject(err);
@@ -133,8 +154,14 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
     setLoading(true);
     try {
       if (f.type.startsWith('video/')) {
-        if (f.size > 10 * 1024 * 1024) {
-          alert(lang === 'fr' ? 'Fichier vidéo trop lourd (max 10 Mo).' : 'حجم الفيديو كبير جداً (10 ميغا كحد أقصى).', 'error');
+        // Direct Base64 video storage in Firestore has a strict 1MB doc limit.
+        if (f.size > 650 * 1024) {
+          alert(
+            lang === 'fr'
+              ? 'Fichier vidéo trop volumineux pour être intégré directement (max 650 Ko). Pour les vidéos plus volumineuses, collez un lien URL direct (https://...).'
+              : 'حجم الفيديو كبير جداً للتخزين المباشر (أقصى حد 650 كيلوبايت). للفيديوهات الأكبر حجماً، يرجى وضع رابط فيديو مباشر (https://...).',
+            'error'
+          );
           return;
         }
         const r = new FileReader();
@@ -172,6 +199,17 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
       alert(lang==='fr'?'Titre requis.':'العنوان مطلوب.','error'); 
       return; 
     }
+
+    if (imgUrl && imgUrl.startsWith('data:') && imgUrl.length > 950000) {
+      alert(
+        lang === 'fr'
+          ? 'L\'image ou la vidéo sélectionnée est trop volumineuse pour Firestore (max ~700 Ko). Veuillez choisir un fichier plus léger ou utiliser un lien URL externe.'
+          : 'الصورة أو الفيديو المختار كبير جداً ويتجاوز حد قاعدة البيانات (1 ميغابايت). يرجى اختيار ملف أصغر أو وضع رابط مباشر.',
+        'error'
+      );
+      return;
+    }
+
     setLoading(true);
     try {
       const rawPayload = { 
