@@ -1548,7 +1548,7 @@ export default function AdminDashboard({
               <div>
                 <p className="text-xs text-slate-400 font-bold uppercase">{lang === 'fr' ? 'Chiffre d\'affaires' : 'إجمالي المبيعات'}</p>
                 <h3 className="text-xl font-black text-brand-dark mt-1">
-                  {formatPrice(ordersList.filter(o => o.status !== 'cancelled').reduce((sum, o) => sum + o.totalAfterDiscount, 0))}
+                  {formatPrice(ordersList.filter(o => o.status !== 'cancelled').reduce((sum, o) => sum + Math.max(0, o.totalAfterDiscount - (Number(o.deliveryCost) || 0)), 0))}
                 </h3>
               </div>
               <div className="p-3 bg-purple-50 text-purple-600 rounded-xl">

@@ -36,7 +36,11 @@ export default function ExpenseManager({ lang, expenses, ordersList, productsLis
 
   const { totalSales, totalPurchaseCost, grossProfit, totalExpenses, netProfit } = useMemo(() => {
     const activeOrders = ordersList.filter((o) => o.status !== 'cancelled');
-    const sales = activeOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
+    // Exclude courier delivery fee from sales & net profit
+    const sales = activeOrders.reduce(
+      (s, o) => s + Math.max(0, o.totalAfterDiscount - (Number(o.deliveryCost) || 0)),
+      0
+    );
 
     const productsMap = new Map<string, Product>();
     productsList.forEach((p) => productsMap.set(p.id, p));
@@ -117,8 +121,8 @@ export default function ExpenseManager({ lang, expenses, ordersList, productsLis
         </h3>
         <p className="text-xs text-slate-400 font-medium mt-1">
           {lang === 'fr'
-            ? 'Bilan exact : Profit Net = Ventes - Coût d\'achat des marchandises - Dépenses opérationnelles'
-            : 'الملخص المالي الفعلي: صافي الربح = إجمالي المبيعات - تكلفة شراء البضاعة - المصروفات التشغيلية'}
+            ? 'Bilan exact : Profit Net = Ventes de marchandises (hors livraison) - Coût d\'achat - Dépenses opérationnelles'
+            : 'الملخص المالي الفعلي: صافي الربح = مبيعات المنتجات الفعلية (بدون احتساب التوصيل) - تكلفة شراء البضاعة - المصروفات التشغيلية'}
         </p>
       </div>
 

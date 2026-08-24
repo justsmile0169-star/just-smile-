@@ -429,6 +429,15 @@ export function exportFinancialStatement({
                               <td style="text-align: ${isRtl ? 'left' : 'right'}; font-weight: 700; color: #0891b2;">${fmtNum(item.price * item.quantity)}</td>
                             </tr>
                           `).join('')}
+                          ${o.deliveryCost && o.deliveryCost > 0 ? `
+                            <tr style="background: #f8fafc;">
+                              <td style="font-weight: 600; color: #475569;">🚚 ${isRtl ? 'خدمة توصيل الطلب (شركة التوصيل)' : 'Frais de livraison'}</td>
+                              <td style="text-align: center; color: #64748b;">${isRtl ? 'توصيل' : 'Livraison'}</td>
+                              <td style="text-align: center; font-weight: 700; color: #0f172a;">1</td>
+                              <td style="text-align: ${isRtl ? 'left' : 'right'}; color: #475569;">${fmtNum(o.deliveryCost)}</td>
+                              <td style="text-align: ${isRtl ? 'left' : 'right'}; font-weight: 700; color: #0891b2;">${fmtNum(o.deliveryCost)}</td>
+                            </tr>
+                          ` : ''}
                         </tbody>
                       </table>
                     `}

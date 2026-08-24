@@ -48,14 +48,15 @@ export default function DoctorMap({ doctors, orders, lang }: DoctorMapProps) {
       }
     });
 
-    // Calculate sales per wilaya
+    // Calculate sales per wilaya (excluding delivery fee)
     orders.forEach(order => {
       const doctor = doctors.find(d => d.uid === order.userId);
       if (doctor?.wilayaCode && stats.has(doctor.wilayaCode)) {
         const existing = stats.get(doctor.wilayaCode)!;
+        const orderSales = Math.max(0, order.totalAfterDiscount - (Number(order.deliveryCost) || 0));
         stats.set(doctor.wilayaCode, {
           ...existing,
-          totalSales: existing.totalSales + order.totalAfterDiscount,
+          totalSales: existing.totalSales + orderSales,
           orderCount: existing.orderCount + 1
         });
       }
@@ -71,7 +72,10 @@ export default function DoctorMap({ doctors, orders, lang }: DoctorMapProps) {
   // Calculate overall statistics
   const overallStats = useMemo(() => {
     const totalDoctors = doctors.length;
-    const totalSales = orders.reduce((sum, order) => sum + order.totalAfterDiscount, 0);
+    const totalSales = orders.reduce(
+      (sum, order) => sum + Math.max(0, order.totalAfterDiscount - (Number(order.deliveryCost) || 0)),
+      0
+    );
     const totalOrders = orders.length;
     const avgSalesPerDoctor = totalDoctors > 0 ? totalSales / totalDoctors : 0;
 

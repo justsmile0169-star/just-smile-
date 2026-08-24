@@ -79,18 +79,23 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
     // Populate active orders
     let totalSales = 0;
     let totalPurchaseCost = 0;
+    let totalDeliveryFees = 0;
     const productMap = new Map<string, { name: string; qty: number; revenue: number }>();
     const dayMap = new Map<string, number>();
 
     activeOrders.forEach((o) => {
-      totalSales += o.totalAfterDiscount;
+      // Exclude courier delivery fee from store product sales and profit
+      const delivery = Number(o.deliveryCost) || 0;
+      totalDeliveryFees += delivery;
+      const orderProductSales = Math.max(0, o.totalAfterDiscount - delivery);
+      totalSales += orderProductSales;
 
       // Peak days
       if (o.createdAt) {
         const key = new Date(o.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-DZ', {
           weekday: 'short', day: '2-digit', month: 'short'
         });
-        dayMap.set(key, (dayMap.get(key) || 0) + o.totalAfterDiscount);
+        dayMap.set(key, (dayMap.get(key) || 0) + orderProductSales);
       }
 
       // Monthly assignment
@@ -109,7 +114,7 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
             });
           }
           const mData = monthlyMap.get(mKey)!;
-          mData.sales += o.totalAfterDiscount;
+          mData.sales += orderProductSales;
           mData.orderCount += 1;
         }
       }
@@ -268,6 +273,7 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
     return {
       totalSales,
       totalPurchaseCost,
+      totalDeliveryFees,
       grossProfit,
       totalExpenses,
       netProfit,
@@ -288,7 +294,7 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
         year: now.getFullYear(),
         month: now.getMonth(),
         label: lang === 'fr' ? 'Mois actuel' : 'الشهر الحالي',
-        shortLabel: '',
+        shortLabel: '---',
         sales: 0,
         purchaseCost: 0,
         grossProfit: 0,
@@ -300,7 +306,7 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
         changeVsPrevSales: null
       }
     );
-  }, [stats.monthsList, selectedMonthKey, currentMonthKey, lang, now]);
+  }, [stats.monthsList, selectedMonthKey, currentMonthKey, now, lang]);
 
   // Navigation handlers for next / previous month
   const handleNavMonth = (direction: 'prev' | 'next') => {
@@ -325,8 +331,8 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
         </h3>
         <p className="text-xs text-slate-400 font-medium mt-1">
           {lang === 'fr'
-            ? 'Calcul financier rigoureux : Profit net = Ventes totales - Coût d\'achat des produits (COGS) - Dépenses opérationnelles'
-            : 'الحسابات المالية الدقيقة: صافي الربح = إجمالي المبيعات - تكلفة شراء البضاعة المباعة - المصروفات التشغيلية'}
+            ? 'Calcul financier rigoureux : Profit net = Ventes réelles des produits (hors livraison) - Coût d\'achat (COGS) - Dépenses opérationnelles'
+            : 'الحسابات المالية الدقيقة: صافي الربح = مبيعات المنتجات الفعلية (بدون احتساب التوصيل) - تكلفة شراء البضاعة المباعة - المصروفات التشغيلية'}
         </p>
       </div>
 

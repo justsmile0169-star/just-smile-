@@ -570,6 +570,7 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                   { label: 'Total HT', val: `${fmt(totalHT)} DA` },
                   { label: 'Total Remise', val: totalRemise > 0 ? `−${fmt(totalRemise)} DA` : '—', red: totalRemise > 0 },
                   { label: `TVA (${tvaRate}%)`, val: `${fmt(montantTVA)} DA` },
+                  ...(order.deliveryCost && order.deliveryCost > 0 ? [{ label: 'Frais de livraison', val: `+${fmt(order.deliveryCost)} DA` }] : []),
                   { label: 'Total TTC', val: `${fmt(totalTTC)} DA`, bold: true, sep: true },
                 ].map((row, i) => (
                   <div key={i} style={{
