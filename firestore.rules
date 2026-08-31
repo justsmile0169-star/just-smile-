@@ -94,12 +94,12 @@ service cloud.firestore {
       allow get: if true;
       allow list: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow create: if true;
-      // Staff can update orders. Doctors can only cancel their own order (cannot modify financial totals)
+      // Staff can update orders. Doctors can only cancel their own pending order (cannot modify financial totals)
       allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (
         isAuthenticated() && resource.data.userId == request.auth.uid &&
+        resource.data.status == 'pending' &&
         request.resource.data.status == 'cancelled' &&
-        request.resource.data.totalAmount == resource.data.totalAmount &&
-        request.resource.data.paidAmount == resource.data.paidAmount
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy', 'cancelledByName'])
       );
       allow delete: if isAdmin();
     }

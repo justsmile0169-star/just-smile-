@@ -532,8 +532,8 @@ export default function App() {
       const ordersQuery = query(collection(db, 'orders'), where('userId', '==', currentUser.uid));
       unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
         const items: Order[] = [];
-        snapshot.forEach((doc) => {
-          items.push(doc.data() as Order);
+        snapshot.forEach((docSnap) => {
+          items.push({ ...(docSnap.data() as Order), id: docSnap.id });
         });
         setUserOrders(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
       }, (err) => {
@@ -1159,6 +1159,8 @@ export default function App() {
                     user={currentUser}
                     currentUser={currentUser}
                     userOrders={userOrders}
+                    allProducts={products}
+                    onAddToCart={handleAddToCart}
                     lang={lang}
                     promotions={promotionsList}
                     onUpdateQuantity={handleUpdateQuantity}

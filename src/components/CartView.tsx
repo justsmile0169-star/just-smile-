@@ -3,8 +3,8 @@ import { CartItem, UserProfile, Order, Product, Promotion } from '../types';
 import { calculatePromotionDiscount } from '../utils/promotionEngine';
 import { Language, getTranslation } from '../translations';
 import { db } from '../firebase';
-import { collection, addDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
-import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, AlertTriangle, CheckCircle, Truck, User, Phone, MapPin, ChevronDown, LogIn, Sparkles, Percent, DollarSign } from 'lucide-react';
+import { collection, addDoc, setDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ShieldAlert, AlertTriangle, CheckCircle, Truck, User, Phone, MapPin, ChevronDown, LogIn, Sparkles, Percent, DollarSign, Search, Check, Layers } from 'lucide-react';
 import { useAppDialog } from '../context/AppDialogContext';
 import {
   isFreeDelivery, getDeliveryPricing, getWilayas, getCommunesByWilaya,
@@ -21,6 +21,8 @@ interface CartViewProps {
   userOrders: Order[];
   lang: Language;
   promotions?: Promotion[];
+  allProducts?: Product[];
+  onAddToCart?: (product: Product, selectedVariant?: ProductVariant) => void;
   onUpdateQuantity: (productId: string, qty: number) => void;
   onRemoveItem: (productId: string) => void;
   onClearCart: () => void;
@@ -35,6 +37,8 @@ export default function CartView({
   userOrders,
   lang,
   promotions = [],
+  allProducts = [],
+  onAddToCart,
   onUpdateQuantity,
   onRemoveItem,
   onClearCart,
@@ -146,6 +150,40 @@ export default function CartView({
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
   };
 
+  // --- Quick Product Direct Search State ---
+  const [quickSearch, setQuickSearch] = useState('');
+  const [showQuickDropdown, setShowQuickDropdown] = useState(false);
+  const [recentlyAddedQuickId, setRecentlyAddedQuickId] = useState<string | null>(null);
+  const [selectedVarProd, setSelectedVarProd] = useState<Product | null>(null);
+
+  const matchedQuickProducts = useMemo(() => {
+    if (!quickSearch.trim() || !allProducts || allProducts.length === 0) return [];
+    const q = quickSearch.trim().toLowerCase();
+    return allProducts
+      .filter((p) => !p.isDeleted)
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.category.toLowerCase().includes(q) ||
+          (p.barcode && p.barcode.toLowerCase().includes(q))
+      )
+      .slice(0, 8);
+  }, [quickSearch, allProducts]);
+
+  const handleQuickAddProduct = (prod: Product, variant?: ProductVariant) => {
+    if (prod.isVariable && !variant && prod.variants && prod.variants.length > 0) {
+      setSelectedVarProd(prod);
+      return;
+    }
+    if (onAddToCart) {
+      onAddToCart(prod, variant);
+      const trackId = variant ? `${prod.id}_${variant.id}` : prod.id;
+      setRecentlyAddedQuickId(trackId);
+      setTimeout(() => setRecentlyAddedQuickId(null), 1500);
+      setSelectedVarProd(null);
+    }
+  };
+
   // Offline mode auto-sync listener
   useEffect(() => {
     const syncOfflineOrders = async () => {
@@ -156,10 +194,8 @@ export default function CartView({
         const queued: any[] = JSON.parse(savedOffline);
         if (Array.isArray(queued) && queued.length > 0) {
           for (const ord of queued) {
-            const docRef = await addDoc(collection(db, 'orders'), ord);
-            if (docRef.id) {
-              await updateDoc(doc(db, 'orders', docRef.id), { id: docRef.id });
-            }
+            const newDocRef = doc(collection(db, 'orders'));
+            await setDoc(newDocRef, cleanFirestoreData({ ...ord, id: newDocRef.id }));
           }
           localStorage.removeItem('justsmile_offline_orders');
           alert(
@@ -285,7 +321,8 @@ export default function CartView({
       const deadlineDate = new Date();
       deadlineDate.setDate(orderDate.getDate() + 15);
 
-      const orderRef = collection(db, 'orders');
+      const newOrderDocRef = doc(collection(db, 'orders'));
+      const newOrderId = newOrderDocRef.id;
 
       const userId = user ? user.uid : `guest_${Date.now()}`;
       const doctorName = user ? user.name : guestName.trim();
@@ -295,7 +332,8 @@ export default function CartView({
       const wilayaName = user ? (user.wilayaName || '') : (selectedWilaya?.nameAr || '');
       const communeName = user ? (user.communeName || '') : (selectedCommune?.nameAr || '');
 
-      const newOrder: Omit<Order, 'id'> = {
+      const newOrder: Order = {
+        id: newOrderId,
         userId,
         doctorName,
         doctorClinic,
@@ -363,11 +401,7 @@ export default function CartView({
       };
 
       console.log('Creating order document:', newOrder);
-      const orderDoc = await addDoc(orderRef, newOrder);
-      if (!orderDoc.id) {
-        throw new Error('Failed to create order document');
-      }
-      await updateDoc(doc(db, 'orders', orderDoc.id), { id: orderDoc.id }).catch(console.error);
+      await setDoc(newOrderDocRef, cleanFirestoreData(newOrder));
 
       // Decrement inventory stock & update salesCount
       try {
@@ -503,13 +537,195 @@ export default function CartView({
   }
 
   return (
-    <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
-      <div className="flex items-center gap-2 mb-2 shrink-0">
-        <ShoppingCart className="text-brand-cyan" size={24} />
-        <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-          {getTranslation(lang, 'cart')} ({cart.length})
-        </h2>
+    <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'}>
+      <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
+        <div className="flex items-center gap-2">
+          <ShoppingCart className="text-brand-cyan" size={24} />
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+            {getTranslation(lang, 'cart')} ({cart.length})
+          </h2>
+        </div>
       </div>
+
+      {/* Quick Direct Product Search Bar */}
+      {allProducts && allProducts.length > 0 && onAddToCart && (
+        <div className="bg-white rounded-3xl p-4 md:p-5 border border-slate-100 shadow-xs space-y-3 relative z-30">
+          <div className="flex items-center justify-between">
+            <label className="text-xs md:text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <Search size={18} className="text-brand-cyan" />
+              <span>{lang === 'fr' ? 'Ajout rapide de produits par recherche directe' : 'البحث والإضافة السريعة للمنتجات مباشرة إلى الطلب / الفاتورة'}</span>
+            </label>
+            <span className="text-[11px] text-slate-400 font-bold hidden sm:inline">
+              {lang === 'fr' ? `${allProducts.length} produits disponibles` : `${allProducts.length} منتج متاح`}
+            </span>
+          </div>
+
+          <div className="relative">
+            <input
+              type="text"
+              value={quickSearch}
+              onFocus={() => setShowQuickDropdown(true)}
+              onChange={(e) => {
+                setQuickSearch(e.target.value);
+                setShowQuickDropdown(true);
+              }}
+              placeholder={
+                lang === 'fr'
+                  ? 'Tapez le nom d\'un produit, catégorie ou code-barres pour l\'ajouter...'
+                  : 'اكتب اسم المنتج، الفئة أو الباركود لإضافته فوراً...'
+              }
+              className={`w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 text-xs md:text-sm font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan focus:bg-white transition-all shadow-inner ${isRtl ? 'pr-10 pl-10' : 'pl-10 pr-10'}`}
+            />
+            <Search size={18} className={`absolute top-3.5 ${isRtl ? 'right-3.5' : 'left-3.5'} text-slate-400 pointer-events-none`} />
+            {quickSearch && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickSearch('');
+                  setShowQuickDropdown(false);
+                }}
+                className={`absolute top-3 ${isRtl ? 'left-3' : 'right-3'} p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60`}
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+
+            {/* Dropdown search results */}
+            {showQuickDropdown && quickSearch.trim().length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-h-80 overflow-y-auto z-50 divide-y divide-slate-100">
+                {matchedQuickProducts.length === 0 ? (
+                  <div className="p-4 text-center text-xs font-bold text-slate-400">
+                    {lang === 'fr' ? 'Aucun produit trouvé' : 'لم يتم العثور على أي منتج يطابق البحث'}
+                  </div>
+                ) : (
+                  matchedQuickProducts.map((p) => {
+                    const hasDiscount = (p.discountPercent || 0) > 0;
+                    const finalPrice = hasDiscount ? Math.round(p.price * (1 - p.discountPercent! / 100)) : p.price;
+                    const isAdded = recentlyAddedQuickId === p.id;
+                    const isOut = p.stock <= 0;
+
+                    return (
+                      <div
+                        key={p.id}
+                        className="p-3 hover:bg-slate-50 flex items-center justify-between gap-3 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <img
+                            src={p.image && String(p.image) !== '0' ? p.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=150'}
+                            alt={p.name}
+                            className="w-10 h-10 object-cover rounded-xl bg-slate-100 shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-xs text-slate-800 truncate">{p.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px]">
+                              <span className="bg-brand-cyan/10 text-brand-cyan px-1.5 py-0.2 rounded-md font-bold">
+                                {p.category}
+                              </span>
+                              {p.isVariable && p.variants && p.variants.length > 0 && (
+                                <span className="bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded-md font-bold flex items-center gap-0.5">
+                                  <Layers size={10} />
+                                  {p.variants.length} {lang === 'fr' ? 'variantes' : 'خيارات'}
+                                </span>
+                              )}
+                              <span className={`font-bold ${isOut ? 'text-rose-500' : 'text-slate-400'}`}>
+                                {isOut ? (lang === 'fr' ? 'Épuisé' : 'نفذت الكمية') : `${p.stock} ${lang === 'fr' ? 'en stock' : 'متوفر'}`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right">
+                            <span className="block font-black text-xs text-brand-dark">
+                              {formatPrice(finalPrice)}
+                            </span>
+                            {hasDiscount && (
+                              <span className="block text-[10px] text-slate-400 line-through">
+                                {formatPrice(p.price)}
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isOut}
+                            onClick={() => handleQuickAddProduct(p)}
+                            className={`px-3 py-1.5 rounded-xl font-extrabold text-xs transition-all flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                              isAdded
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-brand-cyan text-white hover:bg-brand-cyan/90 shadow-xs'
+                            }`}
+                          >
+                            {isAdded ? (
+                              <>
+                                <Check size={13} />
+                                <span>{lang === 'fr' ? 'Ajouté !' : 'تمت الإضافة!'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus size={13} />
+                                <span>{p.isVariable ? (lang === 'fr' ? 'Choisir' : 'اختيار') : (lang === 'fr' ? 'Ajouter' : 'إضافة')}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Variant Selector Popup if variable product selected */}
+          {selectedVarProd && selectedVarProd.variants && (
+            <div className="mt-3 p-3 bg-purple-50/70 border border-purple-200 rounded-2xl animate-in fade-in space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-purple-900 flex items-center gap-1.5">
+                  <Layers size={14} className="text-purple-600" />
+                  {lang === 'fr' ? `Choisir une variante pour "${selectedVarProd.name}" :` : `اختر النوع / المقاس لمنتج "${selectedVarProd.name}":`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedVarProd(null)}
+                  className="text-purple-700 hover:text-purple-900 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {selectedVarProd.variants.map((v) => {
+                  const isVarAdded = recentlyAddedQuickId === `${selectedVarProd.id}_${v.id}`;
+                  const isVarOut = v.stock <= 0;
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      disabled={isVarOut}
+                      onClick={() => handleQuickAddProduct(selectedVarProd, v)}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 text-left transition-all ${
+                        isVarAdded
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : isVarOut
+                          ? 'bg-slate-100 text-slate-400 border-slate-200 opacity-60 cursor-not-allowed'
+                          : 'bg-white border-purple-200 hover:border-purple-400 text-slate-800 hover:shadow-xs cursor-pointer'
+                      }`}
+                    >
+                      <div>
+                        <p className="font-extrabold">{v.name}</p>
+                        <p className="text-[10px] text-slate-500 font-semibold">{formatPrice(v.price)}</p>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-lg bg-purple-100 text-purple-800 font-bold shrink-0">
+                        {isVarAdded ? '✓' : isVarOut ? (lang === 'fr' ? 'Épuisé' : 'نفذ') : `+ ${lang === 'fr' ? 'Ajouter' : 'إضافة'}`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {cart.length === 0 ? (
         <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 space-y-4 shadow-xs">

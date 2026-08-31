@@ -318,6 +318,12 @@ export default function DoctorDashboard({
       : false;
 
   const handleCancelOrder = async (orderId: string) => {
+    if (!orderId) {
+      console.error('Error cancelling order: order ID is undefined');
+      alert(lang === 'fr' ? 'Impossible d\'annuler la commande : identifiant manquant.' : 'تعذر إلغاء الطلبية: رقم الطلب غير موجود.', 'error');
+      return;
+    }
+
     const confirmed = await confirm(lang === 'fr' ? 'Voulez-vous vraiment annuler cette commande ?' : 'هل أنت متأكد من إلغاء هذه الطلبية؟');
     if (!confirmed) return;
     
@@ -329,6 +335,7 @@ export default function DoctorDashboard({
         cancelledBy: user.uid,
         cancelledByName: user.name
       });
+      alert(lang === 'fr' ? 'Commande annulée avec succès.' : 'تم إلغاء الطلبية بنجاح.', 'success');
     } catch (error) {
       console.error('Error cancelling order:', error);
       alert(lang === 'fr' ? 'Erreur lors de l\'annulation de la commande.' : 'حدث خطأ أثناء إلغاء الطلبية.', 'error');

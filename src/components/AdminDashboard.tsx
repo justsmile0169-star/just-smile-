@@ -284,12 +284,285 @@ export default function AdminDashboard({
   const [editOrderPaidAmount, setEditOrderPaidAmount] = useState<number>(0);
   const [savingEditOrderPayment, setSavingEditOrderPayment] = useState(false);
 
+  // --- Direct Product Search in Order Edit Modal State ---
+  const [orderProductSearch, setOrderProductSearch] = useState('');
+  const [showOrderProductDropdown, setShowOrderProductDropdown] = useState(false);
+  const [orderSelectedProduct, setOrderSelectedProduct] = useState<Product | null>(null);
+  const [recentlyAddedToOrderProductId, setRecentlyAddedToOrderProductId] = useState<string | null>(null);
+
+  const matchedOrderProducts = useMemo(() => {
+    if (!orderProductSearch.trim() || !productsList || productsList.length === 0) return [];
+    const q = orderProductSearch.trim().toLowerCase();
+    return productsList
+      .filter((p) => !p.isDeleted)
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.category.toLowerCase().includes(q) ||
+          (p.barcode && p.barcode.toLowerCase().includes(q))
+      )
+      .slice(0, 10);
+  }, [orderProductSearch, productsList]);
+
+  const handleAddProductToOrderEdit = (product: Product, variant?: ProductVariant) => {
+    const finalPrice = variant?.price ?? (
+      product.discountPercent
+        ? Math.round(product.price * (1 - product.discountPercent / 100))
+        : product.price
+    );
+    const purchaseCost = variant?.purchasePrice ?? product.purchasePrice;
+
+    // Check if same product & variant already in editingOrderItems
+    const existingIndex = editingOrderItems.findIndex(
+      (it) => it.productId === product.id && (variant ? it.variantId === variant.id : !it.variantId)
+    );
+
+    if (existingIndex >= 0) {
+      setEditingOrderItems((prev) => {
+        const updated = [...prev];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: updated[existingIndex].quantity + 1
+        };
+        return updated;
+      });
+    } else {
+      const newItem: Order['items'][0] = {
+        productId: product.id,
+        name: product.name,
+        price: finalPrice,
+        quantity: 1,
+        category: product.category,
+        discountPercent: product.discountPercent || 0,
+        ...(variant ? {
+          variantId: variant.id,
+          variantName: variant.name,
+          variantAttributes: variant.attributes
+        } : {}),
+        ...(purchaseCost !== undefined && Number(purchaseCost) > 0 ? {
+          purchasePrice: Number(purchaseCost)
+        } : {})
+      };
+      setEditingOrderItems((prev) => [...prev, newItem]);
+    }
+
+    const trackId = variant ? `${product.id}_${variant.id}` : product.id;
+    setRecentlyAddedToOrderProductId(trackId);
+    setTimeout(() => setRecentlyAddedToOrderProductId(null), 1500);
+    setOrderProductSearch('');
+    setShowOrderProductDropdown(false);
+    setOrderSelectedProduct(null);
+  };
+
+  // --- Create New Order / Invoice State ---
+  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
+  const [newOrderDoctorId, setNewOrderDoctorId] = useState('');
+  const [newOrderDoctorName, setNewOrderDoctorName] = useState('');
+  const [newOrderDoctorClinic, setNewOrderDoctorClinic] = useState('');
+  const [newOrderDoctorPhone, setNewOrderDoctorPhone] = useState('');
+  const [newOrderWilayaCode, setNewOrderWilayaCode] = useState('');
+  const [newOrderWilayaName, setNewOrderWilayaName] = useState('');
+  const [newOrderCommuneName, setNewOrderCommuneName] = useState('');
+  const [newOrderPaymentMethod, setNewOrderPaymentMethod] = useState<'cash' | 'credit'>('credit');
+  const [newOrderDeliveryCost, setNewOrderDeliveryCost] = useState<number>(0);
+  const [newOrderPaidAmount, setNewOrderPaidAmount] = useState<number>(0);
+  const [newOrderNotes, setNewOrderNotes] = useState('');
+  const [newOrderItems, setNewOrderItems] = useState<Order['items']>([]);
+  const [newOrderProductSearch, setNewOrderProductSearch] = useState('');
+  const [showNewOrderProductDropdown, setShowNewOrderProductDropdown] = useState(false);
+  const [newOrderSelectedProduct, setNewOrderSelectedProduct] = useState<Product | null>(null);
+
+  const matchedNewOrderProducts = useMemo(() => {
+    if (!newOrderProductSearch.trim() || !productsList || productsList.length === 0) return [];
+    const q = newOrderProductSearch.trim().toLowerCase();
+    return productsList
+      .filter((p) => !p.isDeleted)
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.category.toLowerCase().includes(q) ||
+          (p.barcode && p.barcode.toLowerCase().includes(q))
+      )
+      .slice(0, 10);
+  }, [newOrderProductSearch, productsList]);
+
+  const handleAddProductToNewOrder = (product: Product, variant?: ProductVariant) => {
+    const finalPrice = variant?.price ?? (
+      product.discountPercent
+        ? Math.round(product.price * (1 - product.discountPercent / 100))
+        : product.price
+    );
+    const purchaseCost = variant?.purchasePrice ?? product.purchasePrice;
+
+    const existingIndex = newOrderItems.findIndex(
+      (it) => it.productId === product.id && (variant ? it.variantId === variant.id : !it.variantId)
+    );
+
+    if (existingIndex >= 0) {
+      setNewOrderItems((prev) => {
+        const updated = [...prev];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: updated[existingIndex].quantity + 1
+        };
+        return updated;
+      });
+    } else {
+      const newItem: Order['items'][0] = {
+        productId: product.id,
+        name: product.name,
+        price: finalPrice,
+        quantity: 1,
+        category: product.category,
+        discountPercent: product.discountPercent || 0,
+        ...(variant ? {
+          variantId: variant.id,
+          variantName: variant.name,
+          variantAttributes: variant.attributes
+        } : {}),
+        ...(purchaseCost !== undefined && Number(purchaseCost) > 0 ? {
+          purchasePrice: Number(purchaseCost)
+        } : {})
+      };
+      setNewOrderItems((prev) => [...prev, newItem]);
+    }
+
+    setNewOrderProductSearch('');
+    setShowNewOrderProductDropdown(false);
+    setNewOrderSelectedProduct(null);
+  };
+
+  const handleSelectDoctorForNewOrder = (doctorId: string) => {
+    setNewOrderDoctorId(doctorId);
+    const doc = usersList.find((u) => u.uid === doctorId);
+    if (doc) {
+      setNewOrderDoctorName(doc.name);
+      setNewOrderDoctorClinic(doc.clinicName || '');
+      setNewOrderDoctorPhone(doc.phone || '');
+      setNewOrderWilayaCode(doc.wilayaCode || '');
+      setNewOrderWilayaName(doc.wilayaName || '');
+      setNewOrderCommuneName(doc.communeName || '');
+    }
+  };
+
+  const handleSaveNewOrder = async () => {
+    if (!newOrderDoctorName.trim()) {
+      alert(lang === 'fr' ? 'Veuillez saisir ou choisir un médecin.' : 'يرجى اختيار الطبيب أو كتابة الاسم.', 'error');
+      return;
+    }
+    if (newOrderItems.length === 0) {
+      alert(lang === 'fr' ? 'Veuillez ajouter au moins un produit à la facture.' : 'يرجى إضافة منتج واحد على الأقل إلى الفاتورة.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const now = new Date();
+      const deadline = new Date();
+      deadline.setDate(now.getDate() + 15);
+
+      const totalBefore = newOrderItems.reduce(
+        (sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1),
+        0
+      );
+      const delivery = Number(newOrderDeliveryCost) || 0;
+      const netTotal = totalBefore + delivery;
+      const paid = Math.max(0, Number(newOrderPaidAmount) || 0);
+      const remaining = Math.max(0, netTotal - paid);
+      const paymentStatus = netTotal === 0 ? 'paid' : paid >= netTotal ? 'paid' : paid > 0 ? 'partial' : 'unpaid';
+
+      const newOrderDocRef = doc(collection(db, 'orders'));
+      const newOrderId = newOrderDocRef.id;
+
+      const orderData: Order = {
+        id: newOrderId,
+        userId: newOrderDoctorId || `guest_${Date.now()}`,
+        doctorName: newOrderDoctorName.trim(),
+        doctorClinic: newOrderDoctorClinic.trim() || 'عيادة خاصة',
+        doctorPhone: newOrderDoctorPhone.trim(),
+        items: newOrderItems,
+        totalBeforeDiscount: totalBefore,
+        discountAmount: 0,
+        totalAfterDiscount: netTotal,
+        status: 'confirmed',
+        paymentStatus: paymentStatus,
+        paidAmount: paid,
+        remainingBalance: remaining,
+        createdAt: now.toISOString(),
+        deadlineDate: deadline.toISOString(),
+        paymentMethod: newOrderPaymentMethod,
+        notes: newOrderNotes.trim(),
+        deliveryType: 'to_clinic',
+        deliveryCost: delivery,
+        doctorWilayaCode: newOrderWilayaCode,
+        doctorWilayaName: newOrderWilayaName,
+        doctorCommuneName: newOrderCommuneName,
+        processedBy: currentUser.uid,
+        processedByName: currentUser.name
+      };
+
+      await setDoc(newOrderDocRef, cleanFirestoreData(orderData));
+
+      // Decrement stock for items
+      try {
+        const batch = writeBatch(db);
+        newOrderItems.forEach((item) => {
+          const prod = productsList.find((p) => p.id === item.productId);
+          if (prod) {
+            const prodRef = doc(db, 'products', prod.id);
+            const currentStock = typeof prod.stock === 'number' ? prod.stock : 0;
+            const newStock = Math.max(0, currentStock - item.quantity);
+            const newSalesCount = (prod.salesCount || 0) + item.quantity;
+            if (prod.isVariable && item.variantId && prod.variants) {
+              const updatedVariants = prod.variants.map((v) =>
+                v.id === item.variantId ? { ...v, stock: Math.max(0, (v.stock || 0) - item.quantity) } : v
+              );
+              batch.update(prodRef, cleanFirestoreData({ stock: newStock, salesCount: newSalesCount, variants: updatedVariants }));
+            } else {
+              batch.update(prodRef, cleanFirestoreData({ stock: newStock, salesCount: newSalesCount }));
+            }
+          }
+        });
+        await batch.commit();
+      } catch (stockErr) {
+        console.warn('Stock decrement warning:', stockErr);
+      }
+
+      await logActivity(
+        currentUser,
+        'order_create',
+        'order',
+        `Créé une nouvelle facture/commande #${newOrderId.slice(-6).toUpperCase()} pour ${newOrderDoctorName}: ${netTotal} DA`,
+        newOrderId
+      );
+
+      alert(lang === 'fr' ? 'Facture créée avec succès !' : 'تم إنشاء الفاتورة والطلب بنجاح!', 'success');
+      setShowCreateOrderModal(false);
+      setNewOrderItems([]);
+      setNewOrderDoctorName('');
+      setNewOrderDoctorClinic('');
+      setNewOrderDoctorPhone('');
+      setNewOrderPaidAmount(0);
+      setNewOrderDeliveryCost(0);
+      setNewOrderNotes('');
+      onRefreshData();
+    } catch (err) {
+      console.error('Error creating order:', err);
+      alert(lang === 'fr' ? 'Erreur lors de la création de la facture.' : 'حدث خطأ أثناء إنشاء الفاتورة.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleStartEditOrder = (order: Order) => {
     setEditingOrder(order);
     setEditingOrderItems(order.items.map((item) => ({ ...item })));
     setEditingPaymentMethod(order.paymentMethod || 'credit');
     setEditingDeliveryCost(order.deliveryCost || 0);
     setEditingOrderPaidAmount(order.paidAmount || 0);
+    setOrderProductSearch('');
+    setShowOrderProductDropdown(false);
+    setOrderSelectedProduct(null);
   };
 
   const handleItemPriceChange = (index: number, newPrice: number) => {
@@ -1568,42 +1841,73 @@ export default function AdminDashboard({
                   value={orderSearchQuery}
                   onChange={(e) => setOrderSearchQuery(e.target.value)}
                   placeholder={lang === 'fr' ? 'Rechercher par N° commande, nom médecin, téléphone, clinique...' : 'ابحث برقم الطلب، اسم الطبيب، العيادة، رقم الهاتف...'}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pr-10 pl-4 text-sm focus:outline-hidden focus:border-brand-cyan"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pr-10 pl-4 text-sm focus:outline-hidden focus:border-brand-cyan font-medium text-slate-800"
                 />
               </div>
 
-              {/* Status Filter Buttons */}
-              <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 scrollbar-hide shrink-0">
-                {(['all', 'pending', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'] as const).map((st) => {
-                  const labelMap: Record<string, { ar: string; fr: string }> = {
-                    all: { ar: 'الكل', fr: 'Tous' },
-                    pending: { ar: 'قيد الانتظار', fr: 'En attente' },
-                    confirmed: { ar: 'مؤكد', fr: 'Confirmée' },
-                    preparing: { ar: 'قيد التجهيز', fr: 'Préparation' },
-                    shipped: { ar: 'تم الشحن', fr: 'Expédiée' },
-                    delivered: { ar: 'تم التسليم', fr: 'Livrée' },
-                    cancelled: { ar: 'ملغى', fr: 'Annulée' }
-                  };
-                  const count = st === 'all' ? ordersList.length : ordersList.filter(o => o.status === st).length;
-                  const isAct = orderStatusFilter === st;
+              {/* Action buttons & Status Filter */}
+              <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end flex-wrap">
+                {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier' || currentUser.role === 'accountant') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewOrderDoctorId('');
+                      setNewOrderDoctorName('');
+                      setNewOrderDoctorClinic('');
+                      setNewOrderDoctorPhone('');
+                      setNewOrderWilayaCode('');
+                      setNewOrderWilayaName('');
+                      setNewOrderCommuneName('');
+                      setNewOrderItems([]);
+                      setNewOrderPaymentMethod('credit');
+                      setNewOrderDeliveryCost(0);
+                      setNewOrderPaidAmount(0);
+                      setNewOrderNotes('');
+                      setNewOrderProductSearch('');
+                      setShowNewOrderProductDropdown(false);
+                      setNewOrderSelectedProduct(null);
+                      setShowCreateOrderModal(true);
+                    }}
+                    className="bg-brand-cyan hover:bg-brand-cyan/90 text-white px-4 py-2.5 rounded-2xl font-extrabold text-xs flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer transition-all"
+                  >
+                    <Plus size={16} />
+                    <span>{lang === 'fr' ? 'Nouvelle Facture' : 'إنشاء فاتورة جديدة'}</span>
+                  </button>
+                )}
 
-                  return (
-                    <button
-                      key={st}
-                      onClick={() => setOrderStatusFilter(st)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                        isAct
-                          ? 'bg-brand-cyan text-white shadow-xs'
-                          : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
-                      }`}
-                    >
-                      <span>{lang === 'fr' ? labelMap[st].fr : labelMap[st].ar}</span>
-                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isAct ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
+                {/* Status Filter Buttons */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-hide shrink-0">
+                  {(['all', 'pending', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'] as const).map((st) => {
+                    const labelMap: Record<string, { ar: string; fr: string }> = {
+                      all: { ar: 'الكل', fr: 'Tous' },
+                      pending: { ar: 'قيد الانتظار', fr: 'En attente' },
+                      confirmed: { ar: 'مؤكد', fr: 'Confirmée' },
+                      preparing: { ar: 'قيد التجهيز', fr: 'Préparation' },
+                      shipped: { ar: 'تم الشحن', fr: 'Expédiée' },
+                      delivered: { ar: 'تم التسليم', fr: 'Livrée' },
+                      cancelled: { ar: 'ملغى', fr: 'Annulée' }
+                    };
+                    const count = st === 'all' ? ordersList.length : ordersList.filter(o => o.status === st).length;
+                    const isAct = orderStatusFilter === st;
+
+                    return (
+                      <button
+                        key={st}
+                        onClick={() => setOrderStatusFilter(st)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                          isAct
+                            ? 'bg-brand-cyan text-white shadow-xs'
+                            : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                        }`}
+                      >
+                        <span>{lang === 'fr' ? labelMap[st].fr : labelMap[st].ar}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isAct ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -3732,11 +4036,138 @@ export default function AdminDashboard({
                 </span>
               </div>
 
+              {/* Add Product by Direct Search section */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5">
+                    <Search size={14} className="text-brand-cyan" />
+                    <span>{lang === 'fr' ? 'Ajouter un produit à la facture (Recherche directe)' : 'إضافة منتج إلى الفاتورة (بحث مباشر)'}</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-bold">
+                    {lang === 'fr' ? `${productsList.length} produits au catalogue` : `${productsList.length} منتج متاح`}
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={orderProductSearch}
+                    onFocus={() => setShowOrderProductDropdown(true)}
+                    onChange={(e) => {
+                      setOrderProductSearch(e.target.value);
+                      setShowOrderProductDropdown(true);
+                    }}
+                    placeholder={
+                      lang === 'fr'
+                        ? 'Rechercher un produit par nom, catégorie ou code-barres...'
+                        : 'ابحث عن المنتج بالاسم، الفئة أو الباركود لإضافته...'
+                    }
+                    className="w-full bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                  />
+                  {orderProductSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOrderProductSearch('');
+                        setShowOrderProductDropdown(false);
+                      }}
+                      className="absolute top-2.5 right-2.5 p-0.5 text-slate-400 hover:text-slate-600 rounded"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+
+                  {/* Dropdown Results */}
+                  {showOrderProductDropdown && orderProductSearch.trim().length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200 shadow-xl max-h-60 overflow-y-auto z-50 divide-y divide-slate-100">
+                      {matchedOrderProducts.length === 0 ? (
+                        <div className="p-3 text-center text-xs text-slate-400 font-bold">
+                          {lang === 'fr' ? 'Aucun produit trouvé' : 'لم يتم العثور على أي منتج'}
+                        </div>
+                      ) : (
+                        matchedOrderProducts.map((p) => {
+                          const hasDiscount = (p.discountPercent || 0) > 0;
+                          const effectivePrice = hasDiscount ? Math.round(p.price * (1 - p.discountPercent! / 100)) : p.price;
+                          const isJustAdded = recentlyAddedToOrderProductId === p.id;
+
+                          return (
+                            <div key={p.id} className="p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2 transition-colors">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-bold text-xs text-slate-800 truncate">{p.name}</p>
+                                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                                  <span className="bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-bold">{p.category}</span>
+                                  {p.barcode && <span className="font-mono text-slate-400">#{p.barcode}</span>}
+                                  <span className="font-black text-brand-dark">{formatPrice(effectivePrice)}</span>
+                                  <span className="text-slate-400">({p.stock} en stock)</span>
+                                </div>
+                              </div>
+
+                              <div>
+                                {p.isVariable && p.variants && p.variants.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setOrderSelectedProduct(orderSelectedProduct?.id === p.id ? null : p)}
+                                    className="px-2.5 py-1 bg-purple-100 text-purple-800 rounded-lg text-[10px] font-black hover:bg-purple-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Layers size={10} />
+                                    <span>{lang === 'fr' ? 'Variantes' : 'الخيارات'} ({p.variants.length})</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddProductToOrderEdit(p)}
+                                    className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${
+                                      isJustAdded ? 'bg-emerald-600 text-white' : 'bg-brand-cyan text-white hover:bg-brand-cyan/90'
+                                    }`}
+                                  >
+                                    {isJustAdded ? <Check size={12} /> : <Plus size={12} />}
+                                    <span>{isJustAdded ? (lang === 'fr' ? 'Ajouté' : 'تمت الإضافة') : (lang === 'fr' ? 'Ajouter' : 'إضافة')}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* If variable product selected, show its variants to pick */}
+                {orderSelectedProduct && orderSelectedProduct.variants && (
+                  <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 space-y-2">
+                    <p className="text-[11px] font-black text-purple-900">
+                      {lang === 'fr' ? `Choisir une variante pour ${orderSelectedProduct.name} :` : `اختر النوع / المقاس المطلوب لـ ${orderSelectedProduct.name}:`}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {orderSelectedProduct.variants.map((v) => (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => handleAddProductToOrderEdit(orderSelectedProduct, v)}
+                          className="p-2 bg-white rounded-lg border border-purple-200 hover:border-purple-400 text-left flex items-center justify-between text-xs font-bold transition-all cursor-pointer hover:shadow-xs"
+                        >
+                          <div>
+                            <span className="block text-slate-800">{v.name}</span>
+                            <span className="text-[10px] text-slate-500">{formatPrice(v.price)}</span>
+                          </div>
+                          <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black">
+                            + {lang === 'fr' ? 'Ajouter' : 'إضافة'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Items List */}
               <div className="space-y-2">
-                <label className="font-extrabold text-slate-700 text-xs uppercase block">
-                  {lang === 'fr' ? 'Produits de la commande' : 'منتجات الطلب'}
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="font-extrabold text-slate-700 text-xs uppercase block">
+                    {lang === 'fr' ? 'Articles de la facture' : 'منتجات الفاتورة'} ({editingOrderItems.length})
+                  </label>
+                </div>
                 <div className="space-y-2">
                   {editingOrderItems.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
@@ -3867,6 +4298,402 @@ export default function AdminDashboard({
                 {loading
                   ? (lang === 'fr' ? 'Enregistrement...' : 'جاري الحفظ...')
                   : (lang === 'fr' ? 'Enregistrer les modifications' : 'حفظ التعديلات')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Order / Invoice Modal Overlay */}
+      {showCreateOrderModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-8 animate-fade-in">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Plus size={20} className="text-brand-cyan" />
+                <span className="font-extrabold text-slate-800 text-base">
+                  {lang === 'fr' ? 'Créer une nouvelle facture / commande' : 'إنشاء فاتورة / طلب جديد'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateOrderModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 text-xs max-h-[75vh] overflow-y-auto">
+              {/* Doctor / Client Selection */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5">
+                    <User size={14} className="text-brand-cyan" />
+                    <span>{lang === 'fr' ? 'Informations du Médecin / Client' : 'بيانات الطبيب / العميل'}</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-bold">
+                    {lang === 'fr' ? 'Sélectionner ou saisir' : 'اختر من القائمة أو اكتب مباشرة'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500">{lang === 'fr' ? 'Médecin inscrit :' : 'اختر طبيباً مسجلاً :'}</label>
+                    <select
+                      value={newOrderDoctorId}
+                      onChange={(e) => handleSelectDoctorForNewOrder(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                    >
+                      <option value="">{lang === 'fr' ? '-- Médecin / Client non listé --' : '-- عميل / طبيب غير مسجل --'}</option>
+                      {usersList
+                        .filter((u) => !u.isDeleted && u.role === 'doctor')
+                        .map((doc) => (
+                          <option key={doc.uid} value={doc.uid}>
+                            {doc.name} {doc.clinicName ? `(${doc.clinicName})` : ''} - {doc.phone || ''}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500">{lang === 'fr' ? 'Nom du Médecin / Client *' : 'اسم الطبيب / العميل *'}</label>
+                    <input
+                      type="text"
+                      required
+                      value={newOrderDoctorName}
+                      onChange={(e) => setNewOrderDoctorName(e.target.value)}
+                      placeholder={lang === 'fr' ? 'Ex: Dr. Ahmed Benali' : 'مثال: د. أحمد بن علي'}
+                      className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500">{lang === 'fr' ? 'Nom de la Clinique' : 'اسم العيادة / المركز'}</label>
+                    <input
+                      type="text"
+                      value={newOrderDoctorClinic}
+                      onChange={(e) => setNewOrderDoctorClinic(e.target.value)}
+                      placeholder={lang === 'fr' ? 'Ex: Clinique Sourire' : 'مثال: عيادة النور'}
+                      className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500">{lang === 'fr' ? 'Numéro de Téléphone' : 'رقم الهاتف'}</label>
+                    <input
+                      type="text"
+                      value={newOrderDoctorPhone}
+                      onChange={(e) => setNewOrderDoctorPhone(e.target.value)}
+                      placeholder="0550000000"
+                      className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Direct Product Search & Add Section */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5">
+                    <Search size={14} className="text-brand-cyan" />
+                    <span>{lang === 'fr' ? 'Rechercher et ajouter des produits à la facture' : 'البحث وإضافة المنتجات إلى الفاتورة'}</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-bold">
+                    {lang === 'fr' ? `${productsList.length} produits au catalogue` : `${productsList.length} منتج متاح`}
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={newOrderProductSearch}
+                    onFocus={() => setShowNewOrderProductDropdown(true)}
+                    onChange={(e) => {
+                      setNewOrderProductSearch(e.target.value);
+                      setShowNewOrderProductDropdown(true);
+                    }}
+                    placeholder={
+                      lang === 'fr'
+                        ? 'Rechercher un produit par nom, catégorie ou code-barres...'
+                        : 'ابحث عن المنتج بالاسم، الفئة أو الباركود لإضافته...'
+                    }
+                    className="w-full bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                  />
+                  {newOrderProductSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewOrderProductSearch('');
+                        setShowNewOrderProductDropdown(false);
+                      }}
+                      className="absolute top-2.5 right-2.5 p-0.5 text-slate-400 hover:text-slate-600 rounded"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+
+                  {/* Dropdown Results */}
+                  {showNewOrderProductDropdown && newOrderProductSearch.trim().length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200 shadow-xl max-h-60 overflow-y-auto z-50 divide-y divide-slate-100">
+                      {matchedNewOrderProducts.length === 0 ? (
+                        <div className="p-3 text-center text-xs text-slate-400 font-bold">
+                          {lang === 'fr' ? 'Aucun produit trouvé' : 'لم يتم العثور على أي منتج'}
+                        </div>
+                      ) : (
+                        matchedNewOrderProducts.map((p) => {
+                          const hasDiscount = (p.discountPercent || 0) > 0;
+                          const effectivePrice = hasDiscount ? Math.round(p.price * (1 - p.discountPercent! / 100)) : p.price;
+
+                          return (
+                            <div key={p.id} className="p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2 transition-colors">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-bold text-xs text-slate-800 truncate">{p.name}</p>
+                                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                                  <span className="bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-bold">{p.category}</span>
+                                  {p.barcode && <span className="font-mono text-slate-400">#{p.barcode}</span>}
+                                  <span className="font-black text-brand-dark">{formatPrice(effectivePrice)}</span>
+                                  <span className="text-slate-400">({p.stock} en stock)</span>
+                                </div>
+                              </div>
+
+                              <div>
+                                {p.isVariable && p.variants && p.variants.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewOrderSelectedProduct(newOrderSelectedProduct?.id === p.id ? null : p)}
+                                    className="px-2.5 py-1 bg-purple-100 text-purple-800 rounded-lg text-[10px] font-black hover:bg-purple-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Layers size={10} />
+                                    <span>{lang === 'fr' ? 'Variantes' : 'الخيارات'} ({p.variants.length})</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddProductToNewOrder(p)}
+                                    className="px-3 py-1 rounded-lg text-xs font-black bg-brand-cyan text-white hover:bg-brand-cyan/90 transition-all flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Plus size={12} />
+                                    <span>{lang === 'fr' ? 'Ajouter' : 'إضافة'}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* If variable product selected, show its variants to pick */}
+                {newOrderSelectedProduct && newOrderSelectedProduct.variants && (
+                  <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 space-y-2">
+                    <p className="text-[11px] font-black text-purple-900">
+                      {lang === 'fr' ? `Choisir une variante pour ${newOrderSelectedProduct.name} :` : `اختر النوع / المقاس المطلوب لـ ${newOrderSelectedProduct.name}:`}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {newOrderSelectedProduct.variants.map((v) => (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => handleAddProductToNewOrder(newOrderSelectedProduct, v)}
+                          className="p-2 bg-white rounded-lg border border-purple-200 hover:border-purple-400 text-left flex items-center justify-between text-xs font-bold transition-all cursor-pointer hover:shadow-xs"
+                        >
+                          <div>
+                            <span className="block text-slate-800">{v.name}</span>
+                            <span className="text-[10px] text-slate-500">{formatPrice(v.price)}</span>
+                          </div>
+                          <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black">
+                            + {lang === 'fr' ? 'Ajouter' : 'إضافة'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Items in New Invoice */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-extrabold text-slate-700 text-xs uppercase block">
+                    {lang === 'fr' ? 'Articles de la facture' : 'منتجات الفاتورة'} ({newOrderItems.length})
+                  </label>
+                </div>
+                {newOrderItems.length === 0 ? (
+                  <div className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-center text-slate-400 font-bold text-xs">
+                    {lang === 'fr' ? 'Aucun produit ajouté. Recherchez ci-dessus pour ajouter des articles.' : 'لم تتم إضافة أي منتج بعد. ابحث في الحقل أعلاه لإضافة المنتجات.'}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {newOrderItems.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                        <div className="flex-1">
+                          <p className="font-bold text-slate-800">{item.name}</p>
+                          <p className="text-[10px] text-slate-400">{item.category} {item.variantName ? `• ${item.variantName}` : ''}</p>
+                        </div>
+                        <div className="w-24">
+                          <label className="text-[9px] font-bold text-slate-400 block">{lang === 'fr' ? 'Prix (DA)' : 'السعر (دج)'}</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.price}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setNewOrderItems((prev) => {
+                                const up = [...prev];
+                                up[idx] = { ...up[idx], price: Math.max(0, val) };
+                                return up;
+                              });
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs"
+                          />
+                        </div>
+                        <div className="w-16">
+                          <label className="text-[9px] font-bold text-slate-400 block">{lang === 'fr' ? 'Qté' : 'الكمية'}</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setNewOrderItems((prev) => {
+                                const up = [...prev];
+                                up[idx] = { ...up[idx], quantity: Math.max(1, val) };
+                                return up;
+                              });
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs text-center"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNewOrderItems((prev) => prev.filter((_, i) => i !== idx))}
+                          className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg mt-3"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Delivery cost & Payment Method & Paid Amount */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                <div className="space-y-1">
+                  <label className="font-extrabold text-slate-700 text-xs">
+                    {lang === 'fr' ? 'Frais de livraison (DA)' : 'تكلفة التوصيل (دج)'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newOrderDeliveryCost}
+                    onChange={(e) => setNewOrderDeliveryCost(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-extrabold text-slate-700 text-xs">
+                    {lang === 'fr' ? 'Montant Payé Immédiatement (DA)' : 'المبلغ المدفوع فوراً (دج)'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newOrderPaidAmount}
+                    onChange={(e) => setNewOrderPaidAmount(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-extrabold text-emerald-600 focus:outline-hidden focus:border-brand-cyan"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-extrabold text-slate-700 text-xs">
+                    {lang === 'fr' ? 'Mode de paiement' : 'طريقة الدفع'}
+                  </label>
+                  <select
+                    value={newOrderPaymentMethod}
+                    onChange={(e) => setNewOrderPaymentMethod(e.target.value as 'cash' | 'credit')}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                  >
+                    <option value="credit">{lang === 'fr' ? 'Crédit (Dette 20j)' : 'آجل (دين 20 يوم)'}</option>
+                    <option value="cash">{lang === 'fr' ? 'Comptant / Cash' : 'نقداً عند التسليم'}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1">
+                <label className="font-extrabold text-slate-700 text-xs">
+                  {lang === 'fr' ? 'Remarques / Notes internes' : 'ملاحظات الفاتورة والطلب'}
+                </label>
+                <input
+                  type="text"
+                  value={newOrderNotes}
+                  onChange={(e) => setNewOrderNotes(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Notes ou instructions de livraison...' : 'أي ملاحظات أو تعليمات خاصة...'}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-medium text-slate-800 focus:outline-hidden focus:border-brand-cyan"
+                />
+              </div>
+
+              {/* Totals Preview */}
+              {(() => {
+                const totalBefore = newOrderItems.reduce(
+                  (sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1),
+                  0
+                );
+                const delivery = Number(newOrderDeliveryCost) || 0;
+                const netTotal = totalBefore + delivery;
+                const paid = Math.max(0, Number(newOrderPaidAmount) || 0);
+                const remaining = Math.max(0, netTotal - paid);
+
+                return (
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-1.5 font-bold">
+                    <div className="flex justify-between text-slate-600">
+                      <span>{lang === 'fr' ? 'Sous-total :' : 'المجموع الفرعي :'}</span>
+                      <span>{formatPrice(totalBefore)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>{lang === 'fr' ? 'Livraison :' : 'التوصيل :'}</span>
+                      <span>+{formatPrice(delivery)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-900 font-extrabold text-sm border-t border-slate-200 pt-1.5">
+                      <span>{lang === 'fr' ? 'Total Net :' : 'الصافي الإجمالي :'}</span>
+                      <span>{formatPrice(netTotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-emerald-600">
+                      <span>{lang === 'fr' ? 'Montant payé :' : 'المبلغ المدفوع :'}</span>
+                      <span>{formatPrice(paid)}</span>
+                    </div>
+                    <div className="flex justify-between text-rose-600 font-extrabold">
+                      <span>{lang === 'fr' ? 'Reste à payer (Dette) :' : 'المتبقي (دين) :'}</span>
+                      <span>{formatPrice(remaining)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCreateOrderModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+              </button>
+              <button
+                type="button"
+                disabled={loading || newOrderItems.length === 0 || !newOrderDoctorName.trim()}
+                onClick={handleSaveNewOrder}
+                className="px-5 py-2 bg-brand-cyan hover:bg-brand-cyan/90 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl transition-all flex items-center gap-2 shadow-xs cursor-pointer"
+              >
+                <Check size={16} />
+                {loading
+                  ? (lang === 'fr' ? 'Création en cours...' : 'جاري الإنشاء...')
+                  : (lang === 'fr' ? 'Créer la Facture' : 'تأكيد وحفظ الفاتورة')}
               </button>
             </div>
           </div>
