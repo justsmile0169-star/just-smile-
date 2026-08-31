@@ -28,6 +28,7 @@ export interface UserProfile {
   password?: string; // for staff accounts login
   lastLoginAt?: string; // track last login time
   isProfileComplete?: boolean; // check if Google Auth user has completed profile details
+  isDeleted?: boolean; // Soft delete flag
 }
 
 export interface ProductVariant {

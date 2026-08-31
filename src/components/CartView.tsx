@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { CartItem, UserProfile, Order, Product, Promotion } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { CartItem, UserProfile, Order, Product, Promotion, ProductVariant } from '../types';
 import { calculatePromotionDiscount } from '../utils/promotionEngine';
 import { Language, getTranslation } from '../translations';
 import { db } from '../firebase';
