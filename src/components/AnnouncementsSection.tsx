@@ -377,6 +377,11 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                   <img
                     src={cur.imageUrl}
                     alt=""
+                    width={800}
+                    height={400}
+                    loading="eager"
+                    fetchPriority="high"
+                    decoding="async"
                     className="w-full h-full object-cover"
                   />
                 )
@@ -445,7 +450,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                       isVid ? (
                         <video src={promo.imageUrl} className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" muted />
                       ) : (
-                        <img src={promo.imageUrl} alt="" className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" />
+                        <img src={promo.imageUrl} alt="" width={64} height={64} loading="lazy" decoding="async" className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" />
                       )
                     ) : (
                       <div className="w-16 h-16 rounded-xl flex-shrink-0 bg-brand-cyan/20 flex items-center justify-center">

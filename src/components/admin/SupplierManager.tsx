@@ -523,6 +523,23 @@ export default function SupplierManager({
               if (item.salePrice && item.salePrice > 0) {
                 updateData.price = item.salePrice;
               }
+
+              if (currentProd.isVariable && currentProd.variants && currentProd.variants.length > 0) {
+                const targetVarId = item.variantId;
+                updateData.variants = currentProd.variants.map((v) => {
+                  if (targetVarId ? v.id === targetVarId : (item.variantName && v.name === item.variantName)) {
+                    const vStock = (Number(v.stock) || 0) + Number(item.quantity);
+                    return {
+                      ...v,
+                      stock: vStock,
+                      purchasePrice: Number(item.purchasePrice) || v.purchasePrice || currentProd.purchasePrice || 0,
+                      ...(item.salePrice && item.salePrice > 0 ? { price: item.salePrice } : {})
+                    };
+                  }
+                  return v;
+                });
+              }
+
               await updateDoc(prodRef, updateData);
             }
           }

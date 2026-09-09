@@ -343,8 +343,11 @@ export default function ClientSituationView({
       clientReturns.reduce((s, r) => s + r.totalAmount, 0) +
       cancelledOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
     const totalPaid = clientPayments.reduce((s, p) => s + p.amount, 0);
-    const totalDebt = activeOrders.reduce((s, o) => s + o.remainingBalance, 0);
-    return { totalPurchases, totalReturns, totalPaid, totalDebt };
+    const netBalance = (totalPurchases - totalReturns) - totalPaid;
+    const isCredit = netBalance < 0;
+    const totalDebt = Math.max(0, netBalance);
+    const clientCreditBalance = Math.max(0, -netBalance);
+    return { totalPurchases, totalReturns, totalPaid, totalDebt, netBalance, isCredit, clientCreditBalance };
   }, [activeOrders, clientReturns, cancelledOrders, clientPayments]);
 
   const formatPrice = (num: number) => {
@@ -606,10 +609,12 @@ export default function ClientSituationView({
                     color: 'text-emerald-600'
                   },
                   {
-                    label: lang === 'fr' ? 'Reste dû' : 'المتبقي',
-                    value: summary.totalDebt,
+                    label: summary.isCredit
+                      ? (lang === 'fr' ? 'Solde créditeur' : 'رصيد دائن (مسبق)')
+                      : (lang === 'fr' ? 'Reste dû' : 'المتبقي (الدين)'),
+                    value: summary.isCredit ? summary.clientCreditBalance : summary.totalDebt,
                     icon: FileText,
-                    color: 'text-rose-600'
+                    color: summary.isCredit ? 'text-emerald-600' : 'text-rose-600'
                   }
                 ].map(({ label, value, icon: Icon, color }) => (
                   <div key={label} className="bg-white border border-slate-100 rounded-2xl p-3 shadow-xs">
@@ -862,10 +867,12 @@ export default function ClientSituationView({
                 <p className="text-slate-500 text-xs">{selectedClient.clinicName || ''}</p>
                 <div className="flex justify-between items-center pt-2 border-t border-emerald-200/60 mt-2">
                   <span className="text-slate-600 font-bold">
-                    {lang === 'fr' ? 'Solde débiteur actuel :' : 'إجمالي الدين الحالي :'}
+                    {summary.isCredit
+                      ? (lang === 'fr' ? 'Solde créditeur (Avance) :' : 'الرصيد الدائن المسبق :')
+                      : (lang === 'fr' ? 'Solde débiteur actuel :' : 'إجمالي الدين الحالي :')}
                   </span>
-                  <span className="text-rose-600 font-extrabold text-sm">
-                    {formatPrice(summary.totalDebt)}
+                  <span className={`${summary.isCredit ? 'text-emerald-600' : 'text-rose-600'} font-extrabold text-sm`}>
+                    {summary.isCredit ? `+${formatPrice(summary.clientCreditBalance)}` : formatPrice(summary.totalDebt)}
                   </span>
                 </div>
               </div>

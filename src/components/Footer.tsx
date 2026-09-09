@@ -54,6 +54,10 @@ export default function Footer({ lang, shopInfo }: FooterProps) {
               <img
                 src={getLogoUrl(shopInfo.logoUrl)}
                 alt={shopInfo.companyName}
+                width={44}
+                height={44}
+                loading="lazy"
+                decoding="async"
                 className="h-11 w-auto object-contain"
               />
               <div>

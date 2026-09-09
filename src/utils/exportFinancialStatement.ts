@@ -73,7 +73,10 @@ export function exportFinancialStatement({
     returns.reduce((s, r) => s + r.totalAmount, 0) +
     cancelledOrders.reduce((s, o) => s + o.totalAfterDiscount, 0);
   const totalPaid = effectivePayments.reduce((s, p) => s + p.amount, 0);
-  const totalDebt = activeOrders.reduce((s, o) => s + o.remainingBalance, 0);
+  const netBalance = (totalPurchases - totalReturns) - totalPaid;
+  const isCredit = netBalance < 0;
+  const totalDebt = Math.max(0, netBalance);
+  const clientCreditBalance = Math.max(0, -netBalance);
 
   const reportDate = new Date().toLocaleDateString(isRtl ? 'ar-DZ' : 'fr-FR', {
     year: 'numeric',
@@ -365,9 +368,9 @@ export function exportFinancialStatement({
           <div class="label">${L.totalPaid}</div>
           <div class="val" style="color: #059669;">${fmtNum(totalPaid)}</div>
         </div>
-        <div class="summary-card" style="background: #fff1f2; border-color: #fecdd3;">
-          <div class="label" style="color: #be123c;">${L.netDebt}</div>
-          <div class="val" style="color: #e11d48;">${fmtNum(totalDebt)}</div>
+        <div class="summary-card" style="background: ${isCredit ? '#ecfdf5' : '#fff1f2'}; border-color: ${isCredit ? '#a7f3d0' : '#fecdd3'};">
+          <div class="label" style="color: ${isCredit ? '#047857' : '#be123c'};">${isCredit ? (isRtl ? 'رصيد دائن (مسبق للعميل)' : 'Solde créditeur (Avance)') : L.netDebt}</div>
+          <div class="val" style="color: ${isCredit ? '#059669' : '#e11d48'};">${isCredit ? `+${fmtNum(clientCreditBalance)}` : fmtNum(totalDebt)}</div>
         </div>
       </div>
 

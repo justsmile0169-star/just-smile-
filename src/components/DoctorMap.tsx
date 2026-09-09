@@ -48,13 +48,16 @@ export default function DoctorMap({ doctors, orders, lang }: DoctorMapProps) {
       }
     });
 
-    // Calculate sales per wilaya (excluding delivery fee)
-    orders.forEach(order => {
+    // Calculate sales per wilaya (excluding delivery fee and excluding cancelled orders)
+    const activeOrders = orders.filter(order => order.status !== 'cancelled');
+
+    activeOrders.forEach(order => {
       const doctor = doctors.find(d => d.uid === order.userId);
-      if (doctor?.wilayaCode && stats.has(doctor.wilayaCode)) {
-        const existing = stats.get(doctor.wilayaCode)!;
+      const targetWilayaCode = doctor?.wilayaCode || order.doctorWilayaCode;
+      if (targetWilayaCode && stats.has(targetWilayaCode)) {
+        const existing = stats.get(targetWilayaCode)!;
         const orderSales = Math.max(0, order.totalAfterDiscount - (Number(order.deliveryCost) || 0));
-        stats.set(doctor.wilayaCode, {
+        stats.set(targetWilayaCode, {
           ...existing,
           totalSales: existing.totalSales + orderSales,
           orderCount: existing.orderCount + 1
@@ -71,12 +74,13 @@ export default function DoctorMap({ doctors, orders, lang }: DoctorMapProps) {
 
   // Calculate overall statistics
   const overallStats = useMemo(() => {
+    const activeOrders = orders.filter(order => order.status !== 'cancelled');
     const totalDoctors = doctors.length;
-    const totalSales = orders.reduce(
+    const totalSales = activeOrders.reduce(
       (sum, order) => sum + Math.max(0, order.totalAfterDiscount - (Number(order.deliveryCost) || 0)),
       0
     );
-    const totalOrders = orders.length;
+    const totalOrders = activeOrders.length;
     const avgSalesPerDoctor = totalDoctors > 0 ? totalSales / totalDoctors : 0;
 
     return { totalDoctors, totalSales, totalOrders, avgSalesPerDoctor };

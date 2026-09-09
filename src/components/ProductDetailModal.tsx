@@ -207,6 +207,10 @@ export default function ProductDetailModal({
               <img
                 src={currentImage && String(currentImage) !== '0' ? currentImage : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
                 alt={product.name}
+                width={300}
+                height={300}
+                loading="eager"
+                decoding="async"
                 className="object-contain w-full h-full p-2"
                 referrerPolicy="no-referrer"
               />

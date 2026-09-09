@@ -530,7 +530,7 @@ export default function BrowseView({
             </button>
           )}
         </div>
-        <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-hide">
+        <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-hide max-w-full min-w-0">
           {categories.map((cat) => {
             const IconComponent = cat.icon;
             const isSelected = selectedCategory === cat.id;
@@ -538,7 +538,7 @@ export default function BrowseView({
               <button
                 key={cat.id}
                 onClick={() => setSelectedCategory(cat.id)}
-                className={`px-4.5 py-2.5 text-xs md:text-sm font-extrabold rounded-full border transition-all whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                className={`shrink-0 px-4.5 py-2.5 text-xs md:text-sm font-extrabold rounded-full border transition-all whitespace-nowrap flex items-center gap-2 cursor-pointer ${
                   isSelected
                     ? 'bg-brand-cyan text-white border-brand-cyan shadow-md shadow-brand-cyan/20 scale-[1.02]'
                     : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-brand-cyan/30 dark:hover:border-brand-cyan/50 hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -572,7 +572,7 @@ export default function BrowseView({
       ) : (
         <>
           <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-1.5 sm:gap-3 md:gap-5">
-            {displayedProducts.map((p) => (
+            {displayedProducts.map((p, idx) => (
               <ProductCard
                 key={p.id}
                 product={p}
@@ -582,6 +582,8 @@ export default function BrowseView({
                 onToggleFavorite={onToggleFavorite}
                 onViewDetails={onViewProduct}
                 user={user}
+                priority={idx < 4}
+                loading={idx < 6 ? 'eager' : 'lazy'}
               />
             ))}
           </div>

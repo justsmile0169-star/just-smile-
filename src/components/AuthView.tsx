@@ -4,7 +4,7 @@ import { doc, setDoc, getDoc, getDocFromServer, updateDoc, collection, query, wh
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
 import { UserProfile } from '../types';
-import { signInStaff } from '../utils/staffAuth';
+import { signInStaff, saveStaffSession } from '../utils/staffAuth';
 import {
   getWilayas, getCommunesByWilaya, isFreeDelivery,
   WilayaOption, CommuneOption,
@@ -219,6 +219,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
           if (userData && userData.role !== 'doctor') {
             const staffProfile = await signInStaff(storedEmail, password);
             if (staffProfile) {
+              saveStaffSession(staffProfile);
               updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
               onAuthSuccess(staffProfile);
               setLoading(false);

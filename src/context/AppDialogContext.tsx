@@ -102,7 +102,7 @@ export function AppDialogProvider({ lang, children }: { lang: Language; children
       {children}
 
       {/* Toast notifications */}
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none">
+      <div className="fixed top-4 inset-x-0 mx-auto z-[100] flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none">
         {toasts.map((t) => {
           const style = typeStyles[t.type];
           const Icon = style.icon;

@@ -74,6 +74,49 @@ export async function signInStaff(email: string, password: string): Promise<User
   }
 }
 
+const STAFF_SESSION_KEY = 'just_smile_staff_session';
+
+/**
+ * Persist staff session in localStorage
+ */
+export function saveStaffSession(user: UserProfile): void {
+  try {
+    const safeUser = { ...user };
+    delete (safeUser as any).password;
+    localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(safeUser));
+  } catch (err) {
+    console.warn('Could not save staff session to localStorage:', err);
+  }
+}
+
+/**
+ * Retrieve active staff session from localStorage
+ */
+export function getStaffSession(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(STAFF_SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as UserProfile;
+    if (data && data.uid && isStaffUser(data)) {
+      return data;
+    }
+  } catch (err) {
+    console.warn('Could not parse staff session from localStorage:', err);
+  }
+  return null;
+}
+
+/**
+ * Clear staff session from localStorage
+ */
+export function clearStaffSession(): void {
+  try {
+    localStorage.removeItem(STAFF_SESSION_KEY);
+  } catch (err) {
+    console.warn('Could not clear staff session:', err);
+  }
+}
+
 /**
  * Check if a user is a staff member
  */

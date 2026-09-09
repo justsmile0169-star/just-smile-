@@ -56,8 +56,7 @@ service cloud.firestore {
       // 1. Admin can update any profile (including role, credit status, grace days, etc.)
       // 2. Manager can update doctor profiles
       // 3. Doctor completing profile initial setup after first Google Sign-in
-      // 4. Authenticated Doctor updating their own password or last login ONLY (cannot touch role, name, phone, clinic, location, credit permissions!)
-      // 5. Staff updating their own password or last login
+      // 4. Authenticated Doctor/Staff updating their own password or last login ONLY (cannot touch role, name, phone, clinic, location, credit permissions!)
       allow update: if isAdmin() ||
                       (isManagerOrAdmin() && resource.data.role == 'doctor') ||
                       (isAuthenticated() && request.auth.uid == userId && resource.data.role == 'doctor' &&
@@ -70,12 +69,6 @@ service cloud.firestore {
 
       // Allow delete for admins only
       allow delete: if isAdmin();
-
-      // ── Bootstrap: allow setting password for accounts that have none yet ──
-      allow update: if !('password' in resource.data) &&
-                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['password']) &&
-                      request.resource.data.password is string &&
-                      request.resource.data.password.size() > 20;
     }
     
     // Products
@@ -83,9 +76,9 @@ service cloud.firestore {
       allow read: if true;
       allow create, delete: if isManagerOrAdmin();
       // Only manager/admin can update product prices/details.
-      // Customer orders can ONLY decrement/increment stock, salesCount, and variants.
+      // Customer orders can only decrement/increment stock, salesCount, and variants when authenticated.
       allow update: if isManagerOrAdmin() || (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'salesCount', 'variants'])
+        isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'salesCount', 'variants'])
       );
     }
     
@@ -113,7 +106,7 @@ service cloud.firestore {
     // Notifications
     match /notifications/{notificationId} {
       allow read: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if true;
+      allow create: if isStaff() || isAuthenticated();
       allow update: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']));
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
     }

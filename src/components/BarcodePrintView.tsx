@@ -57,7 +57,7 @@ export default function BarcodePrintView({ product, lang, onClose }: BarcodePrin
 
         <div className="p-6 flex flex-col items-center gap-4">
           <div id="barcode-label-print" className="border border-slate-200 rounded-xl p-4 bg-white w-full max-w-[220px]">
-            {qrUrl && <img src={qrUrl} alt="Barcode" className="mx-auto w-32 h-32" />}
+            {qrUrl && <img src={qrUrl} alt="Barcode" width={128} height={128} loading="eager" decoding="async" className="mx-auto w-32 h-32" />}
             <p className="name text-xs font-bold text-slate-800 mt-2 text-center leading-tight">{product.name}</p>
             <p className="code text-center font-mono text-sm text-slate-600 mt-1">{code}</p>
             <p className="price text-center text-sm font-black text-brand-cyan mt-1">{fmt(product.price)}</p>

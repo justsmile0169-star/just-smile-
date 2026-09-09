@@ -86,9 +86,6 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
       setNewStaffPassword('');
       setNewStaffRole('cashier');
       setShowAddForm(false);
-
-      // Trigger refresh by calling parent's onRefreshData if available
-      window.location.reload();
     } catch (err) {
       console.error(err);
       alert(lang === 'fr' ? 'Erreur lors de la création.' : 'حدث خطأ أثناء الإنشاء.', 'error');

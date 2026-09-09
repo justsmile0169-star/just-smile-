@@ -503,26 +503,51 @@ export default function AdminDashboard({
 
       await setDoc(newOrderDocRef, cleanFirestoreData(orderData));
 
-      // Decrement stock for items
+      // Decrement stock for items (aggregated by product ID to avoid batch duplicates)
       try {
-        const batch = writeBatch(db);
+        const productUpdatesMap = new Map<string, {
+          product: Product;
+          totalDeductQty: number;
+          variantDeductions: Map<string, number>;
+        }>();
+
         newOrderItems.forEach((item) => {
           const prod = productsList.find((p) => p.id === item.productId);
           if (prod) {
-            const prodRef = doc(db, 'products', prod.id);
-            const currentStock = typeof prod.stock === 'number' ? prod.stock : 0;
-            const newStock = Math.max(0, currentStock - item.quantity);
-            const newSalesCount = (prod.salesCount || 0) + item.quantity;
-            if (prod.isVariable && item.variantId && prod.variants) {
-              const updatedVariants = prod.variants.map((v) =>
-                v.id === item.variantId ? { ...v, stock: Math.max(0, (v.stock || 0) - item.quantity) } : v
-              );
-              batch.update(prodRef, cleanFirestoreData({ stock: newStock, salesCount: newSalesCount, variants: updatedVariants }));
-            } else {
-              batch.update(prodRef, cleanFirestoreData({ stock: newStock, salesCount: newSalesCount }));
+            if (!productUpdatesMap.has(prod.id)) {
+              productUpdatesMap.set(prod.id, {
+                product: prod,
+                totalDeductQty: 0,
+                variantDeductions: new Map<string, number>()
+              });
+            }
+            const entry = productUpdatesMap.get(prod.id)!;
+            entry.totalDeductQty += item.quantity;
+            if (item.variantId) {
+              const currentVarDeduct = entry.variantDeductions.get(item.variantId) || 0;
+              entry.variantDeductions.set(item.variantId, currentVarDeduct + item.quantity);
             }
           }
         });
+
+        const batch = writeBatch(db);
+        productUpdatesMap.forEach(({ product, totalDeductQty, variantDeductions }) => {
+          const prodRef = doc(db, 'products', product.id);
+          const currentStock = typeof product.stock === 'number' ? product.stock : 0;
+          const newStock = Math.max(0, currentStock - totalDeductQty);
+          const newSalesCount = (product.salesCount || 0) + totalDeductQty;
+
+          if (product.isVariable && product.variants && product.variants.length > 0) {
+            const updatedVariants = product.variants.map((v) => {
+              const deduct = variantDeductions.get(v.id) || 0;
+              return deduct > 0 ? { ...v, stock: Math.max(0, (v.stock || 0) - deduct) } : v;
+            });
+            batch.update(prodRef, cleanFirestoreData({ stock: newStock, salesCount: newSalesCount, variants: updatedVariants }));
+          } else {
+            batch.update(prodRef, cleanFirestoreData({ stock: newStock, salesCount: newSalesCount }));
+          }
+        });
+
         await batch.commit();
       } catch (stockErr) {
         console.warn('Stock decrement warning:', stockErr);
@@ -1587,10 +1612,10 @@ export default function AdminDashboard({
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
 
       {/* Sub Tabs Selection Navigation Bar */}
-      <div className="flex border-b border-slate-100 bg-white p-2 rounded-2xl shadow-xs gap-1.5 overflow-x-auto shrink-0 scrollbar-hide">
+      <div className="flex w-full max-w-full min-w-0 border-b border-slate-100 bg-white p-2 rounded-2xl shadow-xs gap-1.5 overflow-x-auto scrollbar-hide">
         <button
           onClick={() => setActiveSubTab('orders')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'orders'
+          className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'orders'
               ? 'bg-brand-cyan text-white shadow-xs'
               : 'text-slate-500 hover:bg-slate-50'
             }`}
@@ -1605,14 +1630,14 @@ export default function AdminDashboard({
         </button>
 
         {hasPermission(currentUser, 'view_analytics') && (
-          <button onClick={() => setActiveSubTab('analytics')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'analytics' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('analytics')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'analytics' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <BarChart3 size={16} />{lang === 'fr' ? 'Analytics' : 'التحليلات'}
           </button>
         )}
         {hasPermission(currentUser, 'view_doctors') && (
           <button
             onClick={() => setActiveSubTab('doctors')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'doctors'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'doctors'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1630,7 +1655,7 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'view_client_situation') && (
           <button
             onClick={() => setActiveSubTab('clientSituation')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'clientSituation'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'clientSituation'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1643,7 +1668,7 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'manage_payments') && (
           <button
             onClick={() => setActiveSubTab('debts')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'debts'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'debts'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1656,7 +1681,7 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'manage_inventory') && (
           <button
             onClick={() => setActiveSubTab('inventory')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'inventory'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'inventory'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1669,7 +1694,7 @@ export default function AdminDashboard({
         {hasPermission(currentUser, 'view_suppliers') && (
           <button
             onClick={() => setActiveSubTab('suppliers')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'suppliers'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'suppliers'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1685,29 +1710,29 @@ export default function AdminDashboard({
         )}
 
         {hasPermission(currentUser, 'manage_promotions') && (
-          <button onClick={() => setActiveSubTab('promotions')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'promotions' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('promotions')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'promotions' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Tag size={16} />{lang === 'fr' ? 'Promotions' : 'العروض'}
           </button>
         )}
         {hasPermission(currentUser, 'view_analytics') && (
-          <button onClick={() => setActiveSubTab('catalog')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'catalog' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('catalog')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'catalog' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <FileText size={16} />{lang === 'fr' ? 'Catalogue' : 'كتالوج'}
           </button>
         )}
         {hasPermission(currentUser, 'view_analytics') && (
-          <button onClick={() => setActiveSubTab('doctorsMap')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctorsMap' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('doctorsMap')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctorsMap' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <MapPin size={16} />{lang === 'fr' ? 'Carte Médecins' : 'خريطة الأطباء'}
           </button>
         )}
         {hasPermission(currentUser, 'view_expenses') && (
-          <button onClick={() => setActiveSubTab('expenses')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'expenses' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('expenses')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'expenses' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Wallet size={16} />{lang === 'fr' ? 'Dépenses' : 'المصروفات'}
           </button>
         )}
         {hasPermission(currentUser, 'view_doctors') && (
           <button
             onClick={() => setActiveSubTab('discounts')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'discounts'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'discounts'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1718,24 +1743,24 @@ export default function AdminDashboard({
         )}
 
         {hasPermission(currentUser, 'manage_staff') && (
-          <button onClick={() => setActiveSubTab('staff')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'staff' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('staff')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'staff' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Shield size={16} />{lang === 'fr' ? 'Rôles' : 'الصلاحيات'}
           </button>
         )}
         {hasPermission(currentUser, 'view_activity_logs') && (
-          <button onClick={() => setActiveSubTab('activityLogs')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'activityLogs' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('activityLogs')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'activityLogs' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <History size={16} />{lang === 'fr' ? 'Journal' : 'السجل'}
           </button>
         )}
         {hasPermission(currentUser, 'manage_backup') && (
-          <button onClick={() => setActiveSubTab('backup')} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'backup' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => setActiveSubTab('backup')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'backup' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Cloud size={16} />{lang === 'fr' ? 'Backup' : 'نسخ احتياطي'}
           </button>
         )}
         {hasPermission(currentUser, 'manage_settings') && (
           <button
             onClick={() => setActiveSubTab('settings')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'settings'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'settings'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1748,7 +1773,7 @@ export default function AdminDashboard({
         {currentUser.role === 'admin' && (
           <button
             onClick={() => setActiveSubTab('messages')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'messages'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'messages'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1766,7 +1791,7 @@ export default function AdminDashboard({
         {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier') && (
           <button
             onClick={() => setActiveSubTab('announcements')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'announcements'
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'announcements'
                 ? 'bg-brand-cyan text-white shadow-xs'
                 : 'text-slate-500 hover:bg-slate-50'
               }`}
@@ -1876,7 +1901,7 @@ export default function AdminDashboard({
                 )}
 
                 {/* Status Filter Buttons */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-hide shrink-0">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-hide max-w-full min-w-0">
                   {(['all', 'pending', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'] as const).map((st) => {
                     const labelMap: Record<string, { ar: string; fr: string }> = {
                       all: { ar: 'الكل', fr: 'Tous' },
@@ -1894,7 +1919,7 @@ export default function AdminDashboard({
                       <button
                         key={st}
                         onClick={() => setOrderStatusFilter(st)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                        className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
                           isAct
                             ? 'bg-brand-cyan text-white shadow-xs'
                             : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -3697,7 +3722,7 @@ export default function AdminDashboard({
 
           {/* Logo Preview */}
           <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-            <img src={getLogoUrl(shopForm.logoUrl)} alt="Logo preview" className="h-16 w-auto max-w-[120px] object-contain rounded-xl border border-slate-200 bg-white p-1" />
+            <img src={getLogoUrl(shopForm.logoUrl)} alt="Logo preview" width={64} height={64} loading="lazy" decoding="async" className="h-16 w-auto max-w-[120px] object-contain rounded-xl border border-slate-200 bg-white p-1" />
             <div>
               <p className="text-xs font-bold text-slate-700">{lang === 'fr' ? 'Aperçu du Logo' : 'معاينة الشعار'}</p>
               <p className="text-xs text-slate-400 mt-0.5">{lang === 'fr' ? 'Visible sur le site, le pied de page et les factures.' : 'يظهر في الموقع والفوتر والفواتير.'}</p>
@@ -5133,7 +5158,7 @@ export default function AdminDashboard({
                                     </label>
                                   </div>
                                   {v.image && (
-                                    <img src={v.image} alt={v.name} className="w-8 h-8 rounded-lg object-cover border border-slate-200 mt-1 shadow-2xs" />
+                                    <img src={v.image} alt={v.name} width={32} height={32} loading="lazy" decoding="async" className="w-8 h-8 rounded-lg object-cover border border-slate-200 mt-1 shadow-2xs" />
                                   )}
                                 </div>
                               </div>
@@ -5302,7 +5327,7 @@ export default function AdminDashboard({
                 </label>
                 <div className="flex items-center gap-3">
                   {pImage && (
-                    <img src={pImage} alt="" className="w-16 h-16 rounded-xl object-cover border border-slate-200" />
+                    <img src={pImage} alt="" width={64} height={64} loading="lazy" decoding="async" className="w-16 h-16 rounded-xl object-cover border border-slate-200" />
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-brand-cyan/10 file:text-brand-cyan file:font-bold" />
                 </div>

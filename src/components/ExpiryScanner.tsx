@@ -247,10 +247,10 @@ export default function ExpiryScanner({
         </div>
 
         {/* Quick Filter Select Buttons */}
-        <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+        <div className="flex items-center gap-1.5 w-full sm:w-auto max-w-full min-w-0 overflow-x-auto pb-1 sm:pb-0 scrollbar-hide">
           <button
             onClick={() => setFilterLevel('all')}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               filterLevel === 'all' 
                 ? 'bg-slate-800 text-white' 
                 : 'bg-slate-100 text-slate-500 hover:bg-slate-150'
@@ -261,7 +261,7 @@ export default function ExpiryScanner({
           
           <button
             onClick={() => setFilterLevel('red')}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               filterLevel === 'red' 
                 ? 'bg-rose-600 text-white' 
                 : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
@@ -273,7 +273,7 @@ export default function ExpiryScanner({
 
           <button
             onClick={() => setFilterLevel('yellow')}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               filterLevel === 'yellow' 
                 ? 'bg-amber-500 text-white' 
                 : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
@@ -285,7 +285,7 @@ export default function ExpiryScanner({
 
           <button
             onClick={() => setFilterLevel('green')}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               filterLevel === 'green' 
                 ? 'bg-emerald-600 text-white' 
                 : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'

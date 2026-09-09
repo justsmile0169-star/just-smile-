@@ -834,6 +834,10 @@ export default function DoctorDashboard({
                     <img 
                       src={p.image && String(p.image) !== '0' ? p.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
                       alt={p.name} 
+                      width={40}
+                      height={40}
+                      loading="lazy"
+                      decoding="async"
                       className="w-10 h-10 object-cover rounded-lg bg-slate-100"
                     />
                     <div className="flex-1 min-w-0">
@@ -872,6 +876,10 @@ export default function DoctorDashboard({
                     <img 
                       src={p.image && String(p.image) !== '0' ? p.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
                       alt={p.name} 
+                      width={40}
+                      height={40}
+                      loading="lazy"
+                      decoding="async"
                       className="w-10 h-10 object-cover rounded-lg bg-slate-100"
                     />
                     <div className="flex-1 min-w-0">

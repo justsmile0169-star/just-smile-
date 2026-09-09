@@ -13,6 +13,8 @@ interface ProductCardProps {
   onViewDetails: (product: Product) => void;
   user: UserProfile | null;
   imageHeight?: string;
+  loading?: 'lazy' | 'eager';
+  priority?: boolean;
 }
 
 export default function ProductCard({
@@ -23,7 +25,9 @@ export default function ProductCard({
   onToggleFavorite,
   onViewDetails,
   user,
-  imageHeight
+  imageHeight,
+  loading,
+  priority = false
 }: ProductCardProps): React.ReactElement {
   const isRtl = lang === 'ar';
   
@@ -91,7 +95,10 @@ export default function ProductCard({
         <img
           src={product.image && String(product.image) !== '0' ? product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300'}
           alt={product.name}
-          loading="lazy"
+          width={300}
+          height={300}
+          loading={loading || (priority ? 'eager' : 'lazy')}
+          fetchPriority={priority ? 'high' : 'auto'}
           decoding="async"
           className="object-contain w-full h-full p-2 group-hover:scale-105 transition-transform duration-300"
           referrerPolicy="no-referrer"

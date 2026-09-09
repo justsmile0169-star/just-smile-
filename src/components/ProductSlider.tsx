@@ -106,7 +106,7 @@ export default function ProductSlider({
         className="flex gap-4 overflow-x-auto pb-3 scrollbar-hide scroll-smooth"
         style={{ scrollSnapType: 'x mandatory' }}
       >
-        {products.map((p) => (
+        {products.map((p, idx) => (
           <div key={p.id} className="shrink-0 w-[260px] sm:w-[300px] md:w-[340px]" style={{ scrollSnapAlign: 'start' }}>
             <ProductCard
               product={p}
@@ -117,6 +117,8 @@ export default function ProductSlider({
               onViewDetails={onViewProduct}
               user={user}
               imageHeight="h-60 sm:h-72 md:h-80"
+              priority={idx < 3}
+              loading={idx < 3 ? 'eager' : 'lazy'}
             />
           </div>
         ))}

@@ -10,6 +10,7 @@ import {
   Promotion, Expense, ActivityLog, AdminMessage, Supplier, PurchaseInvoice, SupplierPayment, ProfileUpdateRequest
 } from './types';
 import { canAccessAdmin } from './utils/permissions';
+import { getStaffSession, saveStaffSession, clearStaffSession } from './utils/staffAuth';
 import { Language, getTranslation } from './translations';
 
 // Sub components — eagerly loaded (always needed)
@@ -253,7 +254,26 @@ export default function App() {
           setLoadingUser(false);
         });
       } else {
-        setCurrentUser(null);
+        const staffSession = getStaffSession();
+        if (staffSession) {
+          setCurrentUser((prev) => {
+            if (!prev) {
+              setActiveTab('admin');
+            }
+            return staffSession;
+          });
+          unsubscribeDoc = onSnapshot(doc(db, 'users', staffSession.uid), (docSnap) => {
+            if (docSnap.exists()) {
+              const updated = docSnap.data() as UserProfile;
+              setCurrentUser(updated);
+              saveStaffSession(updated);
+            }
+          }, (err) => {
+            console.warn('Staff profile listener notice:', err);
+          });
+        } else {
+          setCurrentUser(null);
+        }
         setLoadingUser(false);
       }
     });
@@ -978,25 +998,31 @@ export default function App() {
     }
   };
 
-  // Mark all notifications as read
+  // Mark all notifications as read (chunked to prevent Firestore 500 mutation limit)
   const handleMarkAllRead = async () => {
     if (!currentUser) return;
     try {
-      const batch = writeBatch(db);
-      notifications.forEach((notif) => {
-        if (!notif.isRead) {
+      const unread = notifications.filter((notif) => !notif.isRead);
+      if (unread.length === 0) return;
+
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < unread.length; i += BATCH_SIZE) {
+        const chunk = unread.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach((notif) => {
           batch.update(doc(db, 'notifications', notif.id), { isRead: true });
-        }
-      });
-      await batch.commit();
+        });
+        await batch.commit();
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Error marking notifications read:', err);
     }
   };
 
   // Logout routine
   const handleLogout = async () => {
     try {
+      clearStaffSession();
       // Try to sign out from Firebase Auth (for doctors)
       await signOut(auth).catch(() => {
         // Ignore error if not signed in (staff users don't have Firebase Auth)

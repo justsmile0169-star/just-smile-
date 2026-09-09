@@ -63,6 +63,11 @@ export default function Header({
             <img
               src={getLogoUrl(logoUrl)}
               alt={companyName}
+              width={48}
+              height={48}
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
               className="h-10 w-auto md:h-12 object-contain shrink-0"
             />
             <div className="flex flex-col">

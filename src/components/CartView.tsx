@@ -403,20 +403,45 @@ export default function CartView({
       console.log('Creating order document:', newOrder);
       await setDoc(newOrderDocRef, cleanFirestoreData(newOrder));
 
-      // Decrement inventory stock & update salesCount
+      // Decrement inventory stock & update salesCount (aggregated by product ID to avoid batch duplicates)
       try {
+        const productUpdatesMap = new Map<string, {
+          product: Product;
+          totalDeductQty: number;
+          variantDeductions: Map<string, number>;
+        }>();
+
+        cart.forEach((item) => {
+          const pId = item.product.id;
+          if (!productUpdatesMap.has(pId)) {
+            productUpdatesMap.set(pId, {
+              product: item.product,
+              totalDeductQty: 0,
+              variantDeductions: new Map<string, number>()
+            });
+          }
+          const entry = productUpdatesMap.get(pId)!;
+          entry.totalDeductQty += item.quantity;
+          if (item.selectedVariant?.id) {
+            const currentVarDeduct = entry.variantDeductions.get(item.selectedVariant.id) || 0;
+            entry.variantDeductions.set(item.selectedVariant.id, currentVarDeduct + item.quantity);
+          }
+        });
+
         const batch = writeBatch(db);
         const lowStockAlertsToCreate: { product: Product; newStock: number }[] = [];
-        cart.forEach((item) => {
-          const prodRef = doc(db, 'products', item.product.id);
-          const currentStock = typeof item.product.stock === 'number' && !isNaN(item.product.stock) ? item.product.stock : 0;
-          const newStock = Math.max(0, currentStock - item.quantity);
-          const newSalesCount = (item.product.salesCount || 0) + item.quantity;
 
-          if (item.product.isVariable && item.selectedVariant && item.product.variants) {
-            const updatedVariants = item.product.variants.map((v) => {
+        productUpdatesMap.forEach(({ product, totalDeductQty, variantDeductions }) => {
+          const prodRef = doc(db, 'products', product.id);
+          const currentStock = typeof product.stock === 'number' && !isNaN(product.stock) ? product.stock : 0;
+          const newStock = Math.max(0, currentStock - totalDeductQty);
+          const newSalesCount = (product.salesCount || 0) + totalDeductQty;
+
+          if (product.isVariable && product.variants && product.variants.length > 0) {
+            const updatedVariants = product.variants.map((v) => {
+              const deduct = variantDeductions.get(v.id) || 0;
               const vStock = typeof v.stock === 'number' && !isNaN(v.stock) ? v.stock : 0;
-              return v.id === item.selectedVariant!.id ? { ...v, stock: Math.max(0, vStock - item.quantity) } : v;
+              return deduct > 0 ? { ...v, stock: Math.max(0, vStock - deduct) } : v;
             });
             batch.update(prodRef, cleanFirestoreData({
               stock: newStock,
@@ -430,14 +455,15 @@ export default function CartView({
             }));
           }
 
-          const threshold = item.product.lowStockAlert ?? 5;
-          if (newStock <= threshold && item.product.stock > threshold) {
+          const threshold = product.lowStockAlert ?? 5;
+          if (newStock <= threshold && product.stock > threshold) {
             lowStockAlertsToCreate.push({
-              product: item.product,
+              product,
               newStock
             });
           }
         });
+
         await batch.commit();
 
         for (const alertInfo of lowStockAlertsToCreate) {
@@ -613,6 +639,10 @@ export default function CartView({
                           <img
                             src={p.image && String(p.image) !== '0' ? p.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=150'}
                             alt={p.name}
+                            width={40}
+                            height={40}
+                            loading="lazy"
+                            decoding="async"
                             className="w-10 h-10 object-cover rounded-xl bg-slate-100 shrink-0"
                           />
                           <div className="min-w-0 flex-1">
@@ -766,6 +796,10 @@ export default function CartView({
                       <img
                         src={item.selectedVariant?.image || (item.product.image && String(item.product.image) !== '0' ? item.product.image : 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&q=80&w=300')}
                         alt={item.product.name}
+                        width={80}
+                        height={80}
+                        loading="lazy"
+                        decoding="async"
                         className="w-16 h-16 md:w-20 md:h-20 object-cover rounded-2xl bg-slate-150 border border-slate-50 shrink-0"
                       />
 

@@ -101,6 +101,10 @@ export default function InvoiceVerificationView({
             <img
               src={getLogoUrl(shopInfo.logoUrl)}
               alt={shopInfo.companyName}
+              width={40}
+              height={40}
+              loading="eager"
+              decoding="async"
               className="h-10 w-auto object-contain"
             />
             <div>

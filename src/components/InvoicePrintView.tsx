@@ -294,6 +294,10 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                   <img
                     src={getLogoUrl(shopInfo.logoUrl)}
                     alt={shopInfo.companyName}
+                    width={56}
+                    height={56}
+                    loading="eager"
+                    decoding="async"
                     style={{ width: '56px', height: 'auto', maxHeight: '56px', objectFit: 'contain', flexShrink: 0 }}
                   />
                   <div>
@@ -337,6 +341,10 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                     <img
                       src={qrPngUrl}
                       alt="QR Verification"
+                      width={76}
+                      height={76}
+                      loading="eager"
+                      decoding="async"
                       style={{ width: '76px', height: '76px', display: 'block', borderRadius: '6px' }}
                     />
                   ) : (
@@ -742,6 +750,10 @@ export default function InvoicePrintView({ order, doctor, lang, shopInfo, onClos
                   <img
                     src={qrPngUrl}
                     alt="QR Verification"
+                    width={72}
+                    height={72}
+                    loading="eager"
+                    decoding="async"
                     style={{ width: '72px', height: '72px', display: 'block', borderRadius: '6px' }}
                   />
                 ) : null}

@@ -263,7 +263,7 @@ export default function PromotionManager({ lang, promotions, productsList, curre
                     isVid ? (
                       <video src={promo.imageUrl} className="w-12 h-12 object-cover rounded-lg border border-slate-200" muted />
                     ) : (
-                      <img src={promo.imageUrl} alt="" className="w-12 h-12 object-cover rounded-lg border border-slate-200" />
+                      <img src={promo.imageUrl} alt="" width={48} height={48} loading="lazy" decoding="async" className="w-12 h-12 object-cover rounded-lg border border-slate-200" />
                     )
                   ) : (
                     <div className="w-12 h-12 bg-brand-cyan/10 rounded-lg flex items-center justify-center text-brand-cyan font-bold">P</div>
