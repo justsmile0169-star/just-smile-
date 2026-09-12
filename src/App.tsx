@@ -2,7 +2,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import {
   collection, onSnapshot, query, where, doc, getDoc, getDocs, getDocFromServer, setDoc,
-  writeBatch, addDoc, updateDoc, deleteDoc, getCountFromServer, limit, orderBy
+  writeBatch, addDoc, updateDoc, deleteDoc, getCountFromServer, limit, orderBy, startAfter, DocumentSnapshot
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import {
@@ -84,14 +84,10 @@ export default function App() {
     localStorage.setItem('justsmile_theme', theme);
   }, [theme]);
 
-  // Real-time synced collections with instant local caching
-  const [products, setProducts] = useState<Product[]>(() => {
-    try {
-      const cached = localStorage.getItem('just_smile_cached_products');
-      if (cached) return JSON.parse(cached);
-    } catch {}
-    return [];
-  });
+  const [products, setProducts] = useState<Product[]>([]);
+  const [lastProductDoc, setLastProductDoc] = useState<DocumentSnapshot | null>(null);
+  const [hasMoreProducts, setHasMoreProducts] = useState<boolean>(true);
+  const [isLoadingMoreProducts, setIsLoadingMoreProducts] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [userOrders, setUserOrders] = useState<Order[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]); // Array of favorited product IDs
@@ -325,7 +321,7 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. High-Performance Product Sync (Instant IndexedDB Cache + Real-Time Sync) ---
+  // --- 4. High-Performance Product Sync (Initial 30 Batch + On-Demand Pagination) ---
   useEffect(() => {
     let isMounted = true;
 
@@ -338,25 +334,35 @@ export default function App() {
       })
       .catch(() => {});
 
-    // 2. REAL-TIME FIRESTORE SYNC: Single streamlined onSnapshot listener
+    // 2. FIRESTORE SYNC:
+    // If admin is active, sync full catalog for inventory management.
+    // If browsing/guest, sync initial 30 products for super fast loading (<1s).
     const productsCol = collection(db, 'products');
+    const productsQuery = activeTab === 'admin'
+      ? productsCol
+      : query(productsCol, limit(30));
+
     const unsubscribe = onSnapshot(
-      productsCol,
+      productsQuery,
       { includeMetadataChanges: false },
       (snapshot) => {
         if (!isMounted) return;
-        const allItems: Product[] = [];
+        const items: Product[] = [];
         snapshot.forEach((docSnap) => {
           const product = { ...(docSnap.data() as Product), id: docSnap.id };
           if (!product.isDeleted) {
-            allItems.push(product);
+            items.push(product);
           }
         });
 
-        if (allItems.length > 0) {
-          setProducts(allItems);
-          // Persist to local IndexedDB for future instant loads
-          setStoredProducts(allItems);
+        if (snapshot.docs.length > 0) {
+          setLastProductDoc(snapshot.docs[snapshot.docs.length - 1]);
+        }
+        setHasMoreProducts(snapshot.docs.length >= 30);
+
+        if (items.length > 0) {
+          setProducts(items);
+          setStoredProducts(items);
         }
       },
       (err) => {
@@ -368,7 +374,42 @@ export default function App() {
       isMounted = false;
       unsubscribe();
     };
-  }, []);
+  }, [activeTab]);
+
+  // Handle on-demand loading of the next 30 products
+  const handleLoadMoreProducts = async () => {
+    if (isLoadingMoreProducts || !hasMoreProducts || !lastProductDoc) return;
+    setIsLoadingMoreProducts(true);
+    try {
+      const nextQuery = query(collection(db, 'products'), startAfter(lastProductDoc), limit(30));
+      const snapshot = await getDocs(nextQuery);
+      if (!snapshot.empty) {
+        const nextItems: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const product = { ...(docSnap.data() as Product), id: docSnap.id };
+          if (!product.isDeleted) {
+            nextItems.push(product);
+          }
+        });
+
+        setLastProductDoc(snapshot.docs[snapshot.docs.length - 1]);
+        setHasMoreProducts(snapshot.docs.length >= 30);
+
+        setProducts((prev) => {
+          const seen = new Set(prev.map((p) => p.id));
+          const combined = [...prev, ...nextItems.filter((p) => !seen.has(p.id))];
+          setStoredProducts(combined);
+          return combined;
+        });
+      } else {
+        setHasMoreProducts(false);
+      }
+    } catch (err) {
+      console.warn('Error loading more products:', err);
+    } finally {
+      setIsLoadingMoreProducts(false);
+    }
+  };
 
   // Protective routing redirect for unauthenticated or unauthorized users to prevent blank screen
   useEffect(() => {
@@ -1205,6 +1246,9 @@ export default function App() {
                     selectedCategory={selectedCategory}
                     onSelectCategory={setSelectedCategory}
                     onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                    onLoadMoreProducts={handleLoadMoreProducts}
+                    hasMoreProducts={hasMoreProducts}
+                    isLoadingMore={isLoadingMoreProducts}
                   />
                 )}
 
@@ -1222,6 +1266,9 @@ export default function App() {
                     selectedCategory={selectedCategory}
                     onSelectCategory={setSelectedCategory}
                     onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                    onLoadMoreProducts={handleLoadMoreProducts}
+                    hasMoreProducts={hasMoreProducts}
+                    isLoadingMore={isLoadingMoreProducts}
                   />
                 )}
 
@@ -1239,6 +1286,9 @@ export default function App() {
                     selectedCategory={selectedCategory}
                     onSelectCategory={setSelectedCategory}
                     onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                    onLoadMoreProducts={handleLoadMoreProducts}
+                    hasMoreProducts={hasMoreProducts}
+                    isLoadingMore={isLoadingMoreProducts}
                   />
                 )}
 

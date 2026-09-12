@@ -21,6 +21,9 @@ interface BrowseViewProps {
   onSelectCategory?: (category: string) => void;
   onOpenBarcodeScanner?: () => void;
   mode?: 'catalog' | 'routine_clinic' | 'most_requested';
+  onLoadMoreProducts?: () => void;
+  hasMoreProducts?: boolean;
+  isLoadingMore?: boolean;
 }
 
 export default function BrowseView({
@@ -35,7 +38,10 @@ export default function BrowseView({
   selectedCategory: propSelectedCategory,
   onSelectCategory,
   onOpenBarcodeScanner,
-  mode = 'catalog'
+  mode = 'catalog',
+  onLoadMoreProducts,
+  hasMoreProducts = false,
+  isLoadingMore = false
 }: BrowseViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [localCategory, setLocalCategory] = useState<string>('all');
@@ -559,15 +565,30 @@ export default function BrowseView({
             ))}
           </div>
 
-          {/* Load More Button for Instant Memory-based Pagination */}
-          {hasMoreLocal && (
+          {/* Load More Button for Instant Memory-based & Firestore On-Demand Pagination */}
+          {(hasMoreLocal || hasMoreProducts) && (
             <div className="flex justify-center pt-6 pb-4">
               <button
                 type="button"
-                onClick={() => setDisplayLimit((prev) => prev + 30)}
-                className="bg-white dark:bg-slate-900 hover:bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/30 font-extrabold text-xs md:text-sm px-6 py-3 rounded-2xl shadow-xs transition-all cursor-pointer"
+                disabled={isLoadingMore}
+                onClick={() => {
+                  if (hasMoreLocal) {
+                    setDisplayLimit((prev) => prev + 30);
+                  }
+                  if (onLoadMoreProducts) {
+                    onLoadMoreProducts();
+                  }
+                }}
+                className="bg-white dark:bg-slate-900 hover:bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/30 font-extrabold text-xs md:text-sm px-6 py-3 rounded-2xl shadow-xs transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
               >
-                {lang === 'fr' ? 'Afficher plus de produits...' : 'عرض المزيد من المنتجات...'}
+                {isLoadingMore ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin"></div>
+                    <span>{lang === 'fr' ? 'Chargement...' : 'جاري التحميل...'}</span>
+                  </>
+                ) : (
+                  <span>{lang === 'fr' ? 'Afficher plus de produits...' : 'عرض المزيد من المنتجات...'}</span>
+                )}
               </button>
             </div>
           )}
