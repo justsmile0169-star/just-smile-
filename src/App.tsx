@@ -324,54 +324,63 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. Synchronize Products Collection (Fast Initial Fetch + Real-Time Listener) ---
+  // --- 4. Synchronize Products Collection (Ultra-Fast Initial 36 Batch + Background Full Sync) ---
   useEffect(() => {
     let isMounted = true;
     const productsCol = collection(db, 'products');
 
-    // 1. Instant parallel getDocs for ultra-fast first-time initial render
-    getDocs(productsCol)
+    // 1. FAST INITIAL BATCH: Fetch first 36 products immediately (<100ms lightweight payload)
+    const initialQuery = query(productsCol, limit(36));
+    getDocs(initialQuery)
       .then((snapshot) => {
         if (!isMounted) return;
-        const items: Product[] = [];
+        const initialItems: Product[] = [];
         snapshot.forEach((docSnap) => {
           const p = { ...(docSnap.data() as Product), id: docSnap.id };
-          if (!p.isDeleted) items.push(p);
+          if (!p.isDeleted) initialItems.push(p);
         });
-        if (items.length > 0) {
-          setProducts(items);
-          try {
-            localStorage.setItem('just_smile_cached_products', JSON.stringify(items));
-          } catch {}
+        if (initialItems.length > 0) {
+          setProducts((current) => {
+            if (current.length === 0) {
+              return initialItems;
+            }
+            return current;
+          });
         }
       })
       .catch((err) => {
-        console.warn("Initial products getDocs notice:", err);
+        console.warn("Initial fast batch notice:", err);
       });
 
-    // 2. Real-time onSnapshot for live inventory, price & product updates
-    const unsubscribe = onSnapshot(productsCol, (snapshot) => {
+    // 2. BACKGROUND FULL SYNC: Fetch & synchronize the complete collection quietly in background
+    let unsubscribeFull: (() => void) | null = null;
+    const bgTimer = setTimeout(() => {
       if (!isMounted) return;
-      const items: Product[] = [];
-      snapshot.forEach((docSnap) => {
-        const product = { ...(docSnap.data() as Product), id: docSnap.id };
-        if (!product.isDeleted) {
-          items.push(product);
+
+      unsubscribeFull = onSnapshot(productsCol, (snapshot) => {
+        if (!isMounted) return;
+        const allItems: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const product = { ...(docSnap.data() as Product), id: docSnap.id };
+          if (!product.isDeleted) {
+            allItems.push(product);
+          }
+        });
+        if (allItems.length > 0) {
+          setProducts(allItems);
+          try {
+            localStorage.setItem('just_smile_cached_products', JSON.stringify(allItems));
+          } catch {}
         }
+      }, (err) => {
+        console.warn("Products full sync fallback:", err);
       });
-      if (items.length > 0) {
-        setProducts(items);
-        try {
-          localStorage.setItem('just_smile_cached_products', JSON.stringify(items));
-        } catch {}
-      }
-    }, (err) => {
-      console.warn("Products sync fallback:", err);
-    });
+    }, 250);
 
     return () => {
       isMounted = false;
-      unsubscribe();
+      clearTimeout(bgTimer);
+      if (unsubscribeFull) unsubscribeFull();
     };
   }, []);
 

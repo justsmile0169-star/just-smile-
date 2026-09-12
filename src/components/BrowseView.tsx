@@ -77,13 +77,13 @@ export default function BrowseView({
   }, [mode]);
 
 
-  // Virtual local pagination for instant rendering without network requests
-  const [displayLimit, setDisplayLimit] = useState(24);
+  // Virtual local pagination: 30 initial products for instant display, then paginate on demand
+  const [displayLimit, setDisplayLimit] = useState(30);
   const loaderRef = useRef<HTMLDivElement>(null);
 
   // Reset local pagination limit on category or search change
   useEffect(() => {
-    setDisplayLimit(24);
+    setDisplayLimit(30);
   }, [selectedCategory, searchQuery]);
 
   // Handle outside click for category dropdown
@@ -564,7 +564,7 @@ export default function BrowseView({
             <div className="flex justify-center pt-6 pb-4">
               <button
                 type="button"
-                onClick={() => setDisplayLimit((prev) => prev + 24)}
+                onClick={() => setDisplayLimit((prev) => prev + 30)}
                 className="bg-white dark:bg-slate-900 hover:bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/30 font-extrabold text-xs md:text-sm px-6 py-3 rounded-2xl shadow-xs transition-all cursor-pointer"
               >
                 {lang === 'fr' ? 'Afficher plus de produits...' : 'عرض المزيد من المنتجات...'}
