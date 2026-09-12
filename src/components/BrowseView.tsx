@@ -92,6 +92,25 @@ export default function BrowseView({
     setDisplayLimit(30);
   }, [selectedCategory, searchQuery]);
 
+  // Auto-scroll infinite display pagination observer
+  useEffect(() => {
+    const el = loaderRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayLimit((prev) => prev + 30);
+          if (onLoadMoreProducts) {
+            onLoadMoreProducts();
+          }
+        }
+      },
+      { rootMargin: '350px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [filteredProducts.length, onLoadMoreProducts]);
+
   // Handle outside click for category dropdown
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -565,9 +584,12 @@ export default function BrowseView({
             ))}
           </div>
 
-          {/* Load More Button for Instant Memory-based & Firestore On-Demand Pagination */}
+          {/* Invisible sentinel trigger for automatic infinite scroll */}
+          <div ref={loaderRef} className="h-4 w-full pointer-events-none" />
+
+          {/* Optional manual load more fallback */}
           {(hasMoreLocal || hasMoreProducts) && (
-            <div className="flex justify-center pt-6 pb-4">
+            <div className="flex justify-center pt-2 pb-4">
               <button
                 type="button"
                 disabled={isLoadingMore}

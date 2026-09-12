@@ -321,9 +321,11 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. High-Performance Product Sync (Initial 30 Batch + On-Demand Pagination) ---
+  // --- 4. High-Performance Product Sync: Instant 30-Batch + Silent Progressive Background Hydration ---
   useEffect(() => {
     let isMounted = true;
+    let bgTimeout: NodeJS.Timeout | null = null;
+    let isBackgroundSyncing = false;
 
     // 1. FAST LOCAL LOAD: Read from IndexedDB instantly (<15ms)
     getStoredProducts()
@@ -334,9 +336,58 @@ export default function App() {
       })
       .catch(() => {});
 
-    // 2. FIRESTORE SYNC:
-    // If admin is active, sync full catalog for inventory management.
-    // If browsing/guest, sync initial 30 products for super fast loading (<1s).
+    // Helper: Progressively fetch remaining products in background chunks silently
+    const fetchRemainingInBackground = async (startDoc: DocumentSnapshot) => {
+      if (isBackgroundSyncing || !isMounted) return;
+      isBackgroundSyncing = true;
+      let currentCursor: DocumentSnapshot | null = startDoc;
+
+      while (currentCursor && isMounted) {
+        try {
+          // Subtle idle delay (500ms) to ensure zero impact on user interaction/scrolling
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          if (!isMounted) break;
+
+          const nextQuery = query(
+            collection(db, 'products'),
+            startAfter(currentCursor),
+            limit(30)
+          );
+          const snapshot = await getDocs(nextQuery);
+
+          if (snapshot.empty) {
+            break;
+          }
+
+          const nextBatch: Product[] = [];
+          snapshot.forEach((docSnap) => {
+            const p = { ...(docSnap.data() as Product), id: docSnap.id };
+            if (!p.isDeleted) nextBatch.push(p);
+          });
+
+          currentCursor = snapshot.docs[snapshot.docs.length - 1];
+
+          if (nextBatch.length > 0 && isMounted) {
+            setProducts((prev) => {
+              const seen = new Set(prev.map((p) => p.id));
+              const merged = [...prev, ...nextBatch.filter((p) => !seen.has(p.id))];
+              setStoredProducts(merged);
+              return merged;
+            });
+          }
+
+          if (snapshot.docs.length < 30) {
+            break; // All products in database are fully fetched
+          }
+        } catch (err) {
+          console.warn('Silent background chunk notice:', err);
+          break;
+        }
+      }
+      isBackgroundSyncing = false;
+    };
+
+    // 2. FIRESTORE INITIAL STREAM:
     const productsCol = collection(db, 'products');
     const productsQuery = activeTab === 'admin'
       ? productsCol
@@ -361,8 +412,29 @@ export default function App() {
         setHasMoreProducts(snapshot.docs.length >= 30);
 
         if (items.length > 0) {
-          setProducts(items);
-          setStoredProducts(items);
+          setProducts((prev) => {
+            if (prev.length === 0) {
+              setStoredProducts(items);
+              return items;
+            }
+            // Merge initial 30 items updating any changed details
+            const updatedMap = new Map(prev.map((p) => [p.id, p]));
+            for (const item of items) {
+              updatedMap.set(item.id, item);
+            }
+            const merged = Array.from(updatedMap.values());
+            setStoredProducts(merged);
+            return merged;
+          });
+        }
+
+        // Trigger silent background fetching for the rest of the catalog after initial 30 items are rendered
+        if (activeTab !== 'admin' && snapshot.docs.length >= 30) {
+          const lastDoc = snapshot.docs[snapshot.docs.length - 1];
+          if (bgTimeout) clearTimeout(bgTimeout);
+          bgTimeout = setTimeout(() => {
+            fetchRemainingInBackground(lastDoc);
+          }, 1000);
         }
       },
       (err) => {
@@ -372,11 +444,12 @@ export default function App() {
 
     return () => {
       isMounted = false;
+      if (bgTimeout) clearTimeout(bgTimeout);
       unsubscribe();
     };
   }, [activeTab]);
 
-  // Handle on-demand loading of the next 30 products
+  // Handle manual/infinite on-demand loading fallback
   const handleLoadMoreProducts = async () => {
     if (isLoadingMoreProducts || !hasMoreProducts || !lastProductDoc) return;
     setIsLoadingMoreProducts(true);
