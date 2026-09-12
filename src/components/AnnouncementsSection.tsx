@@ -324,7 +324,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                             isVid ? (
                               <video src={a.imageUrl} className="w-10 h-10 object-cover rounded-lg border border-slate-200" muted />
                             ) : (
-                              <img src={a.imageUrl} alt="" className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                              <img src={a.imageUrl} alt="" width={40} height={40} loading="lazy" decoding="async" className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
                             )
                           ) : (
                             <div className="w-10 h-10 bg-brand-cyan/20 rounded-lg flex items-center justify-center text-brand-cyan font-bold">A</div>
@@ -496,10 +496,10 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
             
             <form onSubmit={handleSave} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">Titre FR</label><input value={titleFr} onChange={e=>setTitleFr(e.target.value)} placeholder="Titre..." className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"/></div>
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">العنوان AR</label><input value={titleAr} onChange={e=>setTitleAr(e.target.value)} placeholder="العنوان..." className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm text-right focus:border-brand-cyan focus:outline-none" dir="rtl"/></div>
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">Description FR</label><textarea value={descFr} onChange={e=>setDescFr(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm resize-none focus:border-brand-cyan focus:outline-none"/></div>
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">الوصف AR</label><textarea value={descAr} onChange={e=>setDescAr(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm resize-none text-right focus:border-brand-cyan focus:outline-none" dir="rtl"/></div>
+                <div><label htmlFor="ann-title-fr" className="text-xs font-bold text-slate-500 block mb-1">Titre FR</label><input id="ann-title-fr" name="titleFr" value={titleFr} onChange={e=>setTitleFr(e.target.value)} placeholder="Titre..." className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"/></div>
+                <div><label htmlFor="ann-title-ar" className="text-xs font-bold text-slate-500 block mb-1">العنوان AR</label><input id="ann-title-ar" name="titleAr" value={titleAr} onChange={e=>setTitleAr(e.target.value)} placeholder="العنوان..." className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm text-right focus:border-brand-cyan focus:outline-none" dir="rtl"/></div>
+                <div><label htmlFor="ann-desc-fr" className="text-xs font-bold text-slate-500 block mb-1">Description FR</label><textarea id="ann-desc-fr" name="descFr" value={descFr} onChange={e=>setDescFr(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm resize-none focus:border-brand-cyan focus:outline-none"/></div>
+                <div><label htmlFor="ann-desc-ar" className="text-xs font-bold text-slate-500 block mb-1">الوصف AR</label><textarea id="ann-desc-ar" name="descAr" value={descAr} onChange={e=>setDescAr(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm resize-none text-right focus:border-brand-cyan focus:outline-none" dir="rtl"/></div>
               </div>
 
               {/* Styled upload interface */}
@@ -517,6 +517,8 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                   </button>
                   
                   <input 
+                    id="ann-file-input"
+                    name="announcementFile"
                     type="file" 
                     ref={fileInputRef}
                     accept="image/*,video/*" 
@@ -536,15 +538,15 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                   {isVideoSource(imgUrl) ? (
                     <video src={imgUrl} controls className="w-full h-28 object-cover" />
                   ) : (
-                    <img src={imgUrl} alt="preview" className="w-full h-28 object-cover" />
+                    <img src={imgUrl} alt="preview" width={400} height={112} loading="lazy" decoding="async" className="w-full h-28 object-cover" />
                   )}
                   <button type="button" onClick={()=>setImgUrl('')} className="absolute top-1.5 right-1.5 p-1 bg-white hover:bg-slate-100 rounded-full shadow text-rose-500 transition-all"><X size={12}/></button>
                 </div>}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">{lang==='fr'?'Lien CTA (optionnel)':'الرابط الترويجي (اختياري)'}</label><input value={linkUrl} onChange={e=>setLinkUrl(e.target.value)} placeholder="https://..." className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"/></div>
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">{lang==='fr'?'Expire le':'تاريخ الانتهاء'}</label><input type="date" value={expAt} onChange={e=>setExpAt(e.target.value)} className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"/></div>
+                <div><label htmlFor="ann-link-url" className="text-xs font-bold text-slate-500 block mb-1">{lang==='fr'?'Lien CTA (optionnel)':'الرابط الترويجي (اختياري)'}</label><input id="ann-link-url" name="linkUrl" value={linkUrl} onChange={e=>setLinkUrl(e.target.value)} placeholder="https://..." className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"/></div>
+                <div><label htmlFor="ann-exp-at" className="text-xs font-bold text-slate-500 block mb-1">{lang==='fr'?'Expire le':'تاريخ الانتهاء'}</label><input id="ann-exp-at" name="expAt" type="date" value={expAt} onChange={e=>setExpAt(e.target.value)} className="w-full border border-slate-200 rounded-xl py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"/></div>
               </div>
 
               <div className="flex gap-2 pt-2 border-t mt-4">

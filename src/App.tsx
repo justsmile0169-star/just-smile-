@@ -16,11 +16,12 @@ import { Language, getTranslation } from './translations';
 // Sub components — eagerly loaded (always needed)
 import Header from './components/Header';
 import Footer from './components/Footer';
+import BrowseView from './components/BrowseView';
 import ProductCard from './components/ProductCard';
+import SplashIntro from './components/SplashIntro';
 import { AppDialogProvider, showAlert, showToast } from './context/AppDialogContext';
 
-// Heavy components — lazy loaded to split bundle chunks
-const BrowseView = lazy(() => import('./components/BrowseView'));
+// Heavy secondary components — lazy loaded to split bundle chunks
 const CartView = lazy(() => import('./components/CartView'));
 const AuthView = lazy(() => import('./components/AuthView'));
 const DoctorDashboard = lazy(() => import('./components/DoctorDashboard'));
@@ -42,6 +43,13 @@ export default function App() {
     return (localStorage.getItem('justsmile_theme') as 'light' | 'dark') || 'light';
   });
   const [activeTab, setActiveTab] = useState<'browse' | 'routine_clinic' | 'most_requested' | 'cart' | 'dashboard' | 'admin' | 'auth' | 'favorites' | 'notifications'>('browse');
+  const [showSplash, setShowSplash] = useState<boolean>(() => {
+    try {
+      return !sessionStorage.getItem('justsmile_intro_seen');
+    } catch {
+      return false;
+    }
+  });
 
   // Ensure scroll to top on initial page load / refresh and on tab changes
   useEffect(() => {
@@ -75,8 +83,14 @@ export default function App() {
     localStorage.setItem('justsmile_theme', theme);
   }, [theme]);
 
-  // Real-time synced collections
-  const [products, setProducts] = useState<Product[]>([]);
+  // Real-time synced collections with instant local caching
+  const [products, setProducts] = useState<Product[]>(() => {
+    try {
+      const cached = localStorage.getItem('just_smile_cached_products');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [userOrders, setUserOrders] = useState<Order[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]); // Array of favorited product IDs
@@ -111,11 +125,11 @@ export default function App() {
   const [showBarcodePrint, setShowBarcodePrint] = useState(false);
   const [productToPrint, setProductToPrint] = useState<Product | null>(null);
 
-  // Shop Info (persisted in Firestore settings/shop_info)
+  // Shop Info (persisted in Firestore settings/shop_info with instant local cache)
   const defaultShopInfo: ShopInfo = {
     companyName: 'JUST SMILE',
     activity: 'Vente de consommables et matériel dentaire',
-    phone: '0770821021 / 0780212989',
+    phone: '0770821021',
     email: 'justsmile0169@gmail.com',
     address: 'Algeria, Djelfa',
     nrc: '16/00-098544B',
@@ -124,7 +138,13 @@ export default function App() {
     tvaRate: 19,
     logoUrl: '/logo.png'
   };
-  const [shopInfo, setShopInfo] = useState<ShopInfo>(defaultShopInfo);
+  const [shopInfo, setShopInfo] = useState<ShopInfo>(() => {
+    try {
+      const cached = localStorage.getItem('just_smile_shop_info');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return defaultShopInfo;
+  });
 
   // Local state UI modifiers
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -284,14 +304,18 @@ export default function App() {
     };
   }, []);
 
-  // --- 3. Load Shop Settings from Firestore ---
+  // --- 3. Load Shop Settings from Firestore with LocalStorage cache ---
   useEffect(() => {
     const loadShopInfo = async () => {
       try {
         const settingsRef = doc(db, 'settings', 'shop_info');
         const snap = await getDoc(settingsRef).catch(() => null);
         if (snap && snap.exists()) {
-          setShopInfo(snap.data() as ShopInfo);
+          const data = snap.data() as ShopInfo;
+          setShopInfo(data);
+          try {
+            localStorage.setItem('just_smile_shop_info', JSON.stringify(data));
+          } catch {}
         }
       } catch {
         // Silent fallback for offline mode
@@ -300,27 +324,11 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. Synchronize Products Collection (Real-Time + Instant Cache) ---
+  // --- 4. Synchronize Products Collection (Real-Time + Local Storage Persistence) ---
   useEffect(() => {
     const q = collection(db, 'products');
 
-    // Instant local fetch so products load immediately on screen
-    getDocs(q).then((snapshot) => {
-      if (snapshot && !snapshot.empty) {
-        const items: Product[] = [];
-        snapshot.forEach((docSnap) => {
-          const product = { ...(docSnap.data() as Product), id: docSnap.id };
-          if (!product.isDeleted) {
-            items.push(product);
-          }
-        });
-        if (items.length > 0) {
-          setProducts((prev) => (prev.length === 0 ? items : prev));
-        }
-      }
-    }).catch(() => {});
-
-    // Real-time listener for ongoing updates
+    // Real-time listener handles both initial data & ongoing updates
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items: Product[] = [];
       snapshot.forEach((docSnap) => {
@@ -329,7 +337,12 @@ export default function App() {
           items.push(product);
         }
       });
-      setProducts(items);
+      if (items.length > 0) {
+        setProducts(items);
+        try {
+          localStorage.setItem('just_smile_cached_products', JSON.stringify(items));
+        } catch {}
+      }
     }, (err) => {
       console.warn("Products sync fallback:", err);
     });
@@ -1095,6 +1108,21 @@ export default function App() {
 
   return (
     <AppDialogProvider lang={lang}>
+      {/* Animated Splash Screen on First Entry */}
+      {showSplash && (
+        <SplashIntro
+          lang={lang}
+          onComplete={() => {
+            try {
+              sessionStorage.setItem('justsmile_intro_seen', '1');
+            } catch {
+              // ignore storage errors
+            }
+            setShowSplash(false);
+          }}
+        />
+      )}
+
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300" dir={isRtl ? 'rtl' : 'ltr'}>
 
         {/* Main layout container (hidden when printing invoice overlay) */}
@@ -1126,7 +1154,14 @@ export default function App() {
                 </p>
               </div>
             ) : (
-              <>
+              <Suspense fallback={
+                <div className="flex flex-col items-center justify-center min-h-[40vh] space-y-3">
+                  <div className="animate-spin rounded-full h-9 w-9 border-b-2 border-brand-cyan"></div>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                    {lang === 'fr' ? 'Chargement...' : 'جاري التحميل...'}
+                  </p>
+                </div>
+              }>
                 {/* Render appropriate views based on active tab state */}
                 {(activeTab === 'browse' || !['routine_clinic', 'most_requested', 'cart', 'auth', 'dashboard', 'admin', 'favorites', 'notifications'].includes(activeTab)) && (
                   <BrowseView
@@ -1361,47 +1396,48 @@ export default function App() {
                     )}
                   </div>
                 )}
-              </>
+              </Suspense>
             )}
           </main>
 
           <Footer lang={lang} shopInfo={shopInfo} />
 
           {/* --- OVERLAYS --- */}
+          <Suspense fallback={null}>
+            {showBarcodeScanner && (
+              <BarcodeScanner
+                lang={lang}
+                products={products}
+                user={currentUser}
+                onAddToCart={handleScannerAddToCart}
+                onPrintBarcode={handleScannerPrintBarcode}
+                onCreateProduct={handleScannerCreateProduct}
+                onClose={() => setShowBarcodeScanner(false)}
+              />
+            )}
 
-          {showBarcodeScanner && (
-            <BarcodeScanner
-              lang={lang}
-              products={products}
-              user={currentUser}
-              onAddToCart={handleScannerAddToCart}
-              onPrintBarcode={handleScannerPrintBarcode}
-              onCreateProduct={handleScannerCreateProduct}
-              onClose={() => setShowBarcodeScanner(false)}
-            />
-          )}
+            {/* Product Detail Modal */}
+            {selectedDetailProduct && (
+              <ProductDetailModal
+                product={selectedDetailProduct}
+                lang={lang}
+                onClose={() => setSelectedDetailProduct(null)}
+                onAddToCart={handleAddToCart}
+              />
+            )}
 
-          {/* Product Detail Modal */}
-          {selectedDetailProduct && (
-            <ProductDetailModal
-              product={selectedDetailProduct}
-              lang={lang}
-              onClose={() => setSelectedDetailProduct(null)}
-              onAddToCart={handleAddToCart}
-            />
-          )}
-
-          {/* Barcode Print View */}
-          {showBarcodePrint && productToPrint && (
-            <BarcodePrintView
-              product={productToPrint}
-              lang={lang}
-              onClose={() => {
-                setShowBarcodePrint(false);
-                setProductToPrint(null);
-              }}
-            />
-          )}
+            {/* Barcode Print View */}
+            {showBarcodePrint && productToPrint && (
+              <BarcodePrintView
+                product={productToPrint}
+                lang={lang}
+                onClose={() => {
+                  setShowBarcodePrint(false);
+                  setProductToPrint(null);
+                }}
+              />
+            )}
+          </Suspense>
         </div>
 
         {/* Invoice Printable PDF View */}

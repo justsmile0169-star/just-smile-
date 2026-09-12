@@ -97,10 +97,11 @@ export default function ProductCard({
           alt={product.name}
           width={300}
           height={300}
+          style={{ aspectRatio: '1 / 1' }}
           loading={loading || (priority ? 'eager' : 'lazy')}
           fetchPriority={priority ? 'high' : 'auto'}
           decoding="async"
-          className="object-contain w-full h-full p-2 group-hover:scale-105 transition-transform duration-300"
+          className="object-contain w-full h-full p-2 group-hover:scale-105 transition-transform duration-300 aspect-square"
           referrerPolicy="no-referrer"
         />
         {isOutOfStock && (

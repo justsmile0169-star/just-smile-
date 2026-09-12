@@ -144,7 +144,10 @@ export default function SearchableWilayaCommuneSelector({
             <div className="p-2.5 border-b border-slate-100 dark:border-slate-800 relative bg-slate-50 dark:bg-slate-800/50">
               <Search size={14} className={`absolute top-1/2 -translate-y-1/2 text-slate-400 ${isRtl ? 'right-5' : 'left-5'}`} />
               <input
-                type="text"
+                id="wilaya-search-input"
+                name="wilayaSearch"
+                type="search"
+                autoComplete="off"
                 value={wilayaSearch}
                 onChange={(e) => setWilayaSearch(e.target.value)}
                 placeholder={lang === 'fr' ? 'Rechercher par nom ou code (ex: 17, Djelfa)...' : 'ابحث بالاسم أو الرمز (مثال: 17، الجلفة)...'}
@@ -254,7 +257,10 @@ export default function SearchableWilayaCommuneSelector({
             <div className="p-2.5 border-b border-slate-100 dark:border-slate-800 relative bg-slate-50 dark:bg-slate-800/50">
               <Search size={14} className={`absolute top-1/2 -translate-y-1/2 text-slate-400 ${isRtl ? 'right-5' : 'left-5'}`} />
               <input
-                type="text"
+                id="commune-search-input"
+                name="communeSearch"
+                type="search"
+                autoComplete="off"
                 value={communeSearch}
                 onChange={(e) => setCommuneSearch(e.target.value)}
                 placeholder={lang === 'fr' ? 'Rechercher une commune...' : 'ابحث عن اسم البلدية...'}

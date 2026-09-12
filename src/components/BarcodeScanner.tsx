@@ -241,6 +241,8 @@ export default function BarcodeScanner({
                 className="flex flex-col sm:flex-row gap-2"
               >
                 <input
+                  id="barcode-manual-code-input"
+                  name="manualCode"
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
                   placeholder={lang === 'fr' ? 'Code-barres EAN / référence...' : 'باركود EAN / مرجع...'}
@@ -264,6 +266,10 @@ export default function BarcodeScanner({
                   <img
                     src={foundProduct.image}
                     alt=""
+                    width={80}
+                    height={80}
+                    loading="lazy"
+                    decoding="async"
                     className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shrink-0"
                   />
                 )}
@@ -280,10 +286,12 @@ export default function BarcodeScanner({
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500">
+                <label htmlFor="barcode-scanner-quantity" className="text-xs font-bold text-slate-500">
                   {lang === 'fr' ? 'Quantité à ajouter' : 'الكمية للإضافة'}
                 </label>
                 <input
+                  id="barcode-scanner-quantity"
+                  name="quantity"
                   type="number"
                   min={1}
                   max={foundProduct.stock}

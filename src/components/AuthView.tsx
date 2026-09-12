@@ -637,11 +637,16 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
 
             {/* Password */}
             <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'password')}</label>
+              <label htmlFor="link-account-password" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'password')}</label>
               <div className="relative">
                 <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                 <input
-                  type="password" required value={linkPassword}
+                  id="link-account-password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={linkPassword}
                   onChange={(e) => setLinkPassword(e.target.value)}
                   placeholder="••••••••"
                   className={inputCls()}
@@ -669,7 +674,7 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
                 onClick={() => {
                   setPendingLinkCredential(null);
                   setLinkEmail('');
-setSuccessMsg('');
+                  setSuccessMsg('');
                 }}
                 className="text-xs text-rose-500 hover:text-rose-600 font-bold transition-colors cursor-pointer"
               >
@@ -681,11 +686,16 @@ setSuccessMsg('');
           <form onSubmit={handleCompleteProfileSubmit} className="space-y-4 text-sm font-medium">
             {/* Name */}
             <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'name')}</label>
+              <label htmlFor="complete-profile-name" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'name')}</label>
               <div className="relative">
                 <User size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                 <input
-                  type="text" required value={name}
+                  id="complete-profile-name"
+                  name="name"
+                  type="text"
+                  autoComplete="name"
+                  required
+                  value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={lang === 'fr' ? 'Dr. Ahmed Benali' : 'د. أحمد بن علي'}
                   className={inputCls()}
@@ -695,11 +705,16 @@ setSuccessMsg('');
 
             {/* Phone */}
             <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'phone')}</label>
+              <label htmlFor="complete-profile-phone" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'phone')}</label>
               <div className="relative">
                 <Phone size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                 <input
-                  type="tel" required value={phone}
+                  id="complete-profile-phone"
+                  name="phone"
+                  type="tel"
+                  autoComplete="tel"
+                  required
+                  value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="0550 12 34 56"
                   className={inputCls()}
@@ -709,11 +724,15 @@ setSuccessMsg('');
 
             {/* Clinic Name */}
             <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'clinicName')}</label>
+              <label htmlFor="complete-profile-clinic" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'clinicName')}</label>
               <div className="relative">
                 <Building size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                 <input
-                  type="text" required value={clinicName}
+                  id="complete-profile-clinic"
+                  name="clinicName"
+                  type="text"
+                  required
+                  value={clinicName}
                   onChange={(e) => setClinicName(e.target.value)}
                   placeholder={lang === 'fr' ? 'Cabinet Dentaire El-Yasmine' : 'عيادة الياسمين لطب الأسنان'}
                   className={inputCls()}
@@ -788,11 +807,16 @@ setSuccessMsg('');
               <>
                 {/* Name */}
                 <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'name')}</label>
+                  <label htmlFor="auth-register-name" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'name')}</label>
                   <div className="relative">
                     <User size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                     <input
-                      type="text" required value={name}
+                      id="auth-register-name"
+                      name="name"
+                      type="text"
+                      autoComplete="name"
+                      required
+                      value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder={lang === 'fr' ? 'Dr. Ahmed Benali' : 'د. أحمد بن علي'}
                       className={inputCls()}
@@ -802,11 +826,16 @@ setSuccessMsg('');
 
                 {/* Phone */}
                 <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'phone')}</label>
+                  <label htmlFor="auth-register-phone" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'phone')}</label>
                   <div className="relative">
                     <Phone size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                     <input
-                      type="tel" required value={phone}
+                      id="auth-register-phone"
+                      name="phone"
+                      type="tel"
+                      autoComplete="tel"
+                      required
+                      value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       placeholder="0550 12 34 56"
                       className={inputCls()}
@@ -816,11 +845,15 @@ setSuccessMsg('');
 
                 {/* Clinic Name */}
                 <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'clinicName')}</label>
+                  <label htmlFor="auth-register-clinic" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'clinicName')}</label>
                   <div className="relative">
                     <Building size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                     <input
-                      type="text" required value={clinicName}
+                      id="auth-register-clinic"
+                      name="clinicName"
+                      type="text"
+                      required
+                      value={clinicName}
                       onChange={(e) => setClinicName(e.target.value)}
                       placeholder={lang === 'fr' ? 'Cabinet Dentaire El-Yasmine' : 'عيادة الياسمين لطب الأسنان'}
                       className={inputCls()}
@@ -845,11 +878,16 @@ setSuccessMsg('');
 
             {/* Email */}
             <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'email')}</label>
+              <label htmlFor="auth-email-input" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'email')}</label>
               <div className="relative">
                 <Mail size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                 <input
-                  type="email" required value={email}
+                  id="auth-email-input"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="dentiste@domain.com"
                   className={inputCls()}
@@ -859,11 +897,16 @@ setSuccessMsg('');
 
             {/* Password */}
             <div className="space-y-1">
-              <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'password')}</label>
+              <label htmlFor="auth-password-input" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'password')}</label>
               <div className="relative">
                 <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                 <input
-                  type="password" required value={password}
+                  id="auth-password-input"
+                  name="password"
+                  type="password"
+                  autoComplete={isLogin ? "current-password" : "new-password"}
+                  required
+                  value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className={inputCls()}

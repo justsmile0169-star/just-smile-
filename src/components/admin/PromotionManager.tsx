@@ -398,7 +398,7 @@ export default function PromotionManager({ lang, promotions, productsList, curre
                   {isVideoSource(imageUrl) ? (
                     <video src={imageUrl} controls className="w-full h-28 object-cover" />
                   ) : (
-                    <img src={imageUrl} alt="preview" className="w-full h-28 object-cover" />
+                    <img src={imageUrl} alt="preview" width={400} height={112} loading="lazy" decoding="async" className="w-full h-28 object-cover" />
                   )}
                   <button
                     type="button"

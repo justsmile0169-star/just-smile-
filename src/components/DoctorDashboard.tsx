@@ -929,13 +929,16 @@ export default function DoctorDashboard({
 
               {/* Doctor Name */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <label htmlFor="doctor-profile-name" className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   {getTranslation(lang, 'name')}
                 </label>
                 <div className="relative">
                   <User size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
+                    id="doctor-profile-name"
+                    name="doctorName"
                     type="text"
+                    autoComplete="name"
                     required
                     value={profileName}
                     onChange={(e) => setProfileName(e.target.value)}
@@ -947,13 +950,16 @@ export default function DoctorDashboard({
 
               {/* Phone Number */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <label htmlFor="doctor-profile-phone" className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   {getTranslation(lang, 'phone')}
                 </label>
                 <div className="relative">
                   <Phone size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
+                    id="doctor-profile-phone"
+                    name="doctorPhone"
                     type="tel"
+                    autoComplete="tel"
                     required
                     value={profilePhone}
                     onChange={(e) => setProfilePhone(e.target.value)}
@@ -965,12 +971,14 @@ export default function DoctorDashboard({
 
               {/* Clinic Name */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <label htmlFor="doctor-profile-clinic" className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   {getTranslation(lang, 'clinicName')}
                 </label>
                 <div className="relative">
                   <Building size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
+                    id="doctor-profile-clinic"
+                    name="doctorClinic"
                     type="text"
                     required
                     value={profileClinic}
@@ -1065,13 +1073,16 @@ export default function DoctorDashboard({
               </p>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <label htmlFor="doctor-new-password" className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   {lang === 'fr' ? 'Nouveau mot de passe' : 'كلمة المرور الجديدة'}
                 </label>
                 <div className="relative">
                   <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
+                    id="doctor-new-password"
+                    name="newPassword"
                     type="password"
+                    autoComplete="new-password"
                     required
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
@@ -1082,13 +1093,16 @@ export default function DoctorDashboard({
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <label htmlFor="doctor-confirm-password" className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   {lang === 'fr' ? 'Confirmer le mot de passe' : 'تأكيد كلمة المرور الجديدة'}
                 </label>
                 <div className="relative">
                   <Lock size={16} className="absolute top-1/2 -translate-y-1/2 text-slate-400 left-3 rtl:right-3 rtl:left-auto" />
                   <input
+                    id="doctor-confirm-password"
+                    name="confirmPassword"
                     type="password"
+                    autoComplete="new-password"
                     required
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
@@ -1142,10 +1156,12 @@ export default function DoctorDashboard({
 
             <div className="p-6 space-y-4">
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <label htmlFor="doctor-admin-message" className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   {lang === 'fr' ? 'Votre message' : 'رسالتك'}
                 </label>
                 <textarea
+                  id="doctor-admin-message"
+                  name="doctorAdminMessage"
                   value={messageText}
                   onChange={(e) => setMessageText(e.target.value)}
                   placeholder={lang === 'fr' ? 'Écrivez votre message ici...' : 'اكتب رسالتك هنا...'}

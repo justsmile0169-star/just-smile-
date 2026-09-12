@@ -1,14 +1,24 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr" dir="ltr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Just Smile</title>
-    <meta name="description" content="منصة تجارة B2B لمستلزمات طب الأسنان" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <title>Just Smile - Fournitures Dentaires B2B</title>
+    <meta name="description" content="منصة تجارة B2B لمستلزمات طب الأسنان والمعدات الطبية" />
     <meta name="theme-color" content="#06b6d4" />
+    
+    <!-- Preconnect & DNS-Prefetch for Speed -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="dns-prefetch" href="https://firestore.googleapis.com" />
+    <link rel="dns-prefetch" href="https://identitytoolkit.googleapis.com" />
+    
+    <!-- Google Fonts with display=swap to avoid blocking text render -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;700&display=swap" />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+    
+    <!-- Preload App Logo -->
+    <link rel="preload" as="image" href="/logo.png" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -16,10 +26,184 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="JUST SMILE" />
+
+    <style>
+      /* Neon Stroke Draw Animation Initial Styles */
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #051324;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        overflow-x: hidden;
+      }
+      #initial-loader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        width: 100vw;
+        background: radial-gradient(circle at 50% 40%, #0d2847 0%, #061527 60%, #030a14 100%);
+        font-family: inherit;
+        user-select: none;
+        position: relative;
+        overflow: hidden;
+      }
+      .ambient-glow {
+        position: absolute;
+        width: 320px;
+        height: 320px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(6, 182, 212, 0.25) 0%, rgba(6, 182, 212, 0) 70%);
+        filter: blur(40px);
+        animation: pulseGlow 2.5s infinite ease-in-out;
+      }
+      .logo-frame {
+        position: relative;
+        width: 220px;
+        height: 220px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .neon-svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      .neon-tooth-path {
+        stroke: #00e5ff;
+        stroke-width: 4;
+        stroke-linecap: round;
+        fill: none;
+        stroke-dasharray: 1200;
+        stroke-dashoffset: 1200;
+        filter: drop-shadow(0 0 8px #00e5ff) drop-shadow(0 0 16px rgba(6, 182, 212, 0.6));
+        animation: drawStroke 1.3s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+      }
+      .neon-smile-path {
+        stroke: #00e5ff;
+        stroke-width: 5;
+        stroke-linecap: round;
+        fill: none;
+        stroke-dasharray: 600;
+        stroke-dashoffset: 600;
+        filter: drop-shadow(0 0 10px #00e5ff);
+        animation: drawStroke 0.9s cubic-bezier(0.65, 0, 0.35, 1) 0.4s forwards;
+      }
+      .logo-img-wrap {
+        position: relative;
+        width: 180px;
+        height: 180px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transform: scale(0.92);
+        animation: revealLogo 1s cubic-bezier(0.2, 0.8, 0.2, 1) 0.6s forwards;
+      }
+      .logo-img-wrap img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        filter: drop-shadow(0 12px 30px rgba(6, 182, 212, 0.45));
+      }
+      .brand-text {
+        margin-top: 18px;
+        text-align: center;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeInUp 0.8s ease-out 0.8s forwards;
+      }
+      .brand-title {
+        font-size: 26px;
+        font-weight: 900;
+        letter-spacing: 2px;
+        color: #ffffff;
+        margin: 0;
+        text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+      }
+      .brand-sub {
+        font-size: 11px;
+        font-weight: 800;
+        color: #06b6d4;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        margin: 4px 0 0 0;
+      }
+      .loader-bar {
+        width: 140px;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 99px;
+        margin-top: 24px;
+        overflow: hidden;
+        position: relative;
+      }
+      .loader-bar-fill {
+        width: 40%;
+        height: 100%;
+        background: linear-gradient(90deg, #00e5ff, #06b6d4, #0284c7);
+        border-radius: 99px;
+        position: absolute;
+        box-shadow: 0 0 10px #00e5ff;
+        animation: slideBar 1.2s infinite ease-in-out;
+      }
+      @keyframes drawStroke {
+        0% { stroke-dashoffset: 1200; opacity: 0; }
+        20% { opacity: 1; }
+        100% { stroke-dashoffset: 0; opacity: 1; }
+      }
+      @keyframes revealLogo {
+        0% { opacity: 0; transform: scale(0.9); filter: brightness(1.5); }
+        100% { opacity: 1; transform: scale(1); filter: brightness(1); }
+      }
+      @keyframes fadeInUp {
+        0% { opacity: 0; transform: translateY(12px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes pulseGlow {
+        0%, 100% { transform: scale(1); opacity: 0.3; }
+        50% { transform: scale(1.15); opacity: 0.6; }
+      }
+      @keyframes slideBar {
+        0% { left: -40%; }
+        50% { left: 40%; width: 60%; }
+        100% { left: 100%; width: 40%; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Instant First-Frame Neon Draw Splash Screen -->
+      <div id="initial-loader">
+        <div class="ambient-glow"></div>
+        <div class="logo-frame">
+          <svg viewBox="0 0 400 400" class="neon-svg">
+            <path
+              d="M 120 80 C 180 80, 200 130, 260 100 C 300 80, 340 120, 330 170 C 310 250, 280 340, 220 350 C 180 355, 170 300, 150 300 C 130 300, 110 355, 80 340 C 40 320, 30 200, 40 140 C 50 90, 80 80, 120 80 Z"
+              class="neon-tooth-path"
+            />
+            <path
+              d="M 90 260 Q 200 370, 360 250"
+              class="neon-smile-path"
+            />
+          </svg>
+          <div class="logo-img-wrap">
+            <img src="/logo.png" alt="JUST SMILE" />
+          </div>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">JUST SMILE</h1>
+          <p class="brand-sub">Dental Supplies B2B</p>
+        </div>
+        <div class="loader-bar">
+          <div class="loader-bar-fill"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

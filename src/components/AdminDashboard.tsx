@@ -10,6 +10,7 @@ import { hasPermission } from '../utils/permissions';
 import { logActivity } from '../utils/activityLogger';
 import { deleteProductFully } from '../utils/productFirestore';
 import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../utils/yalidineService';
+import { sendOrderNotifications } from '../utils/orderNotificationService';
 import {
   DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
@@ -32,6 +33,7 @@ const AnnouncementsSection = lazy(() => import('./AnnouncementsSection'));
 const CatalogGenerator = lazy(() => import('./CatalogGenerator'));
 const DoctorMap = lazy(() => import('./DoctorMap'));
 const SupplierManager = lazy(() => import('./admin/SupplierManager'));
+const NotificationSettingsManager = lazy(() => import('./admin/NotificationSettingsManager').then(m => ({ default: m.NotificationSettingsManager })));
 
 interface AdminDashboardProps {
   lang: Language;
@@ -560,6 +562,11 @@ export default function AdminDashboard({
         `Créé une nouvelle facture/commande #${newOrderId.slice(-6).toUpperCase()} pour ${newOrderDoctorName}: ${netTotal} DA`,
         newOrderId
       );
+
+      // Trigger Telegram & WhatsApp notifications asynchronously
+      sendOrderNotifications(orderData).catch((err) => {
+        console.warn('Could not dispatch order notification:', err);
+      });
 
       alert(lang === 'fr' ? 'Facture créée avec succès !' : 'تم إنشاء الفاتورة والطلب بنجاح!', 'success');
       setShowCreateOrderModal(false);
@@ -3674,6 +3681,7 @@ export default function AdminDashboard({
 
       {/* 5. Shop Settings Panel */}
       {activeSubTab === 'settings' && (
+        <div className="space-y-8">
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
           <div className="border-b border-slate-50 pb-4">
             <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
@@ -3862,6 +3870,16 @@ export default function AdminDashboard({
               {lang === 'fr' ? 'Sauvegarder les Paramètres' : 'حفظ الإعدادات'}
             </button>
           </div>
+        </div>
+
+        {/* Telegram & WhatsApp Order Notifications Manager */}
+        <Suspense fallback={
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 flex items-center justify-center">
+            <Loader2 className="animate-spin text-brand-cyan" size={28} />
+          </div>
+        }>
+          <NotificationSettingsManager lang={lang} onShowToast={(msg, type) => alert(msg, type || 'info')} />
+        </Suspense>
         </div>
       )}
 

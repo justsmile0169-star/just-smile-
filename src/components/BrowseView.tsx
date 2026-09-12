@@ -79,34 +79,12 @@ export default function BrowseView({
 
   // Virtual local pagination for instant rendering without network requests
   const [displayLimit, setDisplayLimit] = useState(24);
-  const [fallbackProducts, setFallbackProducts] = useState<Product[]>([]);
-  const [loadingFallback, setLoadingFallback] = useState(false);
   const loaderRef = useRef<HTMLDivElement>(null);
 
   // Reset local pagination limit on category or search change
   useEffect(() => {
     setDisplayLimit(24);
   }, [selectedCategory, searchQuery]);
-
-  // Fallback fetch if products prop is initially empty
-  useEffect(() => {
-    if (!products || products.length === 0) {
-      setLoadingFallback(true);
-      getDocs(collection(db, 'products'))
-        .then((snap) => {
-          const items: Product[] = [];
-          snap.forEach((d) => {
-            const data = d.data() as Product;
-            if (!data.isDeleted) {
-              items.push({ ...data, id: d.id });
-            }
-          });
-          setFallbackProducts(items);
-        })
-        .catch(() => {}) // Silent catch for offline mode
-        .finally(() => setLoadingFallback(false));
-    }
-  }, [products]);
 
   // Handle outside click for category dropdown
   useEffect(() => {
@@ -175,7 +153,7 @@ export default function BrowseView({
   const activeCategoryObj = categories.find((c) => c.id === selectedCategory) || categories[0];
   const ActiveCategoryIcon = activeCategoryObj.icon;
 
-  const activeProducts = (products && products.length > 0) ? products : fallbackProducts;
+  const activeProducts = products || [];
 
   // Normalize text for Arabic (diacritics/letter variants) and French accents
   const normalizeText = (str: string): string => {
@@ -329,7 +307,10 @@ export default function BrowseView({
                   <Search size={16} />
                 </button>
                 <input
-                  type="text"
+                  id="catalog-search-input"
+                  name="catalogSearch"
+                  type="search"
+                  autoComplete="off"
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
@@ -553,7 +534,7 @@ export default function BrowseView({
       </div>
 
       {/* Products Grid list */}
-      {loadingFallback && activeProducts.length === 0 ? (
+      {activeProducts.length === 0 ? (
         <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-1.5 sm:gap-3 md:gap-5">
           {Array.from({ length: 9 }).map((_, idx) => (
             <div key={idx} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-3 space-y-3 animate-pulse">

@@ -109,3 +109,102 @@ exports.signInStaff = functions.https.onCall(async (data, context) => {
     );
   }
 });
+
+/**
+ * Firestore Trigger on new order creation
+ * Sends real-time Telegram & WhatsApp notifications based on settings/notification_config
+ */
+exports.onOrderCreated = functions.firestore
+  .document('orders/{orderId}')
+  .onCreate(async (snap, context) => {
+    const orderData = snap.data();
+    if (!orderData) return null;
+
+    try {
+      const configDoc = await admin.firestore().doc('settings/notification_config').get();
+      if (!configDoc.exists) return null;
+
+      const config = configDoc.data();
+      if (!config || !config.enabled) return null;
+
+      const orderRef = snap.id.slice(-6).toUpperCase();
+      const shopTitle = config.template?.shopTitle || 'JUST SMILE';
+      const orderTime = orderData.createdAt ? new Date(orderData.createdAt).toLocaleString('fr-DZ') : new Date().toLocaleString();
+
+      // Format Telegram text
+      let tgMsg = `🛍 <b>طلب جديد في ${shopTitle}!</b>\n`;
+      tgMsg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      tgMsg += `🔖 <b>رقم الطلبية:</b> #<code>${orderRef}</code>\n`;
+      tgMsg += `🕒 <b>التوقيت:</b> ${orderTime}\n\n`;
+      tgMsg += `👤 <b>معلومات العميل:</b>\n`;
+      tgMsg += `• <b>الاسم:</b> ${orderData.doctorName || 'زبون زائر'}\n`;
+      if (orderData.doctorPhone) tgMsg += `• <b>الهاتف:</b> <code>${orderData.doctorPhone}</code>\n`;
+      if (orderData.doctorClinic) tgMsg += `• <b>العيادة:</b> ${orderData.doctorClinic}\n`;
+      const location = [orderData.doctorWilayaName, orderData.doctorCommuneName].filter(Boolean).join(' - ');
+      if (location) tgMsg += `• <b>العنوان:</b> ${location}\n`;
+
+      if (Array.isArray(orderData.items) && orderData.items.length > 0) {
+        tgMsg += `\n📦 <b>المنتجات المطلوبة (${orderData.items.length}):</b>\n`;
+        orderData.items.forEach((item, idx) => {
+          const varName = item.variantName ? ` (${item.variantName})` : '';
+          const lineTotal = (item.price || 0) * (item.quantity || 1);
+          tgMsg += `${idx + 1}. <b>${item.name}</b>${varName} × ${item.quantity} = <b>${lineTotal.toLocaleString()} DA</b>\n`;
+        });
+      }
+
+      tgMsg += `\n💰 <b>الصافي الإجمالي: <u>${(orderData.totalAfterDiscount || 0).toLocaleString()} DA</u></b>\n`;
+      if (orderData.notes) tgMsg += `\n📝 <b>الملاحظات:</b> <i>${orderData.notes}</i>\n`;
+
+      // Format WhatsApp text
+      let waMsg = `🛍 *طلب جديد في ${shopTitle}!*\n`;
+      waMsg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      waMsg += `🔖 *رقم الطلبية:* #${orderRef}\n`;
+      waMsg += `👤 *الاسم:* ${orderData.doctorName || 'زبون زائر'}\n`;
+      if (orderData.doctorPhone) waMsg += `📞 *الهاتف:* ${orderData.doctorPhone}\n`;
+      if (orderData.doctorClinic) waMsg += `🏢 *العيادة:* ${orderData.doctorClinic}\n`;
+      if (location) waMsg += `📍 *العنوان:* ${location}\n`;
+      waMsg += `💰 *الصافي الإجمالي: ${(orderData.totalAfterDiscount || 0).toLocaleString()} DA*\n`;
+
+      // 1. Send Telegram
+      if ((config.channel === 'telegram' || config.channel === 'both') && config.telegram?.enabled && config.telegram?.botToken) {
+        const activeTg = (config.telegram.recipients || []).filter(r => r.enabled && r.chatId);
+        for (const recipient of activeTg) {
+          try {
+            await fetch(`https://api.telegram.org/bot${config.telegram.botToken.trim()}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: recipient.chatId.trim(),
+                text: tgMsg,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+              })
+            });
+          } catch (e) {
+            console.error('Cloud Function Telegram send error:', e);
+          }
+        }
+      }
+
+      // 2. Send WhatsApp (CallMeBot)
+      if ((config.channel === 'whatsapp' || config.channel === 'both') && config.whatsapp?.enabled) {
+        if (config.whatsapp.provider === 'callmebot') {
+          const activeWa = (config.whatsapp.callmebotRecipients || []).filter(r => r.enabled && r.phone && r.apiKey);
+          for (const rec of activeWa) {
+            try {
+              let phone = rec.phone.replace(/[^\d+]/g, '');
+              if (phone.startsWith('0') && phone.length === 10) phone = '+213' + phone.substring(1);
+              const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(waMsg)}&apikey=${encodeURIComponent(rec.apiKey.trim())}`;
+              await fetch(url);
+            } catch (e) {
+              console.error('Cloud Function WhatsApp send error:', e);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error executing onOrderCreated trigger:', err);
+    }
+    return null;
+  });
+

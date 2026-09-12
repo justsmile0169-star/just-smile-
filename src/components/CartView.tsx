@@ -13,6 +13,7 @@ import {
 
 import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
 import { cleanFirestoreData } from '../utils/firestoreHelpers';
+import { sendOrderNotifications } from '../utils/orderNotificationService';
 
 interface CartViewProps {
   cart: CartItem[];
@@ -195,7 +196,11 @@ export default function CartView({
         if (Array.isArray(queued) && queued.length > 0) {
           for (const ord of queued) {
             const newDocRef = doc(collection(db, 'orders'));
-            await setDoc(newDocRef, cleanFirestoreData({ ...ord, id: newDocRef.id }));
+            const fullOrd = cleanFirestoreData({ ...ord, id: newDocRef.id });
+            await setDoc(newDocRef, fullOrd);
+            sendOrderNotifications(fullOrd as Order).catch((err) => {
+              console.warn('Could not dispatch offline order notification:', err);
+            });
           }
           localStorage.removeItem('justsmile_offline_orders');
           alert(
@@ -403,6 +408,11 @@ export default function CartView({
       console.log('Creating order document:', newOrder);
       await setDoc(newOrderDocRef, cleanFirestoreData(newOrder));
 
+      // Dispatch real-time Telegram and/or WhatsApp notifications
+      sendOrderNotifications(newOrder).catch((notifErr) => {
+        console.warn('Could not send order notification:', notifErr);
+      });
+
       // Decrement inventory stock & update salesCount (aggregated by product ID to avoid batch duplicates)
       try {
         const productUpdatesMap = new Map<string, {
@@ -588,7 +598,10 @@ export default function CartView({
 
           <div className="relative">
             <input
-              type="text"
+              id="cart-quick-search-input"
+              name="quickSearch"
+              type="search"
+              autoComplete="off"
               value={quickSearch}
               onFocus={() => setShowQuickDropdown(true)}
               onChange={(e) => {
@@ -952,11 +965,14 @@ export default function CartView({
                   <div className="space-y-3 pt-1">
                     {/* Name */}
                     <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                      <label htmlFor="guest-checkout-name" className="text-[11px] font-bold text-slate-600 block mb-1">
                         {lang === 'fr' ? 'Nom et Prénom *' : 'الإسم واللقب *'}
                       </label>
                       <input
+                        id="guest-checkout-name"
+                        name="guestName"
                         type="text"
+                        autoComplete="name"
                         required
                         value={guestName}
                         onChange={(e) => setGuestName(e.target.value)}
@@ -967,11 +983,14 @@ export default function CartView({
 
                     {/* Phone */}
                     <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                      <label htmlFor="guest-checkout-phone" className="text-[11px] font-bold text-slate-600 block mb-1">
                         {lang === 'fr' ? 'Numéro de téléphone *' : 'رقم الهاتف *'}
                       </label>
                       <input
+                        id="guest-checkout-phone"
+                        name="guestPhone"
                         type="tel"
+                        autoComplete="tel"
                         required
                         value={guestPhone}
                         onChange={(e) => setGuestPhone(e.target.value)}
@@ -1164,8 +1183,10 @@ export default function CartView({
               {/* Delivery Notes */}
               {(!user || (user && !isBlockedFromOrdering)) && (
                 <div className="space-y-1">
-                  <label className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'notes')}</label>
+                  <label htmlFor="delivery-notes" className="text-slate-500 font-bold text-xs">{getTranslation(lang, 'notes')}</label>
                   <textarea
+                    id="delivery-notes"
+                    name="deliveryNotes"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder={lang === 'fr' ? 'Indiquez des détails pour le livreur (ex: adresse exacte)...' : 'العنوان التفصيلي أو أية ملاحظات للتوصيل...'}
