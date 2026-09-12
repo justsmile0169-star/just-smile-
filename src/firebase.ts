@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, setLogLevel } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+import { getStorage } from 'firebase/storage';
 
 // Configuration reading from environment variables with fallback to the user's new Firebase project
 const firebaseConfig = {
@@ -35,5 +36,8 @@ const auth = getAuth(app);
 // Initialize Firebase Functions
 const functions = getFunctions(app);
 
-export { app, db, auth, functions };
+// Initialize Firebase Storage
+const storage = getStorage(app);
+
+export { app, db, auth, functions, storage };
 export default app;

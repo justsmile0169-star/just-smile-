@@ -10,8 +10,8 @@ import { hasPermission } from '../utils/permissions';
 import { logActivity } from '../utils/activityLogger';
 import { deleteProductFully } from '../utils/productFirestore';
 import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../utils/yalidineService';
-import { sendOrderNotifications } from '../utils/orderNotificationService';
 import { compressImage } from '../utils/localProductStorage';
+import { uploadImageToCloud, migrateAllProductsToCloud, MigrationProgress } from '../utils/cloudImageStorage';
 import {
   DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
@@ -122,6 +122,9 @@ export default function AdminDashboard({
   const allDoctors = usersList.filter((u) => u.role === 'doctor');
 
   const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
+  const [isMigratingImages, setIsMigratingImages] = useState(false);
+  const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // --- Doctor Profile Update Requests State ---
   const [doctorSubView, setDoctorSubView] = useState<'all' | 'requests'>('all');
@@ -1181,13 +1184,15 @@ export default function AdminDashboard({
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setIsUploadingImage(true);
     try {
+      const cloudUrl = await uploadImageToCloud(file, 'products');
+      setPImage(cloudUrl);
+    } catch {
       const compressed = await compressImage(file, 600, 600, 0.72);
       setPImage(compressed);
-    } catch {
-      const reader = new FileReader();
-      reader.onload = () => setPImage(reader.result as string);
-      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingImage(false);
     }
   };
 
@@ -3684,7 +3689,100 @@ export default function AdminDashboard({
       {/* 5. Shop Settings Panel */}
       {activeSubTab === 'settings' && (
         <div className="space-y-8">
-        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
+          {/* Cloud Image Migration Card (Super Performance Booster) */}
+          <div className="bg-gradient-to-r from-sky-500/5 via-cyan-500/10 to-teal-500/5 p-6 md:p-8 rounded-3xl border border-cyan-200/60 dark:border-cyan-800/40 shadow-xs space-y-5">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="space-y-1 max-w-2xl">
+                <div className="flex items-center gap-2">
+                  <span className="p-2 bg-brand-cyan/10 text-brand-cyan rounded-xl">
+                    <Cloud size={22} className="animate-pulse" />
+                  </span>
+                  <h3 className="text-lg font-black text-slate-900 dark:text-slate-100">
+                    {lang === 'fr' ? 'Migration des Images vers le Cloud ⚡' : 'ترقية الصور إلى السحابة السريعة (Cloud Migration) ⚡'}
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed pt-1">
+                  {lang === 'fr'
+                    ? 'Convertit automatiquement toutes les anciennes images Base64 stockées dans la base en URLs Cloud ultra-rapides. Réduit le poids de la base de 99% et permet un affichage immédiat sans aucun temps d\'attente.'
+                    : 'يقوم بنقرة واحدة بتحويل جميع الصور القديمة المخزنة داخل قاعدة البيانات (Base64) إلى روابط سحابية فائقة السرعة (Cloud URLs)، مما يقلل حجم قاعدة البيانات بنسبة 99% ويجعل المنتجات تفتح بشكل فوري تماماً.'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={isMigratingImages}
+                onClick={async () => {
+                  const confirmed = await confirm(
+                    lang === 'fr'
+                      ? 'Voulez-vous lancer la migration de toutes les images de produits vers le Cloud ? Cette opération est automatique et sécurisée.'
+                      : 'هل ترغب في بدء تحويل جميع صور المنتجات الحالية إلى روابط سحابية خفيفة؟ العملية آمنة وتلقائية بالكامل.'
+                  );
+                  if (!confirmed) return;
+
+                  setIsMigratingImages(true);
+                  setMigrationProgress({ current: 0, total: 0, currentProduct: '', percentage: 0 });
+                  try {
+                    const result = await migrateAllProductsToCloud((progress) => {
+                      setMigrationProgress(progress);
+                    });
+                    alert(
+                      lang === 'fr'
+                        ? `Migration terminée avec succès ! (${result.success} produits migrés, ${result.skipped} déjà optimisés).`
+                        : `تمت ترقية الصور بنجاح تام! (تم تحويل ${result.success} منتج، و ${result.skipped} كانت محسنة مسبقاً).`,
+                      'success'
+                    );
+                    onRefreshData();
+                  } catch (err: any) {
+                    alert(
+                      lang === 'fr'
+                        ? `Erreur lors de la migration: ${err?.message || 'Erreur inconnue'}`
+                        : `حدث خطأ أثناء التحويل: ${err?.message || 'خطأ غير معروف'}`,
+                      'error'
+                    );
+                  } finally {
+                    setIsMigratingImages(false);
+                    setMigrationProgress(null);
+                  }
+                }}
+                className="bg-brand-cyan hover:bg-brand-cyan/90 text-white font-extrabold text-xs md:text-sm px-6 py-3.5 rounded-2xl shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                {isMigratingImages ? (
+                  <>
+                    <Loader2 className="animate-spin" size={18} />
+                    <span>{lang === 'fr' ? 'Migration en cours...' : 'جاري التحويل...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Cloud size={18} />
+                    <span>{lang === 'fr' ? 'Démarrer la Migration vers le Cloud' : 'بدء تحويل جميع الصور إلى السحابة'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Real-time Progress Bar */}
+            {isMigratingImages && migrationProgress && (
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-cyan-100 dark:border-cyan-900/40 space-y-2">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-200">
+                  <span className="truncate max-w-md">
+                    {lang === 'fr' ? 'En cours: ' : 'جاري معالجة: '}
+                    <span className="text-brand-cyan">{migrationProgress.currentProduct}</span>
+                  </span>
+                  <span>
+                    {migrationProgress.current} / {migrationProgress.total} ({migrationProgress.percentage}%)
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3 overflow-hidden">
+                  <div
+                    className="bg-brand-cyan h-3 rounded-full transition-all duration-300"
+                    style={{ width: `${migrationProgress.percentage}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
           <div className="border-b border-slate-50 pb-4">
             <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
               <Settings size={20} className="text-brand-cyan" />
@@ -5159,16 +5257,11 @@ export default function AdminDashboard({
                                         const file = e.target.files?.[0];
                                         if (!file) return;
                                         try {
+                                          const cloudUrl = await uploadImageToCloud(file, 'variants');
+                                          handleUpdateVariant(v.id, 'image', cloudUrl);
+                                        } catch {
                                           const compressed = await compressImage(file, 500, 500, 0.72);
                                           handleUpdateVariant(v.id, 'image', compressed);
-                                        } catch {
-                                          const reader = new FileReader();
-                                          reader.onload = (event) => {
-                                            if (event.target?.result) {
-                                              handleUpdateVariant(v.id, 'image', event.target.result as string);
-                                            }
-                                          };
-                                          reader.readAsDataURL(file);
                                         }
                                         e.target.value = '';
                                       }}
@@ -5355,6 +5448,12 @@ export default function AdminDashboard({
                     <img src={pImage} alt="" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-brand-cyan/10 file:text-brand-cyan file:font-bold" />
+                  {isUploadingImage && (
+                    <div className="flex items-center gap-1.5 text-xs text-brand-cyan font-bold">
+                      <Loader2 className="animate-spin" size={14} />
+                      <span>{lang === 'fr' ? 'Téléversement...' : 'جاري الرفع...'}</span>
+                    </div>
+                  )}
                 </div>
                 <input
                   type="url"
