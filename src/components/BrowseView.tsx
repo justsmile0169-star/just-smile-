@@ -92,25 +92,6 @@ export default function BrowseView({
     setDisplayLimit(30);
   }, [selectedCategory, searchQuery]);
 
-  // Auto-scroll infinite display pagination observer
-  useEffect(() => {
-    const el = loaderRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setDisplayLimit((prev) => prev + 30);
-          if (onLoadMoreProducts) {
-            onLoadMoreProducts();
-          }
-        }
-      },
-      { rootMargin: '350px' }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [filteredProducts.length, onLoadMoreProducts]);
-
   // Handle outside click for category dropdown
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -255,6 +236,25 @@ export default function BrowseView({
   }, [filteredProducts, displayLimit]);
 
   const hasMoreLocal = displayedProducts.length < filteredProducts.length;
+
+  // Auto-scroll infinite display pagination observer
+  useEffect(() => {
+    const el = loaderRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayLimit((prev) => prev + 30);
+          if (onLoadMoreProducts) {
+            onLoadMoreProducts();
+          }
+        }
+      },
+      { rootMargin: '350px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [filteredProducts.length, onLoadMoreProducts]);
 
   // Smart Search suggestions (max 6 suggestions)
   const searchSuggestions = useMemo(() => {
