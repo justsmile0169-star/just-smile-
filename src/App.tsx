@@ -2,7 +2,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import {
   collection, onSnapshot, query, where, doc, getDoc, getDocs, getDocFromServer, setDoc,
-  writeBatch, addDoc, updateDoc, deleteDoc, getCountFromServer
+  writeBatch, addDoc, updateDoc, deleteDoc, getCountFromServer, limit, orderBy
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import {
@@ -324,12 +324,34 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. Synchronize Products Collection (Real-Time + Local Storage Persistence) ---
+  // --- 4. Synchronize Products Collection (Fast Initial Fetch + Real-Time Listener) ---
   useEffect(() => {
-    const q = collection(db, 'products');
+    let isMounted = true;
+    const productsCol = collection(db, 'products');
 
-    // Real-time listener handles both initial data & ongoing updates
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    // 1. Instant parallel getDocs for ultra-fast first-time initial render
+    getDocs(productsCol)
+      .then((snapshot) => {
+        if (!isMounted) return;
+        const items: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const p = { ...(docSnap.data() as Product), id: docSnap.id };
+          if (!p.isDeleted) items.push(p);
+        });
+        if (items.length > 0) {
+          setProducts(items);
+          try {
+            localStorage.setItem('just_smile_cached_products', JSON.stringify(items));
+          } catch {}
+        }
+      })
+      .catch((err) => {
+        console.warn("Initial products getDocs notice:", err);
+      });
+
+    // 2. Real-time onSnapshot for live inventory, price & product updates
+    const unsubscribe = onSnapshot(productsCol, (snapshot) => {
+      if (!isMounted) return;
       const items: Product[] = [];
       snapshot.forEach((docSnap) => {
         const product = { ...(docSnap.data() as Product), id: docSnap.id };
@@ -347,8 +369,11 @@ export default function App() {
       console.warn("Products sync fallback:", err);
     });
 
-    return () => unsubscribe();
-  }, [currentUser]);
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
 
   // Protective routing redirect for unauthenticated or unauthorized users to prevent blank screen
   useEffect(() => {
@@ -679,26 +704,6 @@ export default function App() {
         console.error("Error syncing all orders for admin:", err);
       });
 
-      const paymentsQuery = collection(db, 'payments');
-      const unsubscribePayments = onSnapshot(paymentsQuery, (snapshot) => {
-        const items: Payment[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Payment, 'id'>) });
-        });
-        setPaymentsList(items.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)));
-      }, (err) => {
-        console.error("Error syncing payments for admin:", err);
-      });
-
-      const returnsQuery = collection(db, 'returns');
-      const unsubscribeReturns = onSnapshot(returnsQuery, (snapshot) => {
-        const items: ProductReturn[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ProductReturn, 'id'>) });
-        });
-        setReturnsList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
-      });
-
       const promotionsQuery = collection(db, 'promotions');
       const unsubscribePromotions = onSnapshot(promotionsQuery, (snapshot) => {
         const items: Promotion[] = [];
@@ -707,81 +712,6 @@ export default function App() {
         });
         setPromotionsList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
       });
-
-      const expensesQuery = collection(db, 'expenses');
-      const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
-        const items: Expense[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Expense, 'id'>) });
-        });
-        setExpensesList(items.sort((a, b) => b.date.localeCompare(a.date)));
-      });
-
-      const logsQuery = collection(db, 'activity_logs');
-      const unsubscribeLogs = onSnapshot(logsQuery, (snapshot) => {
-        const items: ActivityLog[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ActivityLog, 'id'>) });
-        });
-        setActivityLogsList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200));
-      });
-
-      // Sync suppliers
-      const suppliersQuery = collection(db, 'suppliers');
-      const unsubscribeSuppliers = onSnapshot(suppliersQuery, (snapshot) => {
-        const items: Supplier[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Supplier, 'id'>) });
-        });
-        setSuppliersList(items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
-      });
-
-      // Sync purchase invoices
-      const purchasesQuery = collection(db, 'purchases');
-      const unsubscribePurchases = onSnapshot(purchasesQuery, (snapshot) => {
-        const items: PurchaseInvoice[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<PurchaseInvoice, 'id'>) });
-        });
-        setPurchasesList(items.sort((a, b) => b.date.localeCompare(a.date)));
-      });
-
-      // Sync supplier payments
-      const supplierPaymentsQuery = collection(db, 'supplier_payments');
-      const unsubscribeSupplierPayments = onSnapshot(supplierPaymentsQuery, (snapshot) => {
-        const items: SupplierPayment[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<SupplierPayment, 'id'>) });
-        });
-        setSupplierPaymentsList(items.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)));
-      });
-
-      // Sync doctor profile update requests
-      const profileRequestsQuery = collection(db, 'profile_update_requests');
-      const unsubscribeProfileRequests = onSnapshot(profileRequestsQuery, (snapshot) => {
-        const items: ProfileUpdateRequest[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ProfileUpdateRequest, 'id'>) });
-        });
-        setProfileUpdateRequestsList(items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
-      });
-
-      // Sync admin messages (only for admin role)
-      let unsubscribeMessages = () => { };
-      if (currentUser.role === 'admin') {
-        const messagesQuery = collection(db, 'admin_messages');
-        unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
-          const items: AdminMessage[] = [];
-          snapshot.forEach((docSnap) => {
-            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdminMessage, 'id'>) });
-          });
-          setAdminMessagesList(items.sort((a, b) => {
-            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateB - dateA;
-          }));
-        });
-      }
 
       // Sync admin notifications
       const notifsQuery = query(collection(db, 'notifications'), where('userId', '==', 'admin'));
@@ -794,6 +724,109 @@ export default function App() {
       }, (err) => {
         console.error("Error syncing admin notifications:", err);
       });
+
+      // Heavy Admin Sub-collections (Synced on-demand when activeTab === 'admin' to save RAM & bandwidth)
+      let unsubscribePayments = () => {};
+      let unsubscribeReturns = () => {};
+      let unsubscribeExpenses = () => {};
+      let unsubscribeLogs = () => {};
+      let unsubscribeSuppliers = () => {};
+      let unsubscribePurchases = () => {};
+      let unsubscribeSupplierPayments = () => {};
+      let unsubscribeProfileRequests = () => {};
+      let unsubscribeMessages = () => {};
+
+      if (activeTab === 'admin') {
+        const paymentsQuery = collection(db, 'payments');
+        unsubscribePayments = onSnapshot(paymentsQuery, (snapshot) => {
+          const items: Payment[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Payment, 'id'>) });
+          });
+          setPaymentsList(items.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)));
+        }, (err) => {
+          console.error("Error syncing payments for admin:", err);
+        });
+
+        const returnsQuery = collection(db, 'returns');
+        unsubscribeReturns = onSnapshot(returnsQuery, (snapshot) => {
+          const items: ProductReturn[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ProductReturn, 'id'>) });
+          });
+          setReturnsList(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+        });
+
+        const expensesQuery = collection(db, 'expenses');
+        unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
+          const items: Expense[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Expense, 'id'>) });
+          });
+          setExpensesList(items.sort((a, b) => b.date.localeCompare(a.date)));
+        });
+
+        // Limit activity logs to newest 150 items to prevent huge RAM consumption
+        const logsQuery = query(collection(db, 'activity_logs'), orderBy('createdAt', 'desc'), limit(150));
+        unsubscribeLogs = onSnapshot(logsQuery, (snapshot) => {
+          const items: ActivityLog[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ActivityLog, 'id'>) });
+          });
+          setActivityLogsList(items);
+        });
+
+        const suppliersQuery = collection(db, 'suppliers');
+        unsubscribeSuppliers = onSnapshot(suppliersQuery, (snapshot) => {
+          const items: Supplier[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Supplier, 'id'>) });
+          });
+          setSuppliersList(items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+        });
+
+        const purchasesQuery = collection(db, 'purchases');
+        unsubscribePurchases = onSnapshot(purchasesQuery, (snapshot) => {
+          const items: PurchaseInvoice[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<PurchaseInvoice, 'id'>) });
+          });
+          setPurchasesList(items.sort((a, b) => b.date.localeCompare(a.date)));
+        });
+
+        const supplierPaymentsQuery = collection(db, 'supplier_payments');
+        unsubscribeSupplierPayments = onSnapshot(supplierPaymentsQuery, (snapshot) => {
+          const items: SupplierPayment[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<SupplierPayment, 'id'>) });
+          });
+          setSupplierPaymentsList(items.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)));
+        });
+
+        const profileRequestsQuery = collection(db, 'profile_update_requests');
+        unsubscribeProfileRequests = onSnapshot(profileRequestsQuery, (snapshot) => {
+          const items: ProfileUpdateRequest[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ProfileUpdateRequest, 'id'>) });
+          });
+          setProfileUpdateRequestsList(items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+        });
+
+        if (currentUser.role === 'admin') {
+          const messagesQuery = collection(db, 'admin_messages');
+          unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+            const items: AdminMessage[] = [];
+            snapshot.forEach((docSnap) => {
+              items.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdminMessage, 'id'>) });
+            });
+            setAdminMessagesList(items.sort((a, b) => {
+              const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+              const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+              return dateB - dateA;
+            }));
+          });
+        }
+      }
 
       return () => {
         unsubscribeUsers();
@@ -817,7 +850,7 @@ export default function App() {
       unsubscribeNotifications();
       unsubscribeFavorites();
     };
-  }, [currentUser]);
+  }, [currentUser, activeTab]);
 
   // Auto-check for debt payment reminders (1 day before 15-day deadline)
   useEffect(() => {
@@ -1146,7 +1179,7 @@ export default function App() {
 
           {/* Main Container Content */}
           <main className="flex-1 w-full mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-10 max-w-7xl">
-            {loadingUser ? (
+            {loadingUser && (activeTab === 'admin' || activeTab === 'dashboard') ? (
               <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-3">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-cyan"></div>
                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
