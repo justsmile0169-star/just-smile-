@@ -18,13 +18,12 @@ const firebaseConfig = {
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with local cache for offline/low bandwidth optimization and stable connection
+// Initialize Firestore with persistent local cache for offline speed and fast instant loads
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
   }),
-  ignoreUndefinedProperties: true,
-  experimentalAutoDetectLongPolling: true
+  ignoreUndefinedProperties: true
 });
 
 // Silence verbose internal Firebase SDK connection logs in browser console
