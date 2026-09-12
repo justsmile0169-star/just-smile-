@@ -104,6 +104,11 @@ export const SplashIntro: React.FC<SplashIntroProps> = ({ onComplete, lang = 'ar
             <img
               src="/logo.png"
               alt="JUST SMILE"
+              width={256}
+              height={256}
+              loading="eager"
+              decoding="async"
+              style={{ aspectRatio: '1 / 1' }}
               className={`w-full h-full object-contain filter drop-shadow-[0_10px_25px_rgba(6,182,212,0.4)] transition-all duration-1000 ${
                 stage === 'drawing'
                   ? 'opacity-80 scale-95 brightness-110'

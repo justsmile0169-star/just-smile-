@@ -3730,7 +3730,7 @@ export default function AdminDashboard({
 
           {/* Logo Preview */}
           <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-            <img src={getLogoUrl(shopForm.logoUrl)} alt="Logo preview" width={64} height={64} loading="lazy" decoding="async" className="h-16 w-auto max-w-[120px] object-contain rounded-xl border border-slate-200 bg-white p-1" />
+            <img src={getLogoUrl(shopForm.logoUrl)} alt="Logo preview" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="h-16 w-16 object-contain rounded-xl border border-slate-200 bg-white p-1 shrink-0" />
             <div>
               <p className="text-xs font-bold text-slate-700">{lang === 'fr' ? 'Aperçu du Logo' : 'معاينة الشعار'}</p>
               <p className="text-xs text-slate-400 mt-0.5">{lang === 'fr' ? 'Visible sur le site, le pied de page et les factures.' : 'يظهر في الموقع والفوتر والفواتير.'}</p>
@@ -5176,7 +5176,7 @@ export default function AdminDashboard({
                                     </label>
                                   </div>
                                   {v.image && (
-                                    <img src={v.image} alt={v.name} width={32} height={32} loading="lazy" decoding="async" className="w-8 h-8 rounded-lg object-cover border border-slate-200 mt-1 shadow-2xs" />
+                                    <img src={v.image} alt={v.name} width={32} height={32} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-8 h-8 rounded-lg object-cover border border-slate-200 mt-1 shadow-2xs shrink-0" />
                                   )}
                                 </div>
                               </div>
@@ -5345,7 +5345,7 @@ export default function AdminDashboard({
                 </label>
                 <div className="flex items-center gap-3">
                   {pImage && (
-                    <img src={pImage} alt="" width={64} height={64} loading="lazy" decoding="async" className="w-16 h-16 rounded-xl object-cover border border-slate-200" />
+                    <img src={pImage} alt="" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-brand-cyan/10 file:text-brand-cyan file:font-bold" />
                 </div>

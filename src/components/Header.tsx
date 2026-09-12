@@ -68,7 +68,8 @@ export default function Header({
               loading="eager"
               fetchPriority="high"
               decoding="async"
-              className="h-10 w-auto md:h-12 object-contain shrink-0"
+              style={{ aspectRatio: '1 / 1' }}
+              className="h-10 w-10 md:h-12 md:w-12 object-contain shrink-0"
             />
             <div className="flex flex-col">
               <span className="text-xl md:text-2xl font-black tracking-tight text-brand-dark dark:text-slate-100">

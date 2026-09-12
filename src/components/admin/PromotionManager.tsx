@@ -263,7 +263,7 @@ export default function PromotionManager({ lang, promotions, productsList, curre
                     isVid ? (
                       <video src={promo.imageUrl} className="w-12 h-12 object-cover rounded-lg border border-slate-200" muted />
                     ) : (
-                      <img src={promo.imageUrl} alt="" width={48} height={48} loading="lazy" decoding="async" className="w-12 h-12 object-cover rounded-lg border border-slate-200" />
+                      <img src={promo.imageUrl} alt="" width={48} height={48} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-12 h-12 object-cover rounded-lg border border-slate-200 shrink-0" />
                     )
                   ) : (
                     <div className="w-12 h-12 bg-brand-cyan/10 rounded-lg flex items-center justify-center text-brand-cyan font-bold">P</div>
@@ -398,7 +398,7 @@ export default function PromotionManager({ lang, promotions, productsList, curre
                   {isVideoSource(imageUrl) ? (
                     <video src={imageUrl} controls className="w-full h-28 object-cover" />
                   ) : (
-                    <img src={imageUrl} alt="preview" width={400} height={112} loading="lazy" decoding="async" className="w-full h-28 object-cover" />
+                    <img src={imageUrl} alt="preview" width={400} height={112} loading="lazy" decoding="async" style={{ aspectRatio: '400 / 112' }} className="w-full h-28 object-cover" />
                   )}
                   <button
                     type="button"

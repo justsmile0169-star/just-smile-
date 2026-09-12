@@ -58,7 +58,8 @@ export default function Footer({ lang, shopInfo }: FooterProps) {
                 height={44}
                 loading="lazy"
                 decoding="async"
-                className="h-11 w-auto object-contain"
+                style={{ aspectRatio: '1 / 1' }}
+                className="h-11 w-11 object-contain shrink-0"
               />
               <div>
                 <p className="text-base font-black text-brand-dark dark:text-slate-100 tracking-tight">

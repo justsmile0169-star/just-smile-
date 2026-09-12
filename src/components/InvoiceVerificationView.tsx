@@ -105,7 +105,8 @@ export default function InvoiceVerificationView({
               height={40}
               loading="eager"
               decoding="async"
-              className="h-10 w-auto object-contain"
+              style={{ aspectRatio: '1 / 1' }}
+              className="h-10 w-10 object-contain shrink-0"
             />
             <div>
               <h1 className="text-lg font-black tracking-wider text-white">{shopInfo.companyName}</h1>

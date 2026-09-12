@@ -270,6 +270,7 @@ export default function BarcodeScanner({
                     height={80}
                     loading="lazy"
                     decoding="async"
+                    style={{ aspectRatio: '1 / 1' }}
                     className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shrink-0"
                   />
                 )}

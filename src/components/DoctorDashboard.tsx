@@ -838,7 +838,8 @@ export default function DoctorDashboard({
                       height={40}
                       loading="lazy"
                       decoding="async"
-                      className="w-10 h-10 object-cover rounded-lg bg-slate-100"
+                      style={{ aspectRatio: '1 / 1' }}
+                      className="w-10 h-10 object-cover rounded-lg bg-slate-100 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
@@ -880,7 +881,8 @@ export default function DoctorDashboard({
                       height={40}
                       loading="lazy"
                       decoding="async"
-                      className="w-10 h-10 object-cover rounded-lg bg-slate-100"
+                      style={{ aspectRatio: '1 / 1' }}
+                      className="w-10 h-10 object-cover rounded-lg bg-slate-100 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>

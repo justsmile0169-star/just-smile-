@@ -324,7 +324,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                             isVid ? (
                               <video src={a.imageUrl} className="w-10 h-10 object-cover rounded-lg border border-slate-200" muted />
                             ) : (
-                              <img src={a.imageUrl} alt="" width={40} height={40} loading="lazy" decoding="async" className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                              <img src={a.imageUrl} alt="" width={40} height={40} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0" />
                             )
                           ) : (
                             <div className="w-10 h-10 bg-brand-cyan/20 rounded-lg flex items-center justify-center text-brand-cyan font-bold">A</div>
@@ -382,6 +382,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                     loading="eager"
                     fetchPriority="high"
                     decoding="async"
+                    style={{ aspectRatio: '2 / 1' }}
                     className="w-full h-full object-cover"
                   />
                 )
@@ -450,7 +451,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                       isVid ? (
                         <video src={promo.imageUrl} className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" muted />
                       ) : (
-                        <img src={promo.imageUrl} alt="" width={64} height={64} loading="lazy" decoding="async" className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" />
+                        <img src={promo.imageUrl} alt="" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" />
                       )
                     ) : (
                       <div className="w-16 h-16 rounded-xl flex-shrink-0 bg-brand-cyan/20 flex items-center justify-center">
@@ -538,7 +539,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                   {isVideoSource(imgUrl) ? (
                     <video src={imgUrl} controls className="w-full h-28 object-cover" />
                   ) : (
-                    <img src={imgUrl} alt="preview" width={400} height={112} loading="lazy" decoding="async" className="w-full h-28 object-cover" />
+                    <img src={imgUrl} alt="preview" width={400} height={112} loading="lazy" decoding="async" style={{ aspectRatio: '400 / 112' }} className="w-full h-28 object-cover" />
                   )}
                   <button type="button" onClick={()=>setImgUrl('')} className="absolute top-1.5 right-1.5 p-1 bg-white hover:bg-slate-100 rounded-full shadow text-rose-500 transition-all"><X size={12}/></button>
                 </div>}

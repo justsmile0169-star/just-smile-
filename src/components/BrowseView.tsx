@@ -6,7 +6,7 @@ import { Language, getTranslation } from '../translations';
 import ProductCard from './ProductCard';
 import AnnouncementsSection from './AnnouncementsSection';
 import ProductSlider from './ProductSlider';
-import { Search, X, ShieldAlert, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, ScanBarcode, Sparkles, Flame, ShoppingBag, Box } from 'lucide-react';
+import { Search, X, ShieldAlert, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, Sparkles, Flame, ShoppingBag, Box } from 'lucide-react';
 
 interface BrowseViewProps {
   products: Product[];
@@ -385,16 +385,6 @@ export default function BrowseView({
                   </div>
                 )}
               </div>
-              {onOpenBarcodeScanner && (
-                <button
-                  type="button"
-                  onClick={onOpenBarcodeScanner}
-                  className="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-sm px-4 py-3 rounded-xl transition-all shrink-0"
-                >
-                  <ScanBarcode size={18} />
-                  {lang === 'fr' ? 'Scanner' : 'مسح'}
-                </button>
-              )}
             </div>
 
             {/* Smart Suggestions Box */}
