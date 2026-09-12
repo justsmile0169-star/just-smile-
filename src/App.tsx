@@ -12,6 +12,7 @@ import {
 import { canAccessAdmin } from './utils/permissions';
 import { getStaffSession, saveStaffSession, clearStaffSession } from './utils/staffAuth';
 import { Language, getTranslation } from './translations';
+import { getStoredProducts, setStoredProducts } from './utils/localProductStorage';
 
 // Sub components — eagerly loaded (always needed)
 import Header from './components/Header';
@@ -324,40 +325,25 @@ export default function App() {
     loadShopInfo();
   }, []);
 
-  // --- 4. Synchronize Products Collection (Ultra-Fast Initial 36 Batch + Background Full Sync) ---
+  // --- 4. High-Performance Product Sync (Instant IndexedDB Cache + Real-Time Sync) ---
   useEffect(() => {
     let isMounted = true;
-    const productsCol = collection(db, 'products');
 
-    // 1. FAST INITIAL BATCH: Fetch first 36 products immediately (<100ms lightweight payload)
-    const initialQuery = query(productsCol, limit(36));
-    getDocs(initialQuery)
-      .then((snapshot) => {
-        if (!isMounted) return;
-        const initialItems: Product[] = [];
-        snapshot.forEach((docSnap) => {
-          const p = { ...(docSnap.data() as Product), id: docSnap.id };
-          if (!p.isDeleted) initialItems.push(p);
-        });
-        if (initialItems.length > 0) {
-          setProducts((current) => {
-            if (current.length === 0) {
-              return initialItems;
-            }
-            return current;
-          });
+    // 1. FAST LOCAL LOAD: Read from IndexedDB instantly (<15ms)
+    getStoredProducts()
+      .then((cached) => {
+        if (isMounted && Array.isArray(cached) && cached.length > 0) {
+          setProducts((current) => (current.length === 0 ? cached : current));
         }
       })
-      .catch((err) => {
-        console.warn("Initial fast batch notice:", err);
-      });
+      .catch(() => {});
 
-    // 2. BACKGROUND FULL SYNC: Fetch & synchronize the complete collection quietly in background
-    let unsubscribeFull: (() => void) | null = null;
-    const bgTimer = setTimeout(() => {
-      if (!isMounted) return;
-
-      unsubscribeFull = onSnapshot(productsCol, (snapshot) => {
+    // 2. REAL-TIME FIRESTORE SYNC: Single streamlined onSnapshot listener
+    const productsCol = collection(db, 'products');
+    const unsubscribe = onSnapshot(
+      productsCol,
+      { includeMetadataChanges: false },
+      (snapshot) => {
         if (!isMounted) return;
         const allItems: Product[] = [];
         snapshot.forEach((docSnap) => {
@@ -366,21 +352,21 @@ export default function App() {
             allItems.push(product);
           }
         });
+
         if (allItems.length > 0) {
           setProducts(allItems);
-          try {
-            localStorage.setItem('just_smile_cached_products', JSON.stringify(allItems));
-          } catch {}
+          // Persist to local IndexedDB for future instant loads
+          setStoredProducts(allItems);
         }
-      }, (err) => {
-        console.warn("Products full sync fallback:", err);
-      });
-    }, 250);
+      },
+      (err) => {
+        console.warn('Products sync notice:', err);
+      }
+    );
 
     return () => {
       isMounted = false;
-      clearTimeout(bgTimer);
-      if (unsubscribeFull) unsubscribeFull();
+      unsubscribe();
     };
   }, []);
 

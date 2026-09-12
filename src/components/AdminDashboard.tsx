@@ -11,6 +11,7 @@ import { logActivity } from '../utils/activityLogger';
 import { deleteProductFully } from '../utils/productFirestore';
 import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../utils/yalidineService';
 import { sendOrderNotifications } from '../utils/orderNotificationService';
+import { compressImage } from '../utils/localProductStorage';
 import {
   DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
@@ -1177,16 +1178,17 @@ export default function AdminDashboard({
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 800_000) {
-      alert(lang === 'fr' ? 'Image trop volumineuse (max 800 Ko).' : 'الصورة كبيرة جداً (800 ك.ب كحد أقصى).', 'error');
-      return;
+    try {
+      const compressed = await compressImage(file, 600, 600, 0.72);
+      setPImage(compressed);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => setPImage(reader.result as string);
+      reader.readAsDataURL(file);
     }
-    const reader = new FileReader();
-    reader.onload = () => setPImage(reader.result as string);
-    reader.readAsDataURL(file);
   };
 
   const handleOpenProductForm = (prod?: Product) => {
@@ -5153,16 +5155,21 @@ export default function AdminDashboard({
                                       type="file"
                                       id={`v-file-${v.id}`}
                                       accept="image/*"
-                                      onChange={(e) => {
+                                      onChange={async (e) => {
                                         const file = e.target.files?.[0];
                                         if (!file) return;
-                                        const reader = new FileReader();
-                                        reader.onload = (event) => {
-                                          if (event.target?.result) {
-                                            handleUpdateVariant(v.id, 'image', event.target.result as string);
-                                          }
-                                        };
-                                        reader.readAsDataURL(file);
+                                        try {
+                                          const compressed = await compressImage(file, 500, 500, 0.72);
+                                          handleUpdateVariant(v.id, 'image', compressed);
+                                        } catch {
+                                          const reader = new FileReader();
+                                          reader.onload = (event) => {
+                                            if (event.target?.result) {
+                                              handleUpdateVariant(v.id, 'image', event.target.result as string);
+                                            }
+                                          };
+                                          reader.readAsDataURL(file);
+                                        }
                                         e.target.value = '';
                                       }}
                                       className="hidden"
