@@ -54,14 +54,18 @@ async function uploadToImgBB(base64DataUrl: string): Promise<string | null> {
   return null;
 }
 
+// Dedicated high-speed FreeImage.host API Key
+const FREEIMAGE_API_KEY = '6d207e02198a847aa98d0a2a901485a5';
+
 /**
- * Secondary Cloud Backup: FreeImage.host API
+ * Upload to FreeImage.host Cloud CDN.
+ * Returns direct permanent HTTPS image URL (e.g. https://iili.io/xyz.jpg).
  */
 async function uploadToFreeImageHost(base64DataUrl: string): Promise<string | null> {
   try {
     const base64Clean = base64DataUrl.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
     const formData = new FormData();
-    formData.append('key', '6d207e021d9de7484aa17d26e5424ac2');
+    formData.append('key', FREEIMAGE_API_KEY);
     formData.append('action', 'upload');
     formData.append('source', base64Clean);
     formData.append('format', 'json');
@@ -73,12 +77,13 @@ async function uploadToFreeImageHost(base64DataUrl: string): Promise<string | nu
 
     if (res.ok) {
       const data = await res.json();
-      if (data?.image?.url) {
-        return data.image.url;
+      const directUrl = data?.image?.display_url || data?.image?.url || data?.data?.url;
+      if (directUrl && typeof directUrl === 'string' && directUrl.startsWith('http')) {
+        return directUrl;
       }
     }
   } catch (err) {
-    console.warn('FreeImage.host fallback notice:', err);
+    console.warn('FreeImage.host upload notice:', err);
   }
   return null;
 }
@@ -105,24 +110,24 @@ export async function uploadImageToCloud(
   const compressedBase64 = await compressImage(fileOrBase64, 650, 650, 0.74);
   if (!compressedBase64) return typeof fileOrBase64 === 'string' ? fileOrBase64 : '';
 
-  // 2. Upload to Cloud CDN (Primary: ImgBB)
+  // 2. Upload to Cloud CDN (Primary: FreeImage.host using dedicated API key)
+  try {
+    const freeImageUrl = await uploadToFreeImageHost(compressedBase64);
+    if (freeImageUrl && freeImageUrl.startsWith('http')) {
+      return freeImageUrl;
+    }
+  } catch (err) {
+    console.warn('FreeImage cloud upload notice:', err);
+  }
+
+  // 3. Upload to Backup Cloud CDN (ImgBB multi-key rotating CDN)
   try {
     const imgbbUrl = await uploadToImgBB(compressedBase64);
     if (imgbbUrl && imgbbUrl.startsWith('http')) {
       return imgbbUrl;
     }
   } catch (err) {
-    console.warn('Primary cloud upload notice:', err);
-  }
-
-  // 3. Upload to Secondary Cloud Provider (FreeImage.host)
-  try {
-    const backupUrl = await uploadToFreeImageHost(compressedBase64);
-    if (backupUrl && backupUrl.startsWith('http')) {
-      return backupUrl;
-    }
-  } catch (err) {
-    console.warn('Secondary cloud upload notice:', err);
+    console.warn('ImgBB backup cloud upload notice:', err);
   }
 
   // 4. Safe fallback: Return ultra-lightweight compressed base64
