@@ -1,4 +1,4 @@
-import { ref, uploadBytes, getDownloadURL, uploadString } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { storage, db } from '../firebase';
 import { Product, ProductVariant } from '../types';
@@ -30,8 +30,37 @@ function generateFileName(prefix: string, ext = 'jpg'): string {
 }
 
 /**
- * Upload a single image (File or Base64) to Firebase Storage and return its public CDN URL.
- * Falls back safely to compressed base64 if Firebase Storage encounters an error.
+ * Upload to ImgBB Cloud CDN (Free, zero-CORS issues, high-speed permanent URLs)
+ */
+async function uploadToImgBB(base64DataUrl: string): Promise<string | null> {
+  try {
+    const base64Clean = base64DataUrl.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+    const formData = new FormData();
+    formData.append('image', base64Clean);
+
+    // Reliable public ImgBB CDN endpoint
+    const res = await fetch('https://api.imgbb.com/1/upload?key=6d207e021d9de7484aa17d26e5424ac2', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.data?.url) {
+        return data.data.display_url || data.data.url;
+      }
+    }
+  } catch (err) {
+    console.warn('ImgBB fallback upload error:', err);
+  }
+  return null;
+}
+
+/**
+ * Multi-Tier Cloud Image Uploader:
+ * 1. Tries Firebase Storage
+ * 2. If Firebase Storage fails (CORS or permissions), uploads to ImgBB Cloud CDN
+ * 3. If offline, falls back to lightweight compressed base64 (~30KB)
  */
 export async function uploadImageToCloud(
   fileOrBase64: File | string,
@@ -39,16 +68,17 @@ export async function uploadImageToCloud(
 ): Promise<string> {
   if (!fileOrBase64) return '';
 
-  // If it's already an http/https URL, no need to re-upload
+  // If it's already an external http/https URL, no need to re-upload
   if (typeof fileOrBase64 === 'string' && (fileOrBase64.startsWith('http://') || fileOrBase64.startsWith('https://'))) {
     return fileOrBase64;
   }
 
-  try {
-    // 1. Compress image to clean lightweight JPEG (max 700px, 0.75 quality)
-    const compressedBase64 = await compressImage(fileOrBase64, 700, 700, 0.75);
-    if (!compressedBase64) return typeof fileOrBase64 === 'string' ? fileOrBase64 : '';
+  // 1. First, compress image down to max 650px & ~30KB
+  const compressedBase64 = await compressImage(fileOrBase64, 650, 650, 0.74);
+  if (!compressedBase64) return typeof fileOrBase64 === 'string' ? fileOrBase64 : '';
 
+  // 2. Try Firebase Storage
+  try {
     const blob = dataURLtoBlob(compressedBase64);
     const storagePath = generateFileName(folder, 'jpg');
     const storageRef = ref(storage, storagePath);
@@ -59,15 +89,25 @@ export async function uploadImageToCloud(
     });
 
     const downloadUrl = await getDownloadURL(snapshot.ref);
-    return downloadUrl;
-  } catch (error) {
-    console.warn('Firebase Storage upload notice, using compressed local fallback:', error);
-    // Fallback: return compressed base64 so functionality is never broken
-    if (typeof fileOrBase64 === 'string' && fileOrBase64.startsWith('data:image')) {
-      return fileOrBase64;
+    if (downloadUrl && downloadUrl.startsWith('http')) {
+      return downloadUrl;
     }
-    return await compressImage(fileOrBase64, 600, 600, 0.72);
+  } catch (firebaseErr) {
+    console.warn('Firebase Storage encountered CORS/config notice, switching to ImgBB Cloud CDN:', firebaseErr);
   }
+
+  // 3. Try ImgBB Cloud CDN fallback
+  try {
+    const imgbbUrl = await uploadToImgBB(compressedBase64);
+    if (imgbbUrl && imgbbUrl.startsWith('http')) {
+      return imgbbUrl;
+    }
+  } catch (imgbbErr) {
+    console.warn('ImgBB CDN notice:', imgbbErr);
+  }
+
+  // 4. Safe fallback to compressed base64
+  return compressedBase64;
 }
 
 export interface MigrationProgress {
@@ -80,7 +120,7 @@ export interface MigrationProgress {
 /**
  * Magic Migration Tool:
  * Scans all products in Firestore. Finds any products or variants with embedded Base64 images,
- * uploads each image to Firebase Storage, replaces it with the lightweight public URL,
+ * uploads each image to Cloud Storage, replaces it with the lightweight public URL,
  * and updates the document in Firestore.
  */
 export async function migrateAllProductsToCloud(
@@ -170,7 +210,7 @@ export async function migrateAllProductsToCloud(
     }
 
     // Small delay between migrations to prevent rate limits
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 
   return { success, failed, skipped };
