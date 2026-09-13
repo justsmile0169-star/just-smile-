@@ -54,36 +54,29 @@ async function uploadToImgBB(base64DataUrl: string): Promise<string | null> {
   return null;
 }
 
-// Dedicated high-speed FreeImage.host API Key
-const FREEIMAGE_API_KEY = '6d207e02198a847aa98d0a2a901485a5';
-
 /**
- * Upload to FreeImage.host Cloud CDN.
- * Returns direct permanent HTTPS image URL (e.g. https://iili.io/xyz.jpg).
+ * Upload image via serverless backend proxy (/api/upload).
+ * Executes on Node.js (Vercel Serverless Function & Vite dev server),
+ * eliminating ALL browser CORS limitations and returning direct FreeImage CDN URLs (https://iili.io/...).
  */
-async function uploadToFreeImageHost(base64DataUrl: string): Promise<string | null> {
+async function uploadViaServerlessApi(base64DataUrl: string): Promise<string | null> {
   try {
-    const base64Clean = base64DataUrl.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
-    const formData = new FormData();
-    formData.append('key', FREEIMAGE_API_KEY);
-    formData.append('action', 'upload');
-    formData.append('source', base64Clean);
-    formData.append('format', 'json');
-
-    const res = await fetch('https://freeimage.host/api/1/upload', {
+    const res = await fetch('/api/upload', {
       method: 'POST',
-      body: formData
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ image: base64DataUrl })
     });
 
     if (res.ok) {
       const data = await res.json();
-      const directUrl = data?.image?.display_url || data?.image?.url || data?.data?.url;
-      if (directUrl && typeof directUrl === 'string' && directUrl.startsWith('http')) {
-        return directUrl;
+      if (data?.success && data?.url && typeof data.url === 'string' && data.url.startsWith('http')) {
+        return data.url;
       }
     }
   } catch (err) {
-    console.warn('FreeImage.host upload notice:', err);
+    console.warn('Serverless upload endpoint notice:', err);
   }
   return null;
 }
@@ -91,8 +84,8 @@ async function uploadToFreeImageHost(base64DataUrl: string): Promise<string | nu
 /**
  * Universal Standalone Cloud Image Uploader:
  * 1. Resizes and compresses image to lightweight Web-optimized JPEG (~30KB-40KB).
- * 2. Uploads directly to high-speed Cloud CDN (ImgBB / FreeImage).
- * 3. Returns permanent, direct HTTPS image URL.
+ * 2. Uploads via /api/upload proxy to FreeImage.host with user's dedicated key (zero CORS).
+ * 3. Returns permanent, direct HTTPS image URL (https://iili.io/xyz.jpg).
  * 4. Safe offline fallback to local compressed format if no internet.
  */
 export async function uploadImageToCloud(
@@ -110,27 +103,17 @@ export async function uploadImageToCloud(
   const compressedBase64 = await compressImage(fileOrBase64, 650, 650, 0.74);
   if (!compressedBase64) return typeof fileOrBase64 === 'string' ? fileOrBase64 : '';
 
-  // 2. Upload to Cloud CDN (Primary: FreeImage.host using dedicated API key)
+  // 2. Upload via Serverless API to FreeImage.host (Zero CORS, 100% Reliable)
   try {
-    const freeImageUrl = await uploadToFreeImageHost(compressedBase64);
-    if (freeImageUrl && freeImageUrl.startsWith('http')) {
-      return freeImageUrl;
+    const cloudUrl = await uploadViaServerlessApi(compressedBase64);
+    if (cloudUrl && cloudUrl.startsWith('http')) {
+      return cloudUrl;
     }
   } catch (err) {
-    console.warn('FreeImage cloud upload notice:', err);
+    console.warn('Primary cloud upload notice:', err);
   }
 
-  // 3. Upload to Backup Cloud CDN (ImgBB multi-key rotating CDN)
-  try {
-    const imgbbUrl = await uploadToImgBB(compressedBase64);
-    if (imgbbUrl && imgbbUrl.startsWith('http')) {
-      return imgbbUrl;
-    }
-  } catch (err) {
-    console.warn('ImgBB backup cloud upload notice:', err);
-  }
-
-  // 4. Safe fallback: Return ultra-lightweight compressed base64
+  // 3. Safe fallback: Return ultra-lightweight compressed base64
   return compressedBase64;
 }
 

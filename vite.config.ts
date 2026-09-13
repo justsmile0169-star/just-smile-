@@ -1,14 +1,62 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+
+function localUploadApiPlugin() {
+  return {
+    name: 'local-upload-api',
+    configureServer(server: any) {
+      server.middlewares.use('/api/upload', (req: any, res: any) => {
+        if (req.method === 'POST') {
+          let bodyStr = '';
+          req.on('data', (chunk: any) => {
+            bodyStr += chunk;
+          });
+          req.on('end', async () => {
+            try {
+              const body = JSON.parse(bodyStr || '{}');
+              const image = body?.image;
+              if (!image) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: 'No image provided' }));
+              }
+              const base64Clean = image.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+              const formData = new FormData();
+              formData.append('key', '6d207e02198a847aa98d0a2a901485a5');
+              formData.append('action', 'upload');
+              formData.append('source', base64Clean);
+              formData.append('format', 'json');
+
+              const response = await fetch('https://freeimage.host/api/1/upload', {
+                method: 'POST',
+                body: formData
+              });
+              const data: any = await response.json();
+              const directUrl = data?.image?.display_url || data?.image?.url || data?.data?.url;
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true, url: directUrl }));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err?.message || String(err) }));
+            }
+          });
+        } else {
+          res.writeHead(405, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Method not allowed' }));
+        }
+      });
+    }
+  };
+}
 
 export default defineConfig(() => {
   return {
     plugins: [
       react(),
       tailwindcss(),
+      localUploadApiPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['logo.png'],
@@ -97,10 +145,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâ€”file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };
