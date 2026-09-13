@@ -840,6 +840,7 @@ export default function DoctorDashboard({
                       decoding="async"
                       style={{ aspectRatio: '1 / 1' }}
                       className="w-10 h-10 object-cover rounded-lg bg-slate-100 shrink-0"
+                      referrerPolicy="no-referrer"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
@@ -883,6 +884,7 @@ export default function DoctorDashboard({
                       decoding="async"
                       style={{ aspectRatio: '1 / 1' }}
                       className="w-10 h-10 object-cover rounded-lg bg-slate-100 shrink-0"
+                      referrerPolicy="no-referrer"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>

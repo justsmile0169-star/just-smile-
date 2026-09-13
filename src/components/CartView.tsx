@@ -658,6 +658,7 @@ export default function CartView({
                             decoding="async"
                             style={{ aspectRatio: '1 / 1' }}
                             className="w-10 h-10 object-cover rounded-xl bg-slate-100 shrink-0"
+                            referrerPolicy="no-referrer"
                           />
                           <div className="min-w-0 flex-1">
                             <p className="font-bold text-xs text-slate-800 truncate">{p.name}</p>
@@ -816,6 +817,7 @@ export default function CartView({
                         decoding="async"
                         style={{ aspectRatio: '1 / 1' }}
                         className="w-16 h-16 md:w-20 md:h-20 object-cover rounded-2xl bg-slate-150 border border-slate-50 shrink-0"
+                        referrerPolicy="no-referrer"
                       />
 
                       <div className="flex-1 min-w-0 space-y-1">

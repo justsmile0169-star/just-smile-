@@ -5445,7 +5445,7 @@ export default function AdminDashboard({
                 </label>
                 <div className="flex items-center gap-3">
                   {pImage && (
-                    <img src={pImage} alt="" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
+                    <img src={pImage} alt="" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" referrerPolicy="no-referrer" />
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="text-xs file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-brand-cyan/10 file:text-brand-cyan file:font-bold" />
                   {isUploadingImage && (

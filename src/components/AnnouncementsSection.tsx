@@ -324,7 +324,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                             isVid ? (
                               <video src={a.imageUrl} className="w-10 h-10 object-cover rounded-lg border border-slate-200" muted />
                             ) : (
-                              <img src={a.imageUrl} alt="" width={40} height={40} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0" />
+                              <img src={a.imageUrl} alt="" width={40} height={40} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0" referrerPolicy="no-referrer" />
                             )
                           ) : (
                             <div className="w-10 h-10 bg-brand-cyan/20 rounded-lg flex items-center justify-center text-brand-cyan font-bold">A</div>
@@ -384,6 +384,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                     decoding="async"
                     style={{ aspectRatio: '2 / 1' }}
                     className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
                   />
                 )
               ) : (
@@ -451,7 +452,7 @@ export default function AnnouncementsSection({ lang, currentUser }: Props) {
                       isVid ? (
                         <video src={promo.imageUrl} className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" muted />
                       ) : (
-                        <img src={promo.imageUrl} alt="" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" />
+                        <img src={promo.imageUrl} alt="" width={64} height={64} loading="lazy" decoding="async" style={{ aspectRatio: '1 / 1' }} className="w-16 h-16 object-cover rounded-xl flex-shrink-0 border border-slate-200" referrerPolicy="no-referrer" />
                       )
                     ) : (
                       <div className="w-16 h-16 rounded-xl flex-shrink-0 bg-brand-cyan/20 flex items-center justify-center">
