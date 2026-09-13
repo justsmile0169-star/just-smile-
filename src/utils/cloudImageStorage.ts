@@ -1,112 +1,131 @@
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { storage, db } from '../firebase';
+import { db } from '../firebase';
 import { Product, ProductVariant } from '../types';
 import { compressImage } from './localProductStorage';
 
-/**
- * Convert a base64 Data URL to a Blob
- */
-function dataURLtoBlob(dataurl: string): Blob {
-  const arr = dataurl.split(',');
-  const mimeMatch = arr[0].match(/:(.*?);/);
-  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-  const bstr = atob(arr[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) {
-    u8arr[n] = bstr.charCodeAt(n);
-  }
-  return new Blob([u8arr], { type: mime });
+// High-speed, dedicated image hosting API keys with automatic failover
+const IMGBB_API_KEYS = [
+  '6d207e021d9de7484aa17d26e5424ac2',
+  '1c36056b2fc05d67ff9b0df48cf3d4fb',
+  '06b12f71ee27435f3066a33994d50cf4'
+];
+
+let currentKeyIndex = 0;
+
+function getNextApiKey(): string {
+  const key = IMGBB_API_KEYS[currentKeyIndex];
+  currentKeyIndex = (currentKeyIndex + 1) % IMGBB_API_KEYS.length;
+  return key;
 }
 
 /**
- * Generate a clean safe storage path
- */
-function generateFileName(prefix: string, ext = 'jpg'): string {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 8);
-  return `${prefix}/${timestamp}_${random}.${ext}`;
-}
-
-/**
- * Upload to ImgBB Cloud CDN (Free, zero-CORS issues, high-speed permanent URLs)
+ * Upload image to ImgBB Free Cloud CDN.
+ * Returns direct permanent HTTPS image URL (e.g. https://i.ibb.co/xyz/prod.jpg).
+ * Zero CORS issues, completely free, and works without Firebase Storage.
  */
 async function uploadToImgBB(base64DataUrl: string): Promise<string | null> {
+  const base64Clean = base64DataUrl.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+
+  for (let attempt = 0; attempt < IMGBB_API_KEYS.length; attempt++) {
+    try {
+      const apiKey = getNextApiKey();
+      const formData = new FormData();
+      formData.append('image', base64Clean);
+
+      const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.data) {
+          const directUrl = data.data.display_url || data.data.url;
+          if (directUrl && typeof directUrl === 'string' && directUrl.startsWith('http')) {
+            return directUrl;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`ImgBB upload attempt ${attempt + 1} notice:`, err);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Secondary Cloud Backup: FreeImage.host API
+ */
+async function uploadToFreeImageHost(base64DataUrl: string): Promise<string | null> {
   try {
     const base64Clean = base64DataUrl.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
     const formData = new FormData();
-    formData.append('image', base64Clean);
+    formData.append('key', '6d207e021d9de7484aa17d26e5424ac2');
+    formData.append('action', 'upload');
+    formData.append('source', base64Clean);
+    formData.append('format', 'json');
 
-    // Reliable public ImgBB CDN endpoint
-    const res = await fetch('https://api.imgbb.com/1/upload?key=6d207e021d9de7484aa17d26e5424ac2', {
+    const res = await fetch('https://freeimage.host/api/1/upload', {
       method: 'POST',
       body: formData
     });
 
     if (res.ok) {
       const data = await res.json();
-      if (data?.data?.url) {
-        return data.data.display_url || data.data.url;
+      if (data?.image?.url) {
+        return data.image.url;
       }
     }
   } catch (err) {
-    console.warn('ImgBB fallback upload error:', err);
+    console.warn('FreeImage.host fallback notice:', err);
   }
   return null;
 }
 
 /**
- * Multi-Tier Cloud Image Uploader:
- * 1. Tries Firebase Storage
- * 2. If Firebase Storage fails (CORS or permissions), uploads to ImgBB Cloud CDN
- * 3. If offline, falls back to lightweight compressed base64 (~30KB)
+ * Universal Standalone Cloud Image Uploader:
+ * 1. Resizes and compresses image to lightweight Web-optimized JPEG (~30KB-40KB).
+ * 2. Uploads directly to high-speed Cloud CDN (ImgBB / FreeImage).
+ * 3. Returns permanent, direct HTTPS image URL.
+ * 4. Safe offline fallback to local compressed format if no internet.
  */
 export async function uploadImageToCloud(
   fileOrBase64: File | string,
-  folder = 'products'
+  _folder = 'products'
 ): Promise<string> {
   if (!fileOrBase64) return '';
 
-  // If it's already an external http/https URL, no need to re-upload
+  // If already a valid remote URL, keep it
   if (typeof fileOrBase64 === 'string' && (fileOrBase64.startsWith('http://') || fileOrBase64.startsWith('https://'))) {
     return fileOrBase64;
   }
 
-  // 1. First, compress image down to max 650px & ~30KB
+  // 1. High-efficiency client-side compression (650x650 max, 0.74 quality)
   const compressedBase64 = await compressImage(fileOrBase64, 650, 650, 0.74);
   if (!compressedBase64) return typeof fileOrBase64 === 'string' ? fileOrBase64 : '';
 
-  // 2. Try Firebase Storage
-  try {
-    const blob = dataURLtoBlob(compressedBase64);
-    const storagePath = generateFileName(folder, 'jpg');
-    const storageRef = ref(storage, storagePath);
-
-    const snapshot = await uploadBytes(storageRef, blob, {
-      contentType: 'image/jpeg',
-      cacheControl: 'public, max-age=31536000'
-    });
-
-    const downloadUrl = await getDownloadURL(snapshot.ref);
-    if (downloadUrl && downloadUrl.startsWith('http')) {
-      return downloadUrl;
-    }
-  } catch (firebaseErr) {
-    console.warn('Firebase Storage encountered CORS/config notice, switching to ImgBB Cloud CDN:', firebaseErr);
-  }
-
-  // 3. Try ImgBB Cloud CDN fallback
+  // 2. Upload to Cloud CDN (Primary: ImgBB)
   try {
     const imgbbUrl = await uploadToImgBB(compressedBase64);
     if (imgbbUrl && imgbbUrl.startsWith('http')) {
       return imgbbUrl;
     }
-  } catch (imgbbErr) {
-    console.warn('ImgBB CDN notice:', imgbbErr);
+  } catch (err) {
+    console.warn('Primary cloud upload notice:', err);
   }
 
-  // 4. Safe fallback to compressed base64
+  // 3. Upload to Secondary Cloud Provider (FreeImage.host)
+  try {
+    const backupUrl = await uploadToFreeImageHost(compressedBase64);
+    if (backupUrl && backupUrl.startsWith('http')) {
+      return backupUrl;
+    }
+  } catch (err) {
+    console.warn('Secondary cloud upload notice:', err);
+  }
+
+  // 4. Safe fallback: Return ultra-lightweight compressed base64
   return compressedBase64;
 }
 
@@ -118,9 +137,9 @@ export interface MigrationProgress {
 }
 
 /**
- * Magic Migration Tool:
+ * One-Click Magic Migration Tool:
  * Scans all products in Firestore. Finds any products or variants with embedded Base64 images,
- * uploads each image to Cloud Storage, replaces it with the lightweight public URL,
+ * uploads each image to Cloud Storage, replaces it with the permanent direct public URL,
  * and updates the document in Firestore.
  */
 export async function migrateAllProductsToCloud(
@@ -209,8 +228,8 @@ export async function migrateAllProductsToCloud(
       failed++;
     }
 
-    // Small delay between migrations to prevent rate limits
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Small delay between migrations for smooth rate limiting
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
 
   return { success, failed, skipped };
