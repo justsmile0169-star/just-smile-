@@ -6,7 +6,8 @@ import { Language, getTranslation } from '../translations';
 import ProductCard from './ProductCard';
 import AnnouncementsSection from './AnnouncementsSection';
 import ProductSlider from './ProductSlider';
-import { Search, X, ShieldAlert, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, Sparkles, Flame, ShoppingBag, Box } from 'lucide-react';
+import { Search, X, ShieldAlert, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, ChevronDown, Sparkles, Flame, ShoppingBag, Box, ArrowRight } from 'lucide-react';
+import { filterAndRankProducts, normalizeSearchText, isProductInStock } from '../utils/productSearch';
 
 interface BrowseViewProps {
   products: Product[];
@@ -48,8 +49,11 @@ export default function BrowseView({
   const selectedCategory = propSelectedCategory ?? localCategory;
   const setSelectedCategory = onSelectCategory ?? setLocalCategory;
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number>(-1);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Custom categories from Firestore
   const [customCategories, setCustomCategories] = useState<string[]>([]);
@@ -92,20 +96,21 @@ export default function BrowseView({
     setDisplayLimit(30);
   }, [selectedCategory, searchQuery]);
 
-  // Handle outside click for category dropdown
+  // Handle outside click for category dropdown and search suggestions
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsCategoryDropdownOpen(false);
       }
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
     }
-    if (isCategoryDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isCategoryDropdownOpen]);
+  }, []);
 
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
     try {
@@ -125,16 +130,6 @@ export default function BrowseView({
       localStorage.setItem('justsmile_recent_searches', JSON.stringify(updated));
       return updated;
     });
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      const trimmed = searchQuery.trim();
-      if (trimmed) {
-        saveSearchQuery(trimmed);
-        setShowSuggestions(false);
-      }
-    }
   };
 
   const isRtl = lang === 'ar';
@@ -175,60 +170,102 @@ export default function BrowseView({
       .trim();
   };
 
-  // Base source products depending on mode
+  // Base source products depending on mode (always prioritizes in-stock items, out-of-stock at the end)
   const sourceProducts = useMemo(() => {
     const valid = activeProducts.filter(p => !p.isDeleted);
 
     if (mode === 'routine_clinic') {
-      return valid.filter(p => p.isRoutineClinic);
+      const routine = valid.filter(p => p.isRoutineClinic);
+      return [...routine].sort((a, b) => {
+        const inStockA = isProductInStock(a) ? 1 : 0;
+        const inStockB = isProductInStock(b) ? 1 : 0;
+        if (inStockA !== inStockB) return inStockB - inStockA;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
     }
+
     if (mode === 'most_requested') {
       const trulyRequested = valid.filter(p => Number(p.salesCount || 0) > 0);
-      if (trulyRequested.length > 0) {
-        return [...trulyRequested].sort((a, b) => Number(b.salesCount || 0) - Number(a.salesCount || 0));
-      }
-      return [...valid].sort((a, b) => Number(b.salesCount || 0) - Number(a.salesCount || 0));
+      const targetList = trulyRequested.length > 0 ? trulyRequested : valid;
+      return [...targetList].sort((a, b) => {
+        const inStockA = isProductInStock(a) ? 1 : 0;
+        const inStockB = isProductInStock(b) ? 1 : 0;
+        if (inStockA !== inStockB) return inStockB - inStockA;
+        return Number(b.salesCount || 0) - Number(a.salesCount || 0);
+      });
     }
-    return valid;
+
+    return [...valid].sort((a, b) => {
+      const inStockA = isProductInStock(a) ? 1 : 0;
+      const inStockB = isProductInStock(b) ? 1 : 0;
+      if (inStockA !== inStockB) return inStockB - inStockA;
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
   }, [activeProducts, mode]);
 
-  // Derived latest products for top slider
+  // Derived latest products for top slider (available products first!)
   const latestProducts = useMemo(() => {
     return activeProducts
       .filter(p => !p.isDeleted)
-      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .sort((a, b) => {
+        const inStockA = isProductInStock(a) ? 1 : 0;
+        const inStockB = isProductInStock(b) ? 1 : 0;
+        if (inStockA !== inStockB) return inStockB - inStockA;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      })
       .slice(0, 16);
   }, [activeProducts]);
 
-  // Enhanced Filter & Multi-token Search Engine
+  // Enhanced Filter & Multi-token Search Engine (ranks and matches tokens anywhere in name or details)
   const filteredProducts = useMemo(() => {
-    const trimmed = searchQuery.trim();
-    const tokens = normalizeText(trimmed).split(/\s+/).filter(Boolean);
-
-    return sourceProducts.filter((prod) => {
-      const matchesCategory =
-        !selectedCategory ||
-        selectedCategory === 'all' ||
-        prod.category === selectedCategory ||
-        (prod.category && normalizeText(prod.category) === normalizeText(selectedCategory));
-
-      if (!matchesCategory) return false;
-
-      if (tokens.length === 0) return true;
-
-      const searchableCorpus = [
-        prod.name,
-        prod.description,
-        prod.category,
-        prod.barcode || '',
-        prod.technicalSheet || '',
-        ...(prod.variants ? prod.variants.flatMap(v => [v.name, v.barcode || '', ...Object.values(v.attributes || {})]) : []),
-        ...(prod.attributes ? prod.attributes.flatMap(a => [a.name, ...a.options]) : [])
-      ].map(normalizeText).join(' ');
-
-      return tokens.every(token => searchableCorpus.includes(token));
-    });
+    return filterAndRankProducts(sourceProducts, searchQuery, selectedCategory);
   }, [sourceProducts, selectedCategory, searchQuery]);
+
+  // Smart Search suggestions (top 8 suggestions ranked by relevance)
+  const searchSuggestions = useMemo(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return [];
+    return filterAndRankProducts(sourceProducts, trimmed).slice(0, 8);
+  }, [sourceProducts, searchQuery]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!showSuggestions) setShowSuggestions(true);
+      setHighlightedSuggestionIndex((prev) =>
+        prev < searchSuggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedSuggestionIndex((prev) =>
+        prev > 0 ? prev - 1 : searchSuggestions.length - 1
+      );
+    } else if (e.key === 'Enter') {
+      if (showSuggestions && highlightedSuggestionIndex >= 0 && searchSuggestions[highlightedSuggestionIndex]) {
+        e.preventDefault();
+        const selected = searchSuggestions[highlightedSuggestionIndex];
+        saveSearchQuery(searchQuery.trim() || selected.name);
+        onViewProduct(selected);
+        setShowSuggestions(false);
+        setHighlightedSuggestionIndex(-1);
+      } else {
+        const trimmed = searchQuery.trim();
+        if (trimmed) {
+          saveSearchQuery(trimmed);
+          setShowSuggestions(false);
+          setHighlightedSuggestionIndex(-1);
+        }
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
+      setHighlightedSuggestionIndex(-1);
+    }
+  };
+
+  const formatPrice = (num?: number) => {
+    if (num === undefined || num === null || isNaN(num)) return '-';
+    return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + (lang === 'fr' ? 'DA' : 'دج');
+  };
 
   // Virtual batch for instant rendering
   const displayedProducts = useMemo(() => {
@@ -255,20 +292,6 @@ export default function BrowseView({
     observer.observe(el);
     return () => observer.disconnect();
   }, [filteredProducts.length, onLoadMoreProducts]);
-
-  // Smart Search suggestions (max 6 suggestions)
-  const searchSuggestions = useMemo(() => {
-    const trimmed = searchQuery.trim();
-    if (!trimmed) return [];
-    const tokens = normalizeText(trimmed).split(/\s+/).filter(Boolean);
-
-    return sourceProducts
-      .filter((p) => {
-        const corpus = normalizeText(`${p.name} ${p.category} ${p.description}`);
-        return tokens.every(token => corpus.includes(token));
-      })
-      .slice(0, 6);
-  }, [sourceProducts, searchQuery]);
 
   return (
     <div className="space-y-8" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -315,7 +338,7 @@ export default function BrowseView({
           </p>
 
           {/* Smart Search Bar & Category Dropdown */}
-          <div className="relative z-20 pt-2">
+          <div className="relative z-20 pt-2" ref={searchContainerRef}>
             <div className="flex flex-col md:flex-row gap-3 max-w-2xl">
               <div className="relative flex-1">
                 <button
@@ -332,6 +355,7 @@ export default function BrowseView({
                   <Search size={16} />
                 </button>
                 <input
+                  ref={searchInputRef}
                   id="catalog-search-input"
                   name="catalogSearch"
                   type="search"
@@ -340,6 +364,7 @@ export default function BrowseView({
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
                     setShowSuggestions(true);
+                    setHighlightedSuggestionIndex(-1);
                   }}
                   onFocus={() => setShowSuggestions(true)}
                   onKeyDown={handleKeyDown}
@@ -348,7 +373,11 @@ export default function BrowseView({
                 />
                 {searchQuery && (
                   <button
-                    onClick={() => setSearchQuery('')}
+                    onClick={() => {
+                      setSearchQuery('');
+                      setShowSuggestions(false);
+                      setHighlightedSuggestionIndex(-1);
+                    }}
                     className="absolute top-1/2 -translate-y-1/2 right-3 sm:right-4 text-slate-400 hover:text-slate-600 rtl:left-3 sm:rtl:left-4 rtl:right-auto z-10"
                   >
                     <X size={14} />
@@ -412,26 +441,112 @@ export default function BrowseView({
               </div>
             </div>
 
-            {/* Smart Suggestions Box */}
-            {showSuggestions && searchSuggestions.length > 0 && (
-              <div className="absolute left-0 right-0 max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-2xl mt-2 overflow-hidden z-50 divide-y divide-slate-50 dark:divide-slate-800 text-slate-700 dark:text-slate-200 text-sm">
-                {searchSuggestions.map((p) => (
-                  <div
-                    key={p.id}
-                    onClick={() => {
-                      if (searchQuery.trim()) {
-                        saveSearchQuery(searchQuery.trim());
-                      }
-                      onViewProduct(p);
-                      setShowSuggestions(false);
-                      setSearchQuery('');
-                    }}
-                    className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer transition-colors"
-                  >
-                    <span className="font-semibold truncate max-w-[320px]">{p.name}</span>
-                    <span className="text-xs text-brand-cyan font-black">{p.category}</span>
-                  </div>
-                ))}
+            {/* Smart Suggestions Box with Product Images */}
+            {showSuggestions && searchQuery.trim() && searchSuggestions.length > 0 && (
+              <div className="absolute left-0 right-0 max-w-2xl bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl mt-2 overflow-hidden z-50 divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-200 text-sm animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between text-xs font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">
+                  <span>{lang === 'fr' ? 'Suggestions de recherche' : 'اقتراحات البحث'}</span>
+                  <span>{filteredProducts.length} {lang === 'fr' ? 'produits trouvés' : 'منتج متطابق'}</span>
+                </div>
+
+                <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                  {searchSuggestions.map((p, index) => {
+                    const isHighlighted = highlightedSuggestionIndex === index;
+                    const prodImage = p.image || p.imageUrl;
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          saveSearchQuery(searchQuery.trim() || p.name);
+                          onViewProduct(p);
+                          setShowSuggestions(false);
+                          setHighlightedSuggestionIndex(-1);
+                        }}
+                        onMouseEnter={() => setHighlightedSuggestionIndex(index)}
+                        className={`p-2.5 sm:p-3 flex items-center gap-3 cursor-pointer transition-colors ${
+                          isHighlighted
+                            ? 'bg-brand-cyan/10 dark:bg-brand-cyan/20'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                        }`}
+                      >
+                        {/* Small Product Thumbnail */}
+                        <div className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0 overflow-hidden flex items-center justify-center">
+                          {prodImage ? (
+                            <img
+                              src={prodImage}
+                              alt={p.name}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                target.style.display = 'none';
+                                if (target.nextElementSibling) {
+                                  target.nextElementSibling.classList.remove('hidden');
+                                }
+                              }}
+                            />
+                          ) : null}
+                          <div className={`${prodImage ? 'hidden' : ''} flex items-center justify-center text-brand-cyan`}>
+                            <ShoppingBag size={18} />
+                          </div>
+                        </div>
+
+                        {/* Product Title, Category, Stock info */}
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                          <span className="font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm truncate">
+                            {p.name}
+                          </span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] font-extrabold text-brand-cyan bg-brand-cyan/10 dark:bg-brand-cyan/20 px-1.5 py-0.5 rounded-md truncate max-w-[130px]">
+                              {p.category}
+                            </span>
+                            {p.stock <= 0 ? (
+                              <span className="text-[10px] font-bold text-red-500">
+                                {lang === 'fr' ? 'Rupture' : 'نفذ المخزون'}
+                              </span>
+                            ) : p.stock <= 5 ? (
+                              <span className="text-[10px] font-bold text-amber-500">
+                                {lang === 'fr' ? `Stock: ${p.stock}` : `بقي ${p.stock}`}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* Price & Action Cue */}
+                        <div className="flex flex-col items-end shrink-0 pl-2 rtl:pl-0 rtl:pr-2">
+                          <span className="font-black text-xs sm:text-sm text-brand-cyan whitespace-nowrap">
+                            {formatPrice(p.price)}
+                          </span>
+                          {typeof p.discountPercent === 'number' && p.discountPercent > 0 && (
+                            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400">
+                              -{p.discountPercent}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Dropdown Footer: Click to see all filtered products in grid */}
+                <div 
+                  onClick={() => {
+                    saveSearchQuery(searchQuery.trim());
+                    setShowSuggestions(false);
+                    setHighlightedSuggestionIndex(-1);
+                  }}
+                  className="p-2.5 text-center bg-slate-50 dark:bg-slate-800/80 hover:bg-brand-cyan/10 dark:hover:bg-brand-cyan/20 text-brand-cyan font-extrabold text-xs cursor-pointer transition-colors border-t border-slate-100 dark:border-slate-800"
+                >
+                  {lang === 'fr' ? `Afficher tous les résultats (${filteredProducts.length})` : `عرض كل النتائج في القائمة (${filteredProducts.length})`}
+                </div>
+              </div>
+            )}
+
+            {/* No results popover */}
+            {showSuggestions && searchQuery.trim() && searchSuggestions.length === 0 && (
+              <div className="absolute left-0 right-0 max-w-2xl bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl mt-2 p-5 text-center z-50 text-slate-500 dark:text-slate-400 text-xs font-semibold animate-in fade-in duration-150">
+                <ShoppingBag className="mx-auto text-slate-300 dark:text-slate-600 mb-2" size={24} />
+                <p>{lang === 'fr' ? `Aucun produit correspondant à "${searchQuery}"` : `لا توجد منتجات مطابقة لـ "${searchQuery}"`}</p>
               </div>
             )}
 

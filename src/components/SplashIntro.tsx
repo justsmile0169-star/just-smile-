@@ -180,13 +180,15 @@ export const SplashIntro: React.FC<SplashIntroProps> = ({ onComplete, lang = 'ar
           />
         </div>
 
-        {/* Skip button for quick navigation */}
+        {/* Skip button for quick navigation (high visibility red) */}
         <button
           type="button"
           onClick={onComplete}
-          className="mt-6 text-[11px] font-bold text-slate-400 hover:text-cyan-300 transition-colors z-20 px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 cursor-pointer"
+          aria-label={lang === 'fr' ? 'Passer l\'introduction' : 'تخطي شاشة البداية'}
+          className="mt-6 text-xs font-black text-white transition-all duration-200 z-20 px-5 py-2 rounded-full bg-gradient-to-r from-red-600 via-rose-500 to-red-600 hover:from-red-500 hover:to-rose-500 border border-red-300/50 shadow-[0_0_22px_rgba(239,68,68,0.6)] hover:shadow-[0_0_30px_rgba(239,68,68,0.9)] hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
         >
-          {lang === 'fr' ? 'Passer ✕' : 'تخطي ✕'}
+          <span>{lang === 'fr' ? 'Passer' : 'تخطي'}</span>
+          <span className="text-white/90 text-sm font-black leading-none">✕</span>
         </button>
       </div>
 

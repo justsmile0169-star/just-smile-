@@ -1,14 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import { collection, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Order, Payment, ProductReturn, UserProfile } from '../types';
+import { Order, Payment, ProductReturn, ShopInfo, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 import { useAppDialog } from '../context/AppDialogContext';
 import { exportFinancialStatement } from '../utils/exportFinancialStatement';
+import { exportAllDebtsPDF } from '../utils/exportAllDebtsPDF';
+import { computeAllClientsFinancials, ClientFinancialSummary } from '../utils/clientFinancials';
 import { logActivity } from '../utils/activityLogger';
 import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import {
-  Search, User, ShoppingBag, CreditCard, RotateCcw, FileText, Plus, X, Printer, Pencil, Trash2, Edit3
+  Search, User, ShoppingBag, CreditCard, RotateCcw, FileText, Plus, X,
+  Printer, Pencil, Trash2, Edit3, FileDown, Users, ArrowLeft, ArrowRight,
+  CheckCircle2, AlertCircle, Eye, RefreshCw, Filter
 } from 'lucide-react';
 
 interface ClientSituationViewProps {
@@ -19,6 +23,7 @@ interface ClientSituationViewProps {
   returnsList: ProductReturn[];
   onPrintInvoice?: (order: Order) => void;
   currentUser?: UserProfile | null;
+  shopInfo?: ShopInfo;
 }
 
 export default function ClientSituationView({
@@ -28,12 +33,14 @@ export default function ClientSituationView({
   paymentsList,
   returnsList,
   onPrintInvoice,
-  currentUser
+  currentUser,
+  shopInfo
 }: ClientSituationViewProps) {
   const { alert } = useAppDialog();
   const isRtl = lang === 'ar';
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClient, setSelectedClient] = useState<UserProfile | null>(null);
+  const [clientFilterTab, setClientFilterTab] = useState<'all' | 'debtors' | 'settled'>('all');
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [returnOrderId, setReturnOrderId] = useState('');
   const [returnAmount, setReturnAmount] = useState(0);
@@ -261,18 +268,59 @@ export default function ClientSituationView({
     [usersList]
   );
 
+  const allDoctorFinancials = useMemo(() => {
+    return computeAllClientsFinancials(doctors, ordersList, paymentsList, returnsList);
+  }, [doctors, ordersList, paymentsList, returnsList]);
+
+  const doctorFinancialsMap = useMemo(() => {
+    const map = new Map<string, ClientFinancialSummary>();
+    allDoctorFinancials.forEach((s) => map.set(s.client.uid, s));
+    return map;
+  }, [allDoctorFinancials]);
+
+  const totalDebtorsCount = useMemo(
+    () => allDoctorFinancials.filter((s) => s.debt > 0).length,
+    [allDoctorFinancials]
+  );
+  const totalSettledCount = useMemo(
+    () => allDoctorFinancials.filter((s) => s.debt === 0).length,
+    [allDoctorFinancials]
+  );
+  const globalTotalDebt = useMemo(
+    () => allDoctorFinancials.reduce((sum, s) => sum + s.debt, 0),
+    [allDoctorFinancials]
+  );
+  const globalTotalPurchases = useMemo(
+    () => allDoctorFinancials.reduce((sum, s) => sum + s.totalPurchases, 0),
+    [allDoctorFinancials]
+  );
+  const globalTotalPaid = useMemo(
+    () => allDoctorFinancials.reduce((sum, s) => sum + s.totalPaid, 0),
+    [allDoctorFinancials]
+  );
+
   const matchedDoctors = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return doctors;
-    return doctors.filter(
+    let list = [...doctors];
+
+    if (clientFilterTab === 'debtors') {
+      list = list.filter((d) => (doctorFinancialsMap.get(d.uid)?.debt || 0) > 0);
+      list.sort((a, b) => (doctorFinancialsMap.get(b.uid)?.debt || 0) - (doctorFinancialsMap.get(a.uid)?.debt || 0));
+    } else if (clientFilterTab === 'settled') {
+      list = list.filter((d) => (doctorFinancialsMap.get(d.uid)?.debt || 0) === 0);
+    }
+
+    if (!q) return list;
+    return list.filter(
       (d) =>
         d.name.toLowerCase().includes(q) ||
         d.uid.toLowerCase().includes(q) ||
-        d.clinicName.toLowerCase().includes(q) ||
-        d.email.toLowerCase().includes(q) ||
-        d.phone.includes(q)
+        (d.clinicName && d.clinicName.toLowerCase().includes(q)) ||
+        (d.email && d.email.toLowerCase().includes(q)) ||
+        (d.phone && d.phone.includes(q)) ||
+        (d.wilayaName && d.wilayaName.toLowerCase().includes(q))
     );
-  }, [doctors, searchQuery]);
+  }, [doctors, searchQuery, clientFilterTab, doctorFinancialsMap]);
 
   const clientOrders = useMemo(
     () =>
@@ -351,7 +399,7 @@ export default function ClientSituationView({
   }, [activeOrders, clientReturns, cancelledOrders, clientPayments]);
 
   const formatPrice = (num: number) => {
-    if (num === 0 || num === undefined || num === null) return '-';
+    if (num === 0 || num === undefined || num === null) return '0 ' + getTranslation(lang, 'currency');
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
   };
 
@@ -465,26 +513,56 @@ export default function ClientSituationView({
       orders: clientOrders,
       payments: clientPayments,
       returns: clientReturns,
+      shopInfo,
       lang
     });
   };
 
+  const handleExportAllDebts = () => {
+    exportAllDebtsPDF({
+      doctors,
+      orders: ordersList,
+      payments: paymentsList,
+      returns: returnsList,
+      shopInfo,
+      lang,
+      includeAllClients: false
+    });
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="border-b border-slate-50 pb-4">
-        <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-          <FileText size={20} className="text-brand-cyan" />
-          {getTranslation(lang, 'clientSituation')}
-        </h3>
-        <p className="text-xs text-slate-400 mt-1">
-          {lang === 'fr'
-            ? 'Consultez le relevé de compte d\'un client : achats, retours et paiements.'
-            : 'اطلع على كشف حساب الزبون: المشتريات، المرتجعات، والمدفوعات.'}
-        </p>
+    <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'}>
+      {/* ── Top Header ────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div>
+          <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+            <FileText size={22} className="text-brand-cyan" />
+            {lang === 'fr' ? 'Relevé de Compte & État des Dettes Clients' : 'كشف حساب ومتابعة ديون الزبائن والأطباء'}
+          </h3>
+          <p className="text-xs text-slate-400 font-medium mt-1">
+            {lang === 'fr'
+              ? 'Consultez les soldes débiteurs, fiches détaillées, paiements et téléchargez le rapport global des créances.'
+              : 'متابعة تفصيلية لحسابات وديون جميع الأطباء والزبائن، تسجيل الدفعات والمرتجعات، وتحميل كشوف الحسابات.'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            type="button"
+            onClick={handleExportAllDebts}
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+            title={lang === 'fr' ? 'Télécharger l\'état global de toutes les dettes en PDF' : 'تحميل كشف كامل الديون لجميع الزبائن بصيغة PDF'}
+          >
+            <FileDown size={16} />
+            <span>{lang === 'fr' ? 'Exporter Toutes les Dettes (PDF)' : 'تحميل كشف جميع الديون PDF 📄'}</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ── Left Sidebar: Doctors list with Filter tabs & Debt Badges ── */}
         <div className="lg:col-span-1 space-y-3">
+          {/* Search bar */}
           <div className="relative">
             <Search
               size={16}
@@ -495,14 +573,67 @@ export default function ClientSituationView({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={
-                lang === 'fr' ? 'Rechercher un client...' : 'البحث عن طبيب...'
+                lang === 'fr' ? 'Rechercher un client / docteur...' : 'البحث عن طبيب أو عيادة...'
               }
-              className={`w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl py-2.5 ${
+              className={`w-full text-xs font-bold bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 ${
                 isRtl ? 'pr-9 pl-3' : 'pl-9 pr-3'
               } focus:outline-hidden focus:border-brand-cyan`}
             />
           </div>
 
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setClientFilterTab('all')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                clientFilterTab === 'all'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {lang === 'fr' ? `Tous (${doctors.length})` : `الكل (${doctors.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setClientFilterTab('debtors')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                clientFilterTab === 'debtors'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30'
+              }`}
+            >
+              <span>{lang === 'fr' ? 'Débiteurs' : 'المدينون'}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${clientFilterTab === 'debtors' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'}`}>
+                {totalDebtorsCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setClientFilterTab('settled')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                clientFilterTab === 'settled'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+              }`}
+            >
+              {lang === 'fr' ? `À jour (${totalSettledCount})` : `مسدد (${totalSettledCount})`}
+            </button>
+          </div>
+
+          {/* Quick All Debts Overview Button */}
+          {selectedClient && (
+            <button
+              type="button"
+              onClick={() => setSelectedClient(null)}
+              className="w-full py-2 px-3 bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan font-black text-xs rounded-xl border border-brand-cyan/30 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <Users size={14} />
+              <span>{lang === 'fr' ? '← Voir tableau de tous les clients' : '← عرض جدول ديون جميع الزبائن'}</span>
+            </button>
+          )}
+
+          {/* Doctors List */}
           <div className="max-h-[500px] overflow-y-auto space-y-1.5 pr-1">
             {matchedDoctors.length === 0 ? (
               <p className="text-xs text-slate-400 text-center py-6">
@@ -511,38 +642,63 @@ export default function ClientSituationView({
             ) : (
               matchedDoctors.map((doc) => {
                 const isSelected = selectedClient?.uid === doc.uid;
+                const fin = doctorFinancialsMap.get(doc.uid);
+                const hasDebt = fin && fin.debt > 0;
+                const hasCredit = fin && fin.credit > 0;
+
                 return (
                   <button
                     key={doc.uid}
                     type="button"
                     onClick={() => setSelectedClient(doc)}
-                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
+                    className={`w-full text-left rtl:text-right p-3 rounded-2xl border transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-brand-cyan text-white border-brand-cyan shadow-sm'
-                        : 'bg-white text-slate-800 border-slate-100 hover:border-slate-300'
+                        : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-1 mb-1">
                       <span className="font-extrabold text-xs truncate">{doc.name}</span>
-                      {doc.role === 'doctor' && (
+                      {hasDebt ? (
                         <span
-                          className={`text-[9px] px-1.5 py-0.5 rounded-full font-extrabold ${
+                          className={`text-[9px] px-2 py-0.5 rounded-md font-black shrink-0 ${
                             isSelected
-                              ? 'bg-white/20 text-white'
-                              : 'bg-slate-100 text-slate-600'
+                              ? 'bg-rose-500 text-white'
+                              : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
                           }`}
                         >
-                          {doc.clinicName || 'عيادة'}
+                          {lang === 'fr' ? 'Dette' : 'دين'}: {formatPrice(fin.debt)}
+                        </span>
+                      ) : hasCredit ? (
+                        <span
+                          className={`text-[9px] px-2 py-0.5 rounded-md font-black shrink-0 ${
+                            isSelected
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
+                          }`}
+                        >
+                          {lang === 'fr' ? 'Crédit' : 'دائن'}: {formatPrice(fin.credit)}
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold shrink-0 ${
+                            isSelected
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                          }`}
+                        >
+                          {lang === 'fr' ? 'À jour' : 'مسدد'}
                         </span>
                       )}
                     </div>
-                    <p
-                      className={`text-[10px] mt-0.5 ${
-                        isSelected ? 'text-white/80' : 'text-slate-400'
-                      }`}
-                    >
-                      {doc.phone} • {doc.wilayaName || ''}
-                    </p>
+                    <div className="flex items-center justify-between text-[10px] mt-0.5">
+                      <span className={`${isSelected ? 'text-white/80' : 'text-slate-400'} truncate`}>
+                        {doc.clinicName || 'عيادة'} • {doc.wilayaName || ''}
+                      </span>
+                      <span className={`font-mono ${isSelected ? 'text-white/90' : 'text-slate-500'}`}>
+                        {doc.phone}
+                      </span>
+                    </div>
                   </button>
                 );
               })
@@ -550,26 +706,207 @@ export default function ClientSituationView({
           </div>
         </div>
 
+        {/* ── Main Content Area (Right 2 cols) ───────────────────── */}
         <div className="lg:col-span-2 space-y-5">
           {!selectedClient ? (
-            <div className="text-center py-16 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-              <User className="mx-auto text-slate-300 mb-3" size={40} />
-              <p className="text-sm font-bold text-slate-500">
-                {lang === 'fr'
-                  ? 'Sélectionnez un client pour afficher son relevé.'
-                  : 'اختر زبوناً لعرض كشف حسابه.'}
-              </p>
+            /* ── ⭐ ALL CUSTOMER DEBTS OVERVIEW & TABLE (كشف ديون جميع الزبائن) ── */
+            <div className="space-y-5">
+              {/* Global Debts KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-2xl p-4 shadow-xs">
+                  <div className="flex items-center gap-1.5 mb-1.5 text-rose-600 dark:text-rose-400">
+                    <CreditCard size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-tight">
+                      {lang === 'fr' ? 'Total Dettes Restantes' : 'إجمالي الديون المعلقة'}
+                    </span>
+                  </div>
+                  <p className="font-black text-rose-700 dark:text-rose-300 text-lg sm:text-xl">
+                    {formatPrice(globalTotalDebt)}
+                  </p>
+                  <p className="text-[10px] text-rose-500 font-bold mt-0.5">
+                    {totalDebtorsCount} {lang === 'fr' ? 'clients avec dettes' : 'زبون عليهم ديون'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-xs">
+                  <div className="flex items-center gap-1.5 mb-1.5 text-slate-600 dark:text-slate-400">
+                    <Users size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-tight">
+                      {lang === 'fr' ? 'Nombre Débiteurs' : 'الزبائن المدينون'}
+                    </span>
+                  </div>
+                  <p className="font-black text-slate-900 dark:text-white text-lg sm:text-xl">
+                    {totalDebtorsCount} / {doctors.length}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                    {totalSettledCount} {lang === 'fr' ? 'clients à jour' : 'حسابات مسددة'}
+                  </p>
+                </div>
+
+                <div className="bg-cyan-50/60 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-900/50 rounded-2xl p-4 shadow-xs">
+                  <div className="flex items-center gap-1.5 mb-1.5 text-cyan-700 dark:text-cyan-400">
+                    <ShoppingBag size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-tight">
+                      {lang === 'fr' ? 'Total Achats' : 'إجمالي المبيعات'}
+                    </span>
+                  </div>
+                  <p className="font-black text-cyan-900 dark:text-cyan-200 text-lg sm:text-xl">
+                    {formatPrice(globalTotalPurchases)}
+                  </p>
+                  <p className="text-[10px] text-cyan-600 font-bold mt-0.5">
+                    {ordersList.filter((o) => o.status !== 'cancelled').length} {lang === 'fr' ? 'commandes' : 'طلبية مؤكدة'}
+                  </p>
+                </div>
+
+                <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl p-4 shadow-xs">
+                  <div className="flex items-center gap-1.5 mb-1.5 text-emerald-700 dark:text-emerald-400">
+                    <CheckCircle2 size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-tight">
+                      {lang === 'fr' ? 'Total Payé' : 'إجمالي المحصل'}
+                    </span>
+                  </div>
+                  <p className="font-black text-emerald-800 dark:text-emerald-200 text-lg sm:text-xl">
+                    {formatPrice(globalTotalPaid)}
+                  </p>
+                  <p className="text-[10px] text-emerald-600 font-bold mt-0.5">
+                    {lang === 'fr' ? 'Versements reçus' : 'المدفوعات المستلمة'}
+                  </p>
+                </div>
+              </div>
+
+              {/* All Debtors Table Card */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div>
+                    <h4 className="font-black text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                      <Users size={18} className="text-brand-cyan" />
+                      {lang === 'fr' ? 'Tableau Récapitulatif des Dettes par Client' : 'جدول تفاصيل ديون جميع الزبائن والأطباء'}
+                    </h4>
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      {lang === 'fr'
+                        ? 'Cliquez sur un client pour ouvrir son relevé complet, voir ses articles ou enregistrer un versement.'
+                        : 'انقر على أي زبون لفتح كشف حسابه التفصيلي، الاطلاع على مشترياته أو تسجيل دفعة.'}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleExportAllDebts}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                  >
+                    <FileDown size={14} />
+                    <span>{lang === 'fr' ? 'Imprimer / Exporter PDF' : 'تصدير الكشف PDF 📄'}</span>
+                  </button>
+                </div>
+
+                {/* Table */}
+                <div className="overflow-x-auto border border-slate-100 dark:border-slate-800 rounded-2xl">
+                  <table className="w-full text-xs min-w-[650px]">
+                    <thead>
+                      <tr className="text-[10px] font-black text-slate-400 uppercase bg-slate-50 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800">
+                        <th className="py-2.5 px-3 text-left rtl:text-right">#</th>
+                        <th className="py-2.5 px-3 text-left rtl:text-right">{lang === 'fr' ? 'Médecin / Client' : 'الطبيب / الزبون'}</th>
+                        <th className="py-2.5 px-3 text-left rtl:text-right">{lang === 'fr' ? 'Cabinet' : 'العيادة'}</th>
+                        <th className="py-2.5 px-3 text-left rtl:text-right">{lang === 'fr' ? 'Téléphone' : 'الهاتف'}</th>
+                        <th className="py-2.5 px-3 text-left rtl:text-right">{lang === 'fr' ? 'Achats' : 'المشتريات'}</th>
+                        <th className="py-2.5 px-3 text-left rtl:text-right">{lang === 'fr' ? 'Payé' : 'المسدد'}</th>
+                        <th className="py-2.5 px-3 text-left rtl:text-right">{lang === 'fr' ? 'Dette' : 'الدين المتبقي'}</th>
+                        <th className="py-2.5 px-3 text-right rtl:text-left">{lang === 'fr' ? 'Action' : 'إجراء'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {allDoctorFinancials.filter((s) => s.debt > 0).length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-12 text-center">
+                            <CheckCircle2 className="mx-auto text-emerald-500 mb-2" size={36} />
+                            <p className="font-extrabold text-slate-700 dark:text-slate-300 text-sm">
+                              {lang === 'fr' ? 'Aucune dette en cours !' : 'لا توجد أي ديون معلقة حالياً! 🎉'}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              {lang === 'fr' ? 'Tous les comptes clients sont à jour.' : 'جميع حسابات الزبائن مسددة بالكامل.'}
+                            </p>
+                          </td>
+                        </tr>
+                      ) : (
+                        allDoctorFinancials
+                          .filter((s) => s.debt > 0)
+                          .sort((a, b) => b.debt - a.debt)
+                          .map((item, idx) => (
+                            <tr
+                              key={item.client.uid}
+                              onClick={() => setSelectedClient(item.client)}
+                              className="hover:bg-rose-50/40 dark:hover:bg-rose-950/20 transition-colors cursor-pointer group"
+                            >
+                              <td className="py-3 px-3 font-bold text-slate-400 text-[11px]">{idx + 1}</td>
+                              <td className="py-3 px-3">
+                                <span className="font-extrabold text-slate-900 dark:text-white group-hover:text-brand-cyan transition-colors block">
+                                  {item.client.name}
+                                </span>
+                                <span className="text-[10px] text-slate-400">{item.client.wilayaName || ''}</span>
+                              </td>
+                              <td className="py-3 px-3 text-slate-600 dark:text-slate-300 font-medium">{item.client.clinicName || '-'}</td>
+                              <td className="py-3 px-3 font-mono text-[11px] text-slate-500">{item.client.phone || '-'}</td>
+                              <td className="py-3 px-3 font-bold text-slate-800 dark:text-slate-200">{formatPrice(item.totalPurchases)}</td>
+                              <td className="py-3 px-3 font-bold text-emerald-600 dark:text-emerald-400">{formatPrice(item.totalPaid)}</td>
+                              <td className="py-3 px-3">
+                                <span className="font-black text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 px-2.5 py-1 rounded-lg text-xs inline-block">
+                                  {formatPrice(item.debt)}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right rtl:text-left">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedClient(item.client);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-brand-cyan hover:text-white dark:hover:bg-brand-cyan text-slate-700 dark:text-slate-300 font-extrabold text-[11px] rounded-lg transition-all inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye size={13} />
+                                  <span>{lang === 'fr' ? 'Détails' : 'عرض الكشف'}</span>
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           ) : (
+            /* ── ⭐ SELECTED CLIENT DETAILED STATEMENT VIEW ── */
             <>
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between gap-4 flex-wrap">
-                <div>
-                  <h4 className="font-extrabold text-slate-900">{selectedClient.name}</h4>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {selectedClient.clinicName} • {selectedClient.phone} • {selectedClient.email}
-                  </p>
-                  <p className="text-[10px] text-slate-400 font-mono mt-1">UID: {selectedClient.uid}</p>
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClient(null)}
+                    className="p-2 bg-white dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-200 rounded-xl border border-slate-200 dark:border-slate-600 transition-colors cursor-pointer"
+                    title={lang === 'fr' ? 'Retour au tableau de tous les clients' : 'العودة لجدول جميع الزبائن والديون'}
+                  >
+                    {isRtl ? <ArrowRight size={18} /> : <ArrowLeft size={18} />}
+                  </button>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-extrabold text-slate-900 dark:text-white text-base">{selectedClient.name}</h4>
+                      {summary.totalDebt > 0 ? (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                          {lang === 'fr' ? 'Débiteur' : 'عليه دين'}: {formatPrice(summary.totalDebt)}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          {lang === 'fr' ? 'À jour' : 'حساب مسدد'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      {selectedClient.clinicName} • {selectedClient.phone} • {selectedClient.email}
+                    </p>
+                    <p className="text-[10px] text-slate-400 font-mono mt-0.5">UID: {selectedClient.uid}</p>
+                  </div>
                 </div>
+
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => setShowGeneralPaymentForm(true)}
@@ -583,7 +920,7 @@ export default function ClientSituationView({
                     className="px-4 py-2 bg-brand-cyan hover:bg-brand-dark text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
                   >
                     <FileText size={16} />
-                    {lang === 'fr' ? 'Imprimer Relevé' : 'تصدير / طباعة كشف الحساب المالي 📑'}
+                    {lang === 'fr' ? 'Imprimer Relevé Client' : 'كشف حساب الزبون (PDF) 📑'}
                   </button>
                 </div>
               </div>

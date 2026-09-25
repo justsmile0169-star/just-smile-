@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import {
   collection, onSnapshot, query, where, doc, getDoc, getDocs, getDocFromServer, setDoc,
@@ -154,6 +154,93 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   const isRtl = lang === 'ar';
+
+  // --- History & Mobile Back Button Navigation Management ---
+  const isPopStateRef = useRef<boolean>(false);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const selectedDetailProductRef = useRef(selectedDetailProduct);
+  selectedDetailProductRef.current = selectedDetailProduct;
+
+  const selectedInvoiceOrderRef = useRef(selectedInvoiceOrder);
+  selectedInvoiceOrderRef.current = selectedInvoiceOrder;
+
+  const showBarcodeScannerRef = useRef(showBarcodeScanner);
+  showBarcodeScannerRef.current = showBarcodeScanner;
+
+  const showBarcodePrintRef = useRef(showBarcodePrint);
+  showBarcodePrintRef.current = showBarcodePrint;
+
+  const verificationOrderIdRef = useRef(verificationOrderId);
+  verificationOrderIdRef.current = verificationOrderId;
+
+  // Initialize root history state on initial load
+  useEffect(() => {
+    if (!window.history.state || !window.history.state.isAppInitialized) {
+      window.history.replaceState(
+        { tab: activeTab || 'browse', isAppRoot: true, isAppInitialized: true },
+        '',
+        window.location.pathname + window.location.search
+      );
+    }
+  }, []);
+
+  // Listen to browser / phone back & forward button events
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      isPopStateRef.current = true;
+      const state = event.state;
+
+      // Close any open modals first
+      const hadProductModal = !!selectedDetailProductRef.current;
+      const hadInvoiceModal = !!selectedInvoiceOrderRef.current;
+      const hadScannerModal = !!showBarcodeScannerRef.current;
+      const hadPrintModal = !!showBarcodePrintRef.current;
+      const hadVerification = !!verificationOrderIdRef.current;
+
+      if (hadProductModal) setSelectedDetailProduct(null);
+      if (hadInvoiceModal) setSelectedInvoiceOrder(null);
+      if (hadScannerModal) setShowBarcodeScanner(false);
+      if (hadPrintModal) {
+        setShowBarcodePrint(false);
+        setProductToPrint(null);
+      }
+      if (hadVerification) setVerificationOrderId(null);
+
+      // Restore specific modal state if user navigated forward/back directly to it
+      if (state && state.modal === 'product_detail' && state.productId) {
+        const found = products.find(p => p.id === state.productId);
+        if (found) setSelectedDetailProduct(found);
+      } else if (state && state.modal === 'invoice' && state.orderId) {
+        const found = (ordersList.length > 0 ? ordersList : userOrders).find(o => o.id === state.orderId);
+        if (found) setSelectedInvoiceOrder(found);
+      } else if (state && state.modal === 'barcode_scanner') {
+        setShowBarcodeScanner(true);
+      } else if (state && state.modal === 'barcode_print' && state.productId) {
+        const found = products.find(p => p.id === state.productId);
+        if (found) {
+          setProductToPrint(found);
+          setShowBarcodePrint(true);
+        }
+      }
+
+      // Synchronize active tab
+      const targetTab = (state && state.tab) ? state.tab : 'browse';
+      if (targetTab !== activeTabRef.current) {
+        setActiveTab(targetTab);
+      }
+
+      setTimeout(() => {
+        isPopStateRef.current = false;
+      }, 60);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [products, ordersList, userOrders]);
 
   // --- 1. Load cart and recently viewed from localStorage ---
   useEffect(() => {
@@ -537,8 +624,13 @@ export default function App() {
           }
           return null;
         });
-        const results = await Promise.all(promises);
-        setFavoriteProducts(results.filter((p): p is Product => p !== null));
+        const validFavs = results.filter((p): p is Product => p !== null);
+        validFavs.sort((a, b) => {
+          const inStockA = Number(a.stock || 0) > 0 ? 1 : 0;
+          const inStockB = Number(b.stock || 0) > 0 ? 1 : 0;
+          return inStockB - inStockA;
+        });
+        setFavoriteProducts(validFavs);
       } catch (err) {
         console.error("Error fetching favorite products details:", err);
       }
@@ -1088,14 +1180,107 @@ export default function App() {
     }
   };
 
-  // --- 7. Recently Viewed Tracker ---
+  // --- 7. Tab & Modal Navigation Handlers (With Mobile Back Button & History Integration) ---
+  const navigateToTab = (newTab: typeof activeTab) => {
+    if (activeTab === newTab && !selectedDetailProduct && !selectedInvoiceOrder && !showBarcodeScanner && !showBarcodePrint) {
+      return;
+    }
+
+    if (selectedDetailProduct) setSelectedDetailProduct(null);
+    if (selectedInvoiceOrder) setSelectedInvoiceOrder(null);
+    if (showBarcodeScanner) setShowBarcodeScanner(false);
+    if (showBarcodePrint) {
+      setShowBarcodePrint(false);
+      setProductToPrint(null);
+    }
+
+    if (!isPopStateRef.current) {
+      window.history.pushState({ tab: newTab, isAppInitialized: true }, '', '');
+    }
+    setActiveTab(newTab);
+  };
+
   const handleViewProductDetails = (product: Product) => {
+    if (!isPopStateRef.current) {
+      window.history.pushState(
+        { tab: activeTab, modal: 'product_detail', productId: product.id, isAppInitialized: true },
+        '',
+        ''
+      );
+    }
     setSelectedDetailProduct(product);
 
     // Save/append to recently viewed array
     let updated = [product.id, ...recentlyViewed.filter((id) => id !== product.id)].slice(0, 8);
     setRecentlyViewed(updated);
     localStorage.setItem('just_smile_recent_viewed', JSON.stringify(updated));
+  };
+
+  const handleCloseProductDetails = () => {
+    if (window.history.state && window.history.state.modal === 'product_detail') {
+      window.history.back();
+    } else {
+      setSelectedDetailProduct(null);
+    }
+  };
+
+  const handleOpenInvoice = (order: Order) => {
+    if (!isPopStateRef.current) {
+      window.history.pushState(
+        { tab: activeTab, modal: 'invoice', orderId: order.id, isAppInitialized: true },
+        '',
+        ''
+      );
+    }
+    setSelectedInvoiceOrder(order);
+  };
+
+  const handleCloseInvoice = () => {
+    if (window.history.state && window.history.state.modal === 'invoice') {
+      window.history.back();
+    } else {
+      setSelectedInvoiceOrder(null);
+    }
+  };
+
+  const handleOpenBarcodeScanner = () => {
+    if (!isPopStateRef.current) {
+      window.history.pushState(
+        { tab: activeTab, modal: 'barcode_scanner', isAppInitialized: true },
+        '',
+        ''
+      );
+    }
+    setShowBarcodeScanner(true);
+  };
+
+  const handleCloseBarcodeScanner = () => {
+    if (window.history.state && window.history.state.modal === 'barcode_scanner') {
+      window.history.back();
+    } else {
+      setShowBarcodeScanner(false);
+    }
+  };
+
+  const handleOpenBarcodePrint = (product: Product) => {
+    if (!isPopStateRef.current) {
+      window.history.pushState(
+        { tab: activeTab, modal: 'barcode_print', productId: product.id, isAppInitialized: true },
+        '',
+        ''
+      );
+    }
+    setProductToPrint(product);
+    setShowBarcodePrint(true);
+  };
+
+  const handleCloseBarcodePrint = () => {
+    if (window.history.state && window.history.state.modal === 'barcode_print') {
+      window.history.back();
+    } else {
+      setShowBarcodePrint(false);
+      setProductToPrint(null);
+    }
   };
 
   // --- 8. Quick Reorder Handler ---
@@ -1274,7 +1459,7 @@ export default function App() {
             lang={lang}
             onLanguageChange={setLang}
             activeTab={activeTab}
-            setActiveTab={setActiveTab}
+            setActiveTab={navigateToTab}
             cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
             favoritesCount={favorites.length}
             unreadNotificationsCount={unreadNotifsCount}
@@ -1318,7 +1503,7 @@ export default function App() {
                     currentUser={currentUser}
                     selectedCategory={selectedCategory}
                     onSelectCategory={setSelectedCategory}
-                    onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                    onOpenBarcodeScanner={handleOpenBarcodeScanner}
                     onLoadMoreProducts={handleLoadMoreProducts}
                     hasMoreProducts={hasMoreProducts}
                     isLoadingMore={isLoadingMoreProducts}
@@ -1338,7 +1523,7 @@ export default function App() {
                     currentUser={currentUser}
                     selectedCategory={selectedCategory}
                     onSelectCategory={setSelectedCategory}
-                    onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                    onOpenBarcodeScanner={handleOpenBarcodeScanner}
                     onLoadMoreProducts={handleLoadMoreProducts}
                     hasMoreProducts={hasMoreProducts}
                     isLoadingMore={isLoadingMoreProducts}
@@ -1358,7 +1543,7 @@ export default function App() {
                     currentUser={currentUser}
                     selectedCategory={selectedCategory}
                     onSelectCategory={setSelectedCategory}
-                    onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+                    onOpenBarcodeScanner={handleOpenBarcodeScanner}
                     onLoadMoreProducts={handleLoadMoreProducts}
                     hasMoreProducts={hasMoreProducts}
                     isLoadingMore={isLoadingMoreProducts}
@@ -1378,8 +1563,8 @@ export default function App() {
                     onUpdateQuantity={handleUpdateQuantity}
                     onRemoveItem={handleRemoveItem}
                     onClearCart={handleClearCart}
-                    onCheckoutSuccess={() => setActiveTab('browse')}
-                    setActiveTab={setActiveTab}
+                    onCheckoutSuccess={() => navigateToTab('browse')}
+                    setActiveTab={navigateToTab}
                   />
                 )}
 
@@ -1390,9 +1575,9 @@ export default function App() {
                     onAuthSuccess={(profile) => {
                       setCurrentUser(profile);
                       if (profile.role !== 'doctor') {
-                        setActiveTab('admin');
+                        navigateToTab('admin');
                       } else {
-                        setActiveTab('browse');
+                        navigateToTab('browse');
                       }
                     }}
                   />
@@ -1413,10 +1598,10 @@ export default function App() {
                     onToggleFavorite={handleToggleFavorite}
                     onViewProduct={handleViewProductDetails}
                     onQuickReorder={handleQuickReorder}
-                    onPrintInvoice={setSelectedInvoiceOrder}
+                    onPrintInvoice={handleOpenInvoice}
                     onSelectCategory={(category) => {
                       setSelectedCategory(category);
-                      setActiveTab('browse');
+                      navigateToTab('browse');
                     }}
                   />
                 )}
@@ -1441,11 +1626,8 @@ export default function App() {
                     shopInfo={shopInfo}
                     onShopInfoChange={setShopInfo}
                     onRefreshData={() => { }}
-                    onPrintInvoice={setSelectedInvoiceOrder}
-                    onPrintBarcode={(product) => {
-                      setProductToPrint(product);
-                      setShowBarcodePrint(true);
-                    }}
+                    onPrintInvoice={handleOpenInvoice}
+                    onPrintBarcode={handleOpenBarcodePrint}
                   />
                 )}
 
@@ -1464,7 +1646,7 @@ export default function App() {
                         <Heart className="mx-auto text-slate-300" size={48} />
                         <h3 className="font-bold text-slate-700 text-sm">{lang === 'fr' ? 'Aucun favori enregistré.' : 'لم تقم بحفظ أي منتجات في المفضلة بعد.'}</h3>
                         <button
-                          onClick={() => setActiveTab('browse')}
+                          onClick={() => navigateToTab('browse')}
                           className="bg-brand-cyan text-white font-extrabold text-xs md:text-sm px-6 py-2.5 rounded-xl hover:bg-brand-cyan/90 transition-colors"
                         >
                           {getTranslation(lang, 'browse')}
@@ -1563,7 +1745,7 @@ export default function App() {
                 onAddToCart={handleScannerAddToCart}
                 onPrintBarcode={handleScannerPrintBarcode}
                 onCreateProduct={handleScannerCreateProduct}
-                onClose={() => setShowBarcodeScanner(false)}
+                onClose={handleCloseBarcodeScanner}
               />
             )}
 
@@ -1572,7 +1754,7 @@ export default function App() {
               <ProductDetailModal
                 product={selectedDetailProduct}
                 lang={lang}
-                onClose={() => setSelectedDetailProduct(null)}
+                onClose={handleCloseProductDetails}
                 onAddToCart={handleAddToCart}
               />
             )}
@@ -1582,10 +1764,7 @@ export default function App() {
               <BarcodePrintView
                 product={productToPrint}
                 lang={lang}
-                onClose={() => {
-                  setShowBarcodePrint(false);
-                  setProductToPrint(null);
-                }}
+                onClose={handleCloseBarcodePrint}
               />
             )}
           </Suspense>
@@ -1598,7 +1777,7 @@ export default function App() {
             doctor={usersList.find(u => u.uid === selectedInvoiceOrder.userId || u.id === selectedInvoiceOrder.userId) || currentUser}
             lang={lang}
             shopInfo={shopInfo}
-            onClose={() => setSelectedInvoiceOrder(null)}
+            onClose={handleCloseInvoice}
           />
         )}
 
@@ -1614,7 +1793,7 @@ export default function App() {
                 setVerificationOrderId(null);
                 window.history.replaceState({}, '', window.location.pathname);
               }}
-              onPrintInvoice={setSelectedInvoiceOrder}
+              onPrintInvoice={handleOpenInvoice}
             />
           </div>
         )}

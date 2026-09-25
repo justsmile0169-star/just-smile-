@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Product } from '../types';
 import { Language, getTranslation } from '../translations';
 import { FileText, Download, X, Check, Search, Filter } from 'lucide-react';
 import jsPDF from 'jspdf';
+import { filterAndRankProducts } from '../utils/productSearch';
 
 interface CatalogGeneratorProps {
   products: Product[];
@@ -19,12 +20,11 @@ export default function CatalogGenerator({ products, lang }: CatalogGeneratorPro
   // Get unique categories
   const categories = Array.from(new Set(products.map(p => p.category))).filter(Boolean);
 
-  // Filter products
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
-    return matchesSearch && matchesCategory && !p.isDeleted;
-  });
+  // Filter products using enhanced multi-position and Arabic-aware search
+  const filteredProducts = useMemo(() => {
+    const valid = products.filter(p => !p.isDeleted);
+    return filterAndRankProducts(valid, searchTerm, categoryFilter);
+  }, [products, searchTerm, categoryFilter]);
 
   const toggleProduct = (productId: string) => {
     const newSelected = new Set(selectedProducts);

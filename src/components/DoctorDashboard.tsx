@@ -9,6 +9,7 @@ import { hashPassword } from '../utils/crypto';
 import { useAppDialog } from '../context/AppDialogContext';
 import { getWilayas, getCommunesByWilaya, WilayaOption, CommuneOption, isFreeDelivery } from '../utils/algeriaData';
 import { exportFinancialStatement } from '../utils/exportFinancialStatement';
+import { isProductInStock } from '../utils/productSearch';
 import DoctorAnalytics from './DoctorAnalytics';
 import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
 
@@ -408,9 +409,22 @@ export default function DoctorDashboard({
 
   const isBlocked = overdueOrders.length > 0;
 
-  // Find products matching arrays
-  const favoriteProducts = allProducts.filter((p) => favorites.includes(p.id));
-  const recentlyViewedProducts = allProducts.filter((p) => recentlyViewed.includes(p.id));
+  // Find products matching arrays (in-stock first, out-of-stock at the end)
+  const favoriteProducts = allProducts
+    .filter((p) => favorites.includes(p.id))
+    .sort((a, b) => {
+      const inStockA = isProductInStock(a) ? 1 : 0;
+      const inStockB = isProductInStock(b) ? 1 : 0;
+      return inStockB - inStockA;
+    });
+
+  const recentlyViewedProducts = allProducts
+    .filter((p) => recentlyViewed.includes(p.id))
+    .sort((a, b) => {
+      const inStockA = isProductInStock(a) ? 1 : 0;
+      const inStockB = isProductInStock(b) ? 1 : 0;
+      return inStockB - inStockA;
+    });
 
   const handleExportStatement = () => {
     const userId = user.uid || (user as any).id;

@@ -16,6 +16,7 @@ interface AnalyticsDashboardProps {
   ordersList: Order[];
   expensesList: Expense[];
   productsList?: Product[];
+  onViewDebts?: () => void;
 }
 
 interface MonthStat {
@@ -35,7 +36,7 @@ interface MonthStat {
   changeVsPrevSales: number | null;
 }
 
-export default function AnalyticsDashboard({ lang, ordersList, expensesList, productsList = [] }: AnalyticsDashboardProps) {
+export default function AnalyticsDashboard({ lang, ordersList, expensesList, productsList = [], onViewDebts }: AnalyticsDashboardProps) {
   const isRtl = lang === 'ar';
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -344,18 +345,53 @@ export default function AnalyticsDashboard({ lang, ordersList, expensesList, pro
           { label: lang === 'fr' ? 'Marge brute totale' : 'الربح الإجمالي العام', value: stats.grossProfit, icon: Scale, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/30' },
           { label: lang === 'fr' ? 'Dépenses totales' : 'المصروفات الكلية', value: stats.totalExpenses, icon: Calendar, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/30' },
           { label: lang === 'fr' ? 'Profit net global' : 'صافي الربح العام النهائي', value: stats.netProfit, icon: TrendingUp, color: stats.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600', bg: stats.netProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-rose-50 dark:bg-rose-950/30' },
-          { label: lang === 'fr' ? 'Dettes non payées' : 'إجمالي الديون المعلقة', value: stats.totalUnpaidDebts, icon: CreditCard, color: 'text-rose-600', bg: 'bg-rose-50 dark:bg-rose-950/30' }
-        ].map(({ label, value, icon: Icon, color, bg }) => (
-          <div key={label} className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`p-1.5 rounded-lg ${bg}`}>
-                <Icon size={14} className={color} />
+          { 
+            label: lang === 'fr' ? 'Dettes non payées' : 'إجمالي الديون المعلقة', 
+            value: stats.totalUnpaidDebts, 
+            icon: CreditCard, 
+            color: 'text-rose-600', 
+            bg: 'bg-rose-50 dark:bg-rose-950/30',
+            isClickable: !!onViewDebts,
+            onClick: onViewDebts,
+            tooltip: lang === 'fr' ? 'Cliquer pour voir le détail des dettes clients' : 'انقر لعرض تفاصيل ديون جميع الزبائن'
+          }
+        ].map(({ label, value, icon: Icon, color, bg, isClickable, onClick, tooltip }) => (
+          <div 
+            key={label} 
+            onClick={onClick}
+            role={isClickable ? 'button' : undefined}
+            tabIndex={isClickable ? 0 : undefined}
+            title={tooltip}
+            className={`bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-all ${
+              isClickable 
+                ? 'cursor-pointer hover:border-rose-400 dark:hover:border-rose-600 hover:shadow-md hover:scale-[1.02] hover:bg-rose-50/30 dark:hover:bg-rose-950/20 group' 
+                : ''
+            }`}
+          >
+            <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center gap-2">
+                <div className={`p-1.5 rounded-lg ${bg}`}>
+                  <Icon size={14} className={color} />
+                </div>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-tight truncate">{label}</span>
               </div>
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-tight truncate">{label}</span>
+              {isClickable && (
+                <span className="text-rose-500 opacity-75 group-hover:opacity-100 transition-opacity">
+                  <ArrowUpRight size={14} />
+                </span>
+              )}
             </div>
             <p className="font-black text-slate-900 dark:text-white text-base sm:text-lg">
               {fmt(value)}
             </p>
+            {isClickable && (
+              <p className="text-[9px] text-rose-600 dark:text-rose-400 font-bold mt-1 group-hover:underline flex items-center gap-0.5">
+                {lang === 'fr' ? 'Voir détails' : 'عرض التفاصيل'}
+                <span className="inline-block transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5">
+                  {isRtl ? '←' : '→'}
+                </span>
+              </p>
+            )}
           </div>
         ))}
       </div>

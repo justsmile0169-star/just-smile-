@@ -1,20 +1,11 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { initAutoUpdater } from './utils/autoUpdater';
 
-// Register Service Worker for PWA
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        console.log('Service Worker registered:', registration);
-      })
-      .catch((error) => {
-        console.error('Service Worker registration error:', error);
-      });
-  });
-}
+// Initialize full auto-updater system (PWA SW lifecycle, tab focus check, dynamic chunk error recovery)
+initAutoUpdater();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

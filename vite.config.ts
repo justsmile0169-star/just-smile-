@@ -61,6 +61,9 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['logo.png'],
         workbox: {
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
           navigateFallbackDenylist: [/^\/__/, /^https:\/\/firestore\.googleapis\.com/],
           runtimeCaching: [

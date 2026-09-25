@@ -1,4 +1,4 @@
-import { Order, Payment, ProductReturn, UserProfile } from '../types';
+import { Order, Payment, ProductReturn, ShopInfo, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 
 interface ExportFinancialStatementOptions {
@@ -6,6 +6,7 @@ interface ExportFinancialStatementOptions {
   orders: Order[];
   payments: Payment[];
   returns: ProductReturn[];
+  shopInfo?: ShopInfo;
   lang: Language;
 }
 
@@ -14,6 +15,7 @@ export function exportFinancialStatement({
   orders,
   payments,
   returns,
+  shopInfo,
   lang
 }: ExportFinancialStatementOptions) {
   const isRtl = lang === 'ar';
