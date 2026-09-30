@@ -1,7 +1,9 @@
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import { Order, Payment, ProductReturn, ShopInfo, UserProfile } from '../types';
 import { Language, getTranslation } from '../translations';
 
-interface ExportFinancialStatementOptions {
+export interface ExportFinancialStatementOptions {
   client: UserProfile;
   orders: Order[];
   payments: Payment[];
@@ -10,26 +12,19 @@ interface ExportFinancialStatementOptions {
   lang: Language;
 }
 
-export function exportFinancialStatement({
+/**
+ * Generate standalone HTML content for financial statement
+ */
+export function generateFinancialStatementHTML({
   client,
   orders,
   payments,
   returns,
   shopInfo,
-  lang
-}: ExportFinancialStatementOptions) {
+  lang,
+  includePrintControls = false
+}: ExportFinancialStatementOptions & { includePrintControls?: boolean }): string {
   const isRtl = lang === 'ar';
-  const printWindow = window.open('', '_blank');
-
-  if (!printWindow) {
-    alert(
-      lang === 'fr'
-        ? 'Veuillez autoriser les fenêtres surgissantes (popups) pour imprimer le relevé.'
-        : 'يرجى السماح بالنوافذ المنبثقة (Popups) للتمكن من طباعة كشف الحساب.'
-    );
-    return;
-  }
-
   const cancelledOrders = orders.filter((o) => o.status === 'cancelled');
   const activeOrders = orders.filter((o) => o.status !== 'cancelled');
 
@@ -95,7 +90,7 @@ export function exportFinancialStatement({
     previewSubtitle: '(جاهز للطباعة أو التصدير PDF)',
     btnPrint: 'طباعة الكشف 🖨️',
     btnClose: 'إغلاق',
-    companyTitle: 'JUST SMILE - مستلزمات طب الأسنان',
+    companyTitle: shopInfo?.companyName || 'JUST SMILE - مستلزمات طب الأسنان',
     companySub: 'كشف حساب مالي رسمي للعيادة — Relevé De Compte Financier',
     exportDate: 'تاريخ الاستخراج',
     doctorClinic: 'الطبيب / العيادة',
@@ -143,7 +138,7 @@ export function exportFinancialStatement({
     previewSubtitle: '(Prêt pour impression ou export PDF)',
     btnPrint: 'Imprimer le Relevé 🖨️',
     btnClose: 'Fermer',
-    companyTitle: 'JUST SMILE - Matériel Dentaire',
+    companyTitle: shopInfo?.companyName || 'JUST SMILE - Matériel Dentaire',
     companySub: 'Relevé de Compte Financier Officiel du Cabinet',
     exportDate: 'Date d\'extraction',
     doctorClinic: 'Médecin / Cabinet',
@@ -190,7 +185,7 @@ export function exportFinancialStatement({
   const fmtNum = (num: number) =>
     new Intl.NumberFormat(isRtl ? 'ar-DZ' : 'fr-FR').format(num) + ' ' + currencySymbol;
 
-  const htmlContent = `
+  return `
     <!DOCTYPE html>
     <html dir="${isRtl ? 'rtl' : 'ltr'}">
     <head>
@@ -333,16 +328,18 @@ export function exportFinancialStatement({
       </style>
     </head>
     <body>
-      <div class="no-print-bar no-print">
-        <div>
-          <strong style="font-size: 14px;">${L.previewTitle}</strong>
-          <span style="color: #64748b; font-size: 12px; ${isRtl ? 'margin-right' : 'margin-left'}: 10px;">${L.previewSubtitle}</span>
+      ${includePrintControls ? `
+        <div class="no-print-bar no-print">
+          <div>
+            <strong style="font-size: 14px;">${L.previewTitle}</strong>
+            <span style="color: #64748b; font-size: 12px; ${isRtl ? 'margin-right' : 'margin-left'}: 10px;">${L.previewSubtitle}</span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn-print" onclick="window.print()">${L.btnPrint}</button>
+            <button class="btn-close" onclick="window.close()">${L.btnClose}</button>
+          </div>
         </div>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn-print" onclick="window.print()">${L.btnPrint}</button>
-          <button class="btn-close" onclick="window.close()">${L.btnClose}</button>
-        </div>
-      </div>
+      ` : ''}
 
       <div class="header">
         <h1>${L.companyTitle}</h1>
@@ -513,24 +510,29 @@ export function exportFinancialStatement({
       <div class="footer">
         ${L.footerText}
       </div>
-
-      <script>
-        function triggerPrint() {
-          window.focus();
-          window.print();
-        }
-        if (document.readyState === 'complete') {
-          setTimeout(triggerPrint, 350);
-        } else {
-          window.addEventListener('load', function() { setTimeout(triggerPrint, 350); });
-          setTimeout(triggerPrint, 500);
-        }
-      </script>
     </body>
     </html>
   `;
+}
 
-  printWindow.document.write(htmlContent);
+/**
+ * Direct browser print popup for financial statement
+ */
+export function exportFinancialStatement(options: ExportFinancialStatementOptions) {
+  const isRtl = options.lang === 'ar';
+  const printWindow = window.open('', '_blank');
+
+  if (!printWindow) {
+    alert(
+      options.lang === 'fr'
+        ? 'Veuillez autoriser les fenêtres surgissantes (popups) pour imprimer le relevé.'
+        : 'يرجى السماح بالنوافذ المنبثقة (Popups) للتمكن من طباعة كشف الحساب.'
+    );
+    return;
+  }
+
+  const html = generateFinancialStatementHTML({ ...options, includePrintControls: true });
+  printWindow.document.write(html);
   printWindow.document.close();
   printWindow.focus();
   setTimeout(() => {
@@ -540,4 +542,61 @@ export function exportFinancialStatement({
       console.error('Error triggering window.print()', err);
     }
   }, 450);
+}
+
+/**
+ * Generate actual PDF file as a Blob in memory (used for Telegram document dispatch)
+ */
+export async function generateDoctorFinancialStatementPDFBlob(options: ExportFinancialStatementOptions): Promise<Blob> {
+  const html = generateFinancialStatementHTML({ ...options, includePrintControls: false });
+
+  // Create an offscreen container for html2canvas rendering
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-9999px';
+  container.style.top = '0';
+  container.style.width = '794px'; // 210mm at 96 DPI
+  container.style.background = '#ffffff';
+  container.style.zIndex = '-99999';
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  try {
+    // Wait slightly for any font rendering
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const canvas = await html2canvas(container, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      backgroundColor: '#ffffff',
+      windowWidth: 794
+    });
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    let heightLeft = pdfHeight;
+    let position = 0;
+
+    pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+    heightLeft -= pageHeight;
+
+    while (heightLeft > 0) {
+      position = heightLeft - pdfHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+      heightLeft -= pageHeight;
+    }
+
+    return pdf.output('blob');
+  } finally {
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
 }

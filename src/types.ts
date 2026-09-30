@@ -109,7 +109,7 @@ export interface Order {
   paidAmount: number;
   remainingBalance: number;
   createdAt: string;
-  deadlineDate: string; // createdAt + 15 days
+  deadlineDate?: string; // createdAt + 15 days
   paymentMethod?: 'credit' | 'cash'; // 'credit' = 20-day debt, 'cash' = cash on delivery immediate
   isEmergency?: boolean; // Emergency order for urgent clinic needs
   notes?: string;

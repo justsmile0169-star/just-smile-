@@ -12,6 +12,7 @@ import { deleteProductFully } from '../utils/productFirestore';
 import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../utils/yalidineService';
 import { compressImage } from '../utils/localProductStorage';
 import { uploadImageToCloud, migrateAllProductsToCloud, MigrationProgress } from '../utils/cloudImageStorage';
+import { sendOrderNotifications } from '../utils/orderNotificationService';
 import {
   DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
@@ -3985,7 +3986,14 @@ export default function AdminDashboard({
             <Loader2 className="animate-spin text-brand-cyan" size={28} />
           </div>
         }>
-          <NotificationSettingsManager lang={lang} onShowToast={(msg, type) => alert(msg, type || 'info')} />
+          <NotificationSettingsManager
+            lang={lang}
+            onShowToast={(msg, type) => alert(msg, type || 'info')}
+            usersList={usersList}
+            ordersList={ordersList}
+            paymentsList={paymentsList}
+            returnsList={returnsList}
+          />
         </Suspense>
         </div>
       )}

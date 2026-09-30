@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Bell,
   Send,
@@ -18,7 +18,17 @@ import {
   Smartphone,
   Save,
   Info,
-  Check
+  Check,
+  Calendar,
+  Clock,
+  FileSpreadsheet,
+  Users,
+  AlertTriangle,
+  Play,
+  CheckCircle,
+  XCircle,
+  Layers,
+  FileText
 } from 'lucide-react';
 import {
   NotificationConfig,
@@ -31,17 +41,44 @@ import {
   TelegramRecipient,
   WhatsAppCallMeBotRecipient
 } from '../../utils/orderNotificationService';
-import { Order } from '../../types';
+import {
+  WeeklyStatementConfig,
+  DEFAULT_WEEKLY_STATEMENT_CONFIG,
+  WeeklyStatementRecipient,
+  getWeeklyStatementConfig,
+  saveWeeklyStatementConfig,
+  buildDoctorStatementPDFCaption,
+  buildWeeklySummaryMessage,
+  executeWeeklyStatementsDispatch,
+  sendSingleDoctorStatementToTelegram,
+  getUpcomingThursdayMidnight,
+  formatCurrency,
+  BatchDispatchProgress
+} from '../../utils/weeklyStatementService';
+import { computeClientFinancials, ClientFinancialSummary } from '../../utils/clientFinancials';
+import { Order, Payment, ProductReturn, UserProfile } from '../../types';
 
 interface NotificationSettingsManagerProps {
   lang?: 'ar' | 'fr';
   onShowToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  usersList?: UserProfile[];
+  ordersList?: Order[];
+  paymentsList?: Payment[];
+  returnsList?: ProductReturn[];
 }
 
 export const NotificationSettingsManager: React.FC<NotificationSettingsManagerProps> = ({
   lang = 'ar',
-  onShowToast
+  onShowToast,
+  usersList = [],
+  ordersList = [],
+  paymentsList = [],
+  returnsList = []
 }) => {
+  const isRtl = lang === 'ar';
+  const [activeMainTab, setActiveMainTab] = useState<'orders' | 'weekly_statements'>('weekly_statements');
+
+  // Order notifications config state
   const [config, setConfig] = useState<NotificationConfig>(DEFAULT_NOTIFICATION_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -50,31 +87,57 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
   const [testResultTelegram, setTestResultTelegram] = useState<{ success: boolean; message: string } | null>(null);
   const [testResultWhatsApp, setTestResultWhatsApp] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Form states for adding new recipients
+  // Form states for order notifications
   const [newTgChatId, setNewTgChatId] = useState('');
   const [newTgLabel, setNewTgLabel] = useState('');
-
   const [newWaPhone, setNewWaPhone] = useState('');
   const [newWaApiKey, setNewWaApiKey] = useState('');
   const [newWaLabel, setNewWaLabel] = useState('');
-
   const [newUltraMsgPhone, setNewUltraMsgPhone] = useState('');
 
-  // UI state
+  // UI state for order notifications
   const [showTgToken, setShowTgToken] = useState(false);
   const [showTgGuide, setShowTgGuide] = useState(false);
   const [showWaGuide, setShowWaGuide] = useState(false);
   const [previewTab, setPreviewTab] = useState<'telegram' | 'whatsapp'>('telegram');
 
-  // Load config on mount
+  // ──────────────────────────────────────────────────────────────────────────
+  // Weekly Statements State
+  // ──────────────────────────────────────────────────────────────────────────
+  const [weeklyConfig, setWeeklyConfig] = useState<WeeklyStatementConfig>(DEFAULT_WEEKLY_STATEMENT_CONFIG);
+  const [savingWeekly, setSavingWeekly] = useState(false);
+  const [newWeeklyTgChatId, setNewWeeklyTgChatId] = useState('');
+  const [newWeeklyTgLabel, setNewWeeklyTgLabel] = useState('');
+  const [showWeeklyCustomToken, setShowWeeklyCustomToken] = useState(false);
+
+  // Batch dispatch execution state
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<BatchDispatchProgress | null>(null);
+  const [batchResult, setBatchResult] = useState<{
+    success: boolean;
+    totalDoctors: number;
+    sentCount: number;
+    failedCount: number;
+    errors: string[];
+  } | null>(null);
+
+  // Single test statement state
+  const [testingSingleDoctor, setTestingSingleDoctor] = useState(false);
+  const [singleTestResult, setSingleTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Load configs on mount
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const loaded = await getNotificationConfig();
-        setConfig(loaded);
+        const [loadedOrderCfg, loadedWeeklyCfg] = await Promise.all([
+          getNotificationConfig(),
+          getWeeklyStatementConfig()
+        ]);
+        setConfig(loadedOrderCfg);
+        setWeeklyConfig(loadedWeeklyCfg);
       } catch (err) {
-        console.error(err);
+        console.error('Error loading notification settings:', err);
       } finally {
         setLoading(false);
       }
@@ -90,7 +153,10 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
     }
   };
 
-  const handleSave = async () => {
+  // ──────────────────────────────────────────────────────────────────────────
+  // Order Notifications Handlers
+  // ──────────────────────────────────────────────────────────────────────────
+  const handleSaveOrderConfig = async () => {
     setSaving(true);
     try {
       await saveNotificationConfig(config);
@@ -102,31 +168,15 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
       );
     } catch (err: any) {
       console.error(err);
-      notify(
-        lang === 'fr'
-          ? `Erreur lors de la sauvegarde: ${err.message}`
-          : `حدث خطأ أثناء الحفظ: ${err.message}`,
-        'error'
-      );
+      notify(err.message || 'Error saving settings', 'error');
     } finally {
       setSaving(false);
     }
   };
 
-  // Telegram recipient management
   const handleAddTelegramRecipient = () => {
     if (!newTgChatId.trim()) {
-      notify(lang === 'fr' ? 'Veuillez saisir un Chat ID.' : 'يرجى إدخال معرف الدردشة (Chat ID).', 'error');
-      return;
-    }
-    const botId = config.telegram.botToken?.split(':')[0]?.trim();
-    if (botId && newTgChatId.trim() === botId) {
-      notify(
-        lang === 'fr'
-          ? 'Ce numéro est l\'ID du bot lui-même ! Le bot ne peut pas s\'envoyer de messages à lui-même. Veuillez entrer votre propre Chat ID utilisateur (obtenu via @userinfobot).'
-          : '⚠️ هذا الرقم هو معرف البوت نفسه! البوت لا يمكنه إرسال رسائل لنفسه. يرجى إدخال Chat ID الخاص بحسابك الشخصي (المستخرج من @userinfobot).',
-        'error'
-      );
+      notify(lang === 'fr' ? 'Veuillez saisir un Chat ID.' : 'يرجى إدخال Chat ID صالح.', 'error');
       return;
     }
     const newRecipient: TelegramRecipient = {
@@ -168,7 +218,6 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
     }));
   };
 
-  // WhatsApp CallMeBot recipient management
   const handleAddCallMeBotRecipient = () => {
     if (!newWaPhone.trim() || !newWaApiKey.trim()) {
       notify(
@@ -220,7 +269,6 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
     }));
   };
 
-  // UltraMsg phone management
   const handleAddUltraMsgPhone = () => {
     if (!newUltraMsgPhone.trim()) return;
     setConfig((prev) => ({
@@ -249,13 +297,12 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
     }));
   };
 
-  // Test Buttons
   const handleTestTelegram = async () => {
     setTestingTelegram(true);
     setTestResultTelegram(null);
     try {
       const res = await sendTestNotification('telegram', config);
-      setTestResultTelegram(res);
+      setTestResultTelegram({ success: res.success, message: res.message });
       if (res.success) {
         notify(res.message, 'success');
       } else {
@@ -274,7 +321,7 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
     setTestResultWhatsApp(null);
     try {
       const res = await sendTestNotification('whatsapp', config);
-      setTestResultWhatsApp(res);
+      setTestResultWhatsApp({ success: res.success, message: res.message });
       if (res.success) {
         notify(res.message, 'success');
       } else {
@@ -288,8 +335,148 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
     }
   };
 
-  // Sample Order for Preview
-  const sampleOrder: Order = {
+  // ──────────────────────────────────────────────────────────────────────────
+  // Weekly Statements Handlers
+  // ──────────────────────────────────────────────────────────────────────────
+  const handleSaveWeeklyConfig = async () => {
+    setSavingWeekly(true);
+    try {
+      await saveWeeklyStatementConfig(weeklyConfig);
+      notify(
+        lang === 'fr'
+          ? 'Paramètres des relevés hebdomadaires enregistrés !'
+          : 'تم حفظ إعدادات كشوفات الحسابات الأسبوعية بنجاح! ✅',
+        'success'
+      );
+    } catch (err: any) {
+      console.error(err);
+      notify(err.message || 'Error saving weekly config', 'error');
+    } finally {
+      setSavingWeekly(false);
+    }
+  };
+
+  const handleAddWeeklyRecipient = () => {
+    if (!newWeeklyTgChatId.trim()) {
+      notify(lang === 'fr' ? 'Veuillez saisir un Chat ID.' : 'يرجى إدخال Chat ID صالح.', 'error');
+      return;
+    }
+    const newRecipient: WeeklyStatementRecipient = {
+      id: `w_tg_${Date.now()}`,
+      chatId: newWeeklyTgChatId.trim(),
+      label: newWeeklyTgLabel.trim() || (lang === 'fr' ? `Compte ${weeklyConfig.recipients.length + 1}` : `حساب كشوفات ${weeklyConfig.recipients.length + 1}`),
+      enabled: true,
+    };
+    setWeeklyConfig((prev) => ({
+      ...prev,
+      recipients: [...(prev.recipients || []), newRecipient],
+    }));
+    setNewWeeklyTgChatId('');
+    setNewWeeklyTgLabel('');
+  };
+
+  const handleToggleWeeklyRecipient = (id: string) => {
+    setWeeklyConfig((prev) => ({
+      ...prev,
+      recipients: (prev.recipients || []).map((r) =>
+        r.id === id ? { ...r, enabled: !r.enabled } : r
+      ),
+    }));
+  };
+
+  const handleDeleteWeeklyRecipient = (id: string) => {
+    setWeeklyConfig((prev) => ({
+      ...prev,
+      recipients: (prev.recipients || []).map((r) => r.id !== id),
+    }));
+  };
+
+  // Trigger manual batch send now
+  const handleRunWeeklyBatchNow = async () => {
+    const confirmMsg = isRtl
+      ? 'هل أنت متأكد من رغبتك في بدء إرسال كشوفات الحساب لجميع الأطباء عبر تيليجرام الآن؟'
+      : 'Voulez-vous vraiment lancer l\'envoi des relevés hebdomadaires à tous les médecins sur Telegram maintenant ?';
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    setBatchRunning(true);
+    setBatchProgress(null);
+    setBatchResult(null);
+
+    try {
+      const result = await executeWeeklyStatementsDispatch({
+        config: weeklyConfig,
+        usersList: usersList.length > 0 ? usersList : undefined,
+        ordersList: ordersList.length > 0 ? ordersList : undefined,
+        paymentsList: paymentsList.length > 0 ? paymentsList : undefined,
+        returnsList: returnsList.length > 0 ? returnsList : undefined,
+        onProgress: (prog) => setBatchProgress(prog)
+      });
+
+      setBatchResult(result);
+      // Reload updated weekly config for timestamps
+      const updated = await getWeeklyStatementConfig();
+      setWeeklyConfig(updated);
+
+      if (result.success) {
+        notify(
+          isRtl
+            ? `تم إرسال كشوفات الحسابات بنجاح إلى تيليجرام (${result.sentCount} طبيب)! 🚀`
+            : `Relevés envoyés avec succès (${result.sentCount} médecins) !`,
+          'success'
+        );
+      } else {
+        notify(
+          isRtl ? 'حدث خطأ أثناء الإرسال. يرجى مراجعة التفاصيل.' : 'Erreur lors de l\'envoi.',
+          'error'
+        );
+      }
+    } catch (err: any) {
+      console.error(err);
+      notify(err.message || 'Error executing batch send', 'error');
+    } finally {
+      setBatchRunning(false);
+    }
+  };
+
+  // Send single test doctor statement
+  const handleSendSingleTestDoctor = async () => {
+    const sampleDoctor: UserProfile = usersList.find((u) => u.role === 'doctor') || {
+      uid: 'sample_doc_123',
+      name: 'د. يوسف شريف (طبيب تجريبي)',
+      clinicName: 'عيادة النور لطب وجراحة الأسنان',
+      phone: '0770821021',
+      wilayaName: 'الجلفة',
+      communeName: 'الجلفة المركز',
+      location: 'الجلفة - الجلفة المركز',
+      role: 'doctor',
+      status: 'active',
+      email: 'doctor.test@justsmile.dz',
+      createdAt: new Date().toISOString(),
+    };
+
+    setTestingSingleDoctor(true);
+    setSingleTestResult(null);
+
+    try {
+      const res = await sendSingleDoctorStatementToTelegram(
+        sampleDoctor,
+        ordersList,
+        paymentsList,
+        returnsList
+      );
+      setSingleTestResult(res);
+      notify(res.message, res.success ? 'success' : 'error');
+    } catch (err: any) {
+      setSingleTestResult({ success: false, message: err.message });
+      notify(err.message, 'error');
+    } finally {
+      setTestingSingleDoctor(false);
+    }
+  };
+
+  // Sample data for preview
+  const sampleOrder: Order = useMemo(() => ({
     id: 'ORD-892401',
     userId: 'doctor_123',
     doctorName: 'د. يوسف شريف',
@@ -320,42 +507,94 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
       },
       {
         productId: 'p2',
-        name: 'Boîte Fraises Diamantées FG (10 pcs)',
-        variantName: 'Grain Bleu / Cylindrique',
-        price: 3500,
-        quantity: 2,
+        name: 'Boîte de Fraises Diamantées (10 pcs)',
+        variantName: 'Grain Moyen / Bleu',
+        price: 2700,
+        quantity: 3,
         category: 'Instruments',
       },
-      {
-        productId: 'p3',
-        name: 'Gants d\'examen Latex poudrés (Boîte 100)',
-        variantName: 'Taille M',
-        price: 1000,
-        quantity: 1,
-        category: 'Hygiène & Stérilisation',
-      },
     ],
-  };
+  }), []);
+
+  const sampleDoctorSummary: ClientFinancialSummary = useMemo(() => {
+    const sampleDoc: UserProfile = {
+      uid: 'sample_preview',
+      name: 'د. يوسف شريف',
+      clinicName: 'عيادة النور لطب وجراحة الأسنان',
+      phone: '0770821021',
+      wilayaName: 'الجلفة',
+      communeName: 'الجلفة المركز',
+      location: 'الجلفة - الجلفة المركز',
+      role: 'doctor',
+      status: 'active',
+      email: 'doctor@example.com',
+      createdAt: new Date().toISOString()
+    };
+    return {
+      client: sampleDoc,
+      activeOrdersCount: 4,
+      totalPurchases: 125000,
+      totalReturns: 5000,
+      totalPaid: 80000,
+      netBalance: 40000,
+      debt: 40000,
+      credit: 0,
+      isDebtor: true
+    };
+  }, []);
+
+  const sampleUnpaidOrders: Order[] = useMemo(() => [
+    {
+      id: 'ORD-98214',
+      userId: 'sample_preview',
+      doctorName: 'د. يوسف شريف',
+      doctorClinic: 'عيادة النور',
+      doctorPhone: '0770821021',
+      totalBeforeDiscount: 25000,
+      discountAmount: 0,
+      totalAfterDiscount: 25000,
+      status: 'confirmed',
+      paymentStatus: 'unpaid',
+      paidAmount: 0,
+      remainingBalance: 25000,
+      createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      items: []
+    },
+    {
+      id: 'ORD-97501',
+      userId: 'sample_preview',
+      doctorName: 'د. يوسف شريف',
+      doctorClinic: 'عيادة النور',
+      doctorPhone: '0770821021',
+      totalBeforeDiscount: 20000,
+      discountAmount: 0,
+      totalAfterDiscount: 20000,
+      status: 'delivered',
+      paymentStatus: 'partial',
+      paidAmount: 5000,
+      remainingBalance: 15000,
+      createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      items: []
+    }
+  ], []);
+
+  const nextThursdayDate = useMemo(() => getUpcomingThursdayMidnight(), []);
 
   if (loading) {
     return (
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-xs flex items-center justify-center py-16">
-        <div className="flex flex-col items-center gap-3">
-          <RefreshCw className="animate-spin text-brand-cyan" size={32} />
-          <p className="text-sm font-bold text-slate-500">
-            {lang === 'fr' ? 'Chargement des paramètres de notification...' : 'جاري تحميل إعدادات الإشعارات...'}
-          </p>
-        </div>
+      <div className="bg-white p-12 rounded-3xl border border-slate-100 flex flex-col items-center justify-center gap-3">
+        <RefreshCw className="animate-spin text-brand-cyan" size={32} />
+        <p className="text-xs font-black text-slate-500">
+          {lang === 'fr' ? 'Chargement des paramètres de notification...' : 'جاري تحميل إعدادات الإشعارات...'}
+        </p>
       </div>
     );
   }
 
-  const isRtl = lang === 'ar';
-
   return (
-    <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-8 animate-fade-in">
-      {/* Header */}
-      <div className="border-b border-slate-100 pb-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-8 animate-fade-in" dir={isRtl ? 'rtl' : 'ltr'}>
+      {/* ── Top Navigation Tabs ──────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
         <div>
           <h3 className="text-xl font-black text-slate-900 flex items-center gap-2.5">
             <div className="p-2.5 bg-brand-cyan/10 text-brand-cyan rounded-2xl">
@@ -363,332 +602,335 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
             </div>
             <span>
               {lang === 'fr'
-                ? 'Notifications des Commandes (Telegram & WhatsApp)'
-                : 'إشعارات الطلبيات الجديدة (تيليغرام & واتساب)'}
+                ? 'Centre d\'alertes & Notifications Telegram / WhatsApp'
+                : 'مركز الإشعارات وكشوفات الحسابات الأوتوماتيكية'}
             </span>
           </h3>
           <p className="text-xs text-slate-500 mt-1 font-semibold">
             {lang === 'fr'
-              ? 'Recevez instantanément tous les détails des nouvelles commandes passées par vos clients sur Telegram et WhatsApp.'
-              : 'استقبل إشعاراً فورياً ومفصلاً بجميع معلومات الطلبية والعميل عند قيام أي مستخدم بالطلب من المتجر.'}
+              ? 'Configurez les alertes de commandes en direct et l\'envoi hebdomadaire des relevés de comptes des médecins.'
+              : 'إدارة إشعارات الطلبيات اللحظية والإرسال الأسبوعي التلقائي لكشوفات حسابات كل طبيب ليلة الجمعة.'}
           </p>
         </div>
 
-        {/* Master Enable Toggle */}
-        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-4 py-2.5 rounded-2xl self-start md:self-auto shadow-2xs">
-          <div>
-            <p className="text-xs font-black text-slate-800">
-              {lang === 'fr' ? 'Service d\'alertes' : 'حالة نظام الإشعارات'}
-            </p>
-            <p className="text-[10px] font-bold text-slate-400">
-              {config.enabled
-                ? (lang === 'fr' ? 'Actif en temps réel' : 'مفعل ويعمل في الخلفية')
-                : (lang === 'fr' ? 'Désactivé' : 'معطل حالياً')}
-            </p>
-          </div>
+        {/* Tab Switcher Buttons */}
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200/80 shadow-2xs self-stretch sm:self-auto">
           <button
             type="button"
-            onClick={() => setConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
-            className={`w-12 h-6 rounded-full transition-all relative shrink-0 cursor-pointer ${
-              config.enabled ? 'bg-emerald-500 shadow-xs shadow-emerald-500/30' : 'bg-slate-300'
+            onClick={() => setActiveMainTab('weekly_statements')}
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              activeMainTab === 'weekly_statements'
+                ? 'bg-brand-cyan text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
             }`}
           >
-            <div
-              className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
-                config.enabled ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
-              }`}
-            />
+            <FileSpreadsheet size={15} />
+            <span>{lang === 'fr' ? 'Relevés de Dettes PDF (Jeudi)' : 'كشوفات الديون الأسبوعية (ملفات PDF) 📑'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('orders')}
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              activeMainTab === 'orders'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <Bell size={15} />
+            <span>{lang === 'fr' ? 'Commandes Instantanées' : 'إشعارات الطلبيات الفورية 🛍️'}</span>
           </button>
         </div>
       </div>
 
-      {/* Main Channel Selector */}
-      <div className="space-y-3">
-        <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">
-          {lang === 'fr' ? 'Canal d\'envoi principal :' : 'قناة إرسال الإشعارات المطلوبة:'}
-        </label>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[
-            {
-              id: 'telegram',
-              title: lang === 'fr' ? 'Telegram uniquement' : 'تيليغرام فقط',
-              sub: lang === 'fr' ? 'Gratuit, rapide et illimité' : 'سريع ومجاني 100% وبدون قيود',
-              icon: Send,
-              color: 'text-sky-500 bg-sky-50 border-sky-200',
-              activeColor: 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/50'
-            },
-            {
-              id: 'whatsapp',
-              title: lang === 'fr' ? 'WhatsApp uniquement' : 'واتساب فقط',
-              sub: lang === 'fr' ? 'Messages directs aux numéros' : 'رسائل فورية للأرقام المحددة',
-              icon: MessageSquare,
-              color: 'text-emerald-500 bg-emerald-50 border-emerald-200',
-              activeColor: 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/50'
-            },
-            {
-              id: 'both',
-              title: lang === 'fr' ? 'Telegram + WhatsApp' : 'تيليغرام وواتساب معاً',
-              sub: lang === 'fr' ? 'Envoi simultané sur les deux' : 'إرسال متزامن للقناتين في نفس الوقت',
-              icon: Sparkles,
-              color: 'text-purple-500 bg-purple-50 border-purple-200',
-              activeColor: 'border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/50'
-            },
-          ].map((ch) => {
-            const isSelected = config.channel === ch.id;
-            const Icon = ch.icon;
-            return (
-              <button
-                key={ch.id}
-                type="button"
-                onClick={() => setConfig((prev) => ({ ...prev, channel: ch.id as any }))}
-                className={`p-4 rounded-2xl border text-start transition-all cursor-pointer flex items-start gap-3 relative ${
-                  isSelected ? ch.activeColor : 'border-slate-200 bg-white hover:bg-slate-50'
-                }`}
-              >
-                <div className={`p-2.5 rounded-xl border ${ch.color} shrink-0`}>
-                  <Icon size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="font-extrabold text-slate-800 text-sm">{ch.title}</p>
-                    {isSelected && <CheckCircle2 size={16} className="text-brand-cyan shrink-0" />}
-                  </div>
-                  <p className="text-[11px] text-slate-400 font-semibold mt-0.5">{ch.sub}</p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* SECTION 1: Telegram Settings */}
-      {(config.channel === 'telegram' || config.channel === 'both') && (
-        <div className="border border-sky-100 bg-sky-50/20 rounded-3xl p-6 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-sky-100 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-sky-500 text-white rounded-2xl shadow-xs shadow-sky-500/20">
-                <Send size={20} />
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 1: WEEKLY DOCTOR STATEMENTS (PDF DOCUMENTS)                       */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {activeMainTab === 'weekly_statements' && (
+        <div className="space-y-8 animate-fade-in">
+          {/* Header Info & Auto-Schedule Banner */}
+          <div className="bg-gradient-to-r from-sky-50 via-indigo-50/50 to-emerald-50 border border-sky-100 p-5 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-1 bg-sky-600 text-white rounded-lg text-[10px] font-black tracking-wide flex items-center gap-1.5 shadow-2xs">
+                  <Clock size={12} />
+                  {isRtl ? 'الجدولة الأوتوماتيكية: كل خميس منتصف الليل (ليلة الجمعة)' : 'Envoi auto: Chaque jeudi minuit (PDF)'}
+                </span>
+                <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-black flex items-center gap-1">
+                  <CheckCircle size={12} />
+                  {weeklyConfig.enabled
+                    ? (isRtl ? 'إرسال ملفات PDF مفعل تلقائياً' : 'Envoi PDF actif')
+                    : (isRtl ? 'معطل حالياً' : 'Désactivé')}
+                </span>
               </div>
-              <div>
-                <h4 className="font-black text-slate-900 text-base">
-                  {lang === 'fr' ? 'Configuration Telegram' : 'إعدادات وقناة تيليغرام (Telegram Bot)'}
-                </h4>
-                <p className="text-xs text-slate-500 font-semibold">
-                  {lang === 'fr'
-                    ? 'Permet d\'envoyer des alertes à un ou plusieurs comptes ou groupes Telegram.'
-                    : 'يتيح إرسال التنبيهات الفورية إلى حسابات أو مجموعات تيليغرام متعددة.'}
-                </p>
-              </div>
+              <p className="text-xs font-black text-slate-800 pt-1">
+                {isRtl
+                  ? 'يقوم النظام أوتوماتيكياً كل ليلة جمعة (الخميس 23:59) بتوليد ملف PDF رسمي لكشف الحساب لكل طبيب عليه ديون متبقية فقط، وإرساله كملف مرفق إلى حساب تيليجرام المحدد.'
+                  : 'Chaque jeudi à minuit, le système génère et envoie le fichier PDF officiel du relevé de compte de chaque médecin débiteur sur Telegram.'}
+              </p>
+              <p className="text-[11px] text-slate-500 font-bold flex items-center gap-1">
+                <Calendar size={13} className="text-sky-600" />
+                {isRtl ? 'موعد الإرسال الأسبوعي القادم المتوقع:' : 'Prochain envoi automatique :'}
+                <span className="font-extrabold text-sky-700">
+                  {nextThursdayDate.toLocaleDateString(isRtl ? 'ar-DZ' : 'fr-DZ', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </span>
+              </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Master Toggle */}
+            <div className="flex items-center gap-3 bg-white/90 backdrop-blur-xs border border-sky-200/80 px-4 py-3 rounded-2xl shrink-0 shadow-xs">
+              <div>
+                <p className="text-xs font-black text-slate-800">
+                  {isRtl ? 'تفعيل الإرسال الأسبوعي' : 'Activer l\'envoi hebdo'}
+                </p>
+                <p className="text-[10px] font-bold text-slate-400">
+                  {weeklyConfig.enabled ? (isRtl ? 'شغال تلقائياً' : 'Actif') : (isRtl ? 'معطل' : 'Désactivé')}
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowTgGuide((prev) => !prev)}
-                className="text-xs font-bold text-sky-600 hover:text-sky-700 bg-sky-100/70 hover:bg-sky-100 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <HelpCircle size={14} />
-                <span>{lang === 'fr' ? 'Guide de configuration' : 'طريقة الإعداد السريعة'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfig((prev) => ({
-                  ...prev,
-                  telegram: { ...prev.telegram, enabled: !prev.telegram.enabled }
-                }))}
-                className={`w-10 h-5 rounded-full transition-all relative shrink-0 cursor-pointer ${
-                  config.telegram.enabled ? 'bg-sky-500' : 'bg-slate-300'
+                onClick={() => setWeeklyConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                className={`w-12 h-6 rounded-full transition-all relative shrink-0 cursor-pointer ${
+                  weeklyConfig.enabled ? 'bg-sky-600 shadow-xs shadow-sky-600/30' : 'bg-slate-300'
                 }`}
               >
                 <div
-                  className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.75 transition-all shadow-sm ${
-                    config.telegram.enabled ? (isRtl ? 'left-0.75' : 'right-0.75') : (isRtl ? 'right-0.75' : 'left-0.75')
+                  className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
+                    weeklyConfig.enabled ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
                   }`}
                 />
               </button>
             </div>
           </div>
 
-          {/* Quick Guide Accordion */}
-          {showTgGuide && (
-            <div className="bg-white p-5 rounded-2xl border border-sky-200 text-xs space-y-3 shadow-sm animate-scale-up">
-              <h5 className="font-black text-sky-900 flex items-center gap-2 text-sm">
-                <Info size={16} className="text-sky-600" />
-                {lang === 'fr' ? 'Comment configurer Telegram en 3 étapes :' : 'كيفية إنشاء بوت تيليغرام والحصول على الـ Token والـ Chat ID في دقيقة :'}
-              </h5>
-              <ol className="list-decimal list-inside space-y-2 text-slate-700 font-semibold leading-relaxed">
-                <li>
-                  {lang === 'fr' ? 'Ouvrez Telegram et recherchez ' : 'افتح تطبيق تيليغرام وابحث عن '}
-                  <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-sky-600 font-black underline inline-flex items-center gap-0.5">
-                    @BotFather <ExternalLink size={11} />
-                  </a>
-                  {lang === 'fr' ? ', envoyez /newbot et suivez les instructions pour créer votre bot et copier son Token.' : '، وأرسل أمر /newbot واتبع الخطوات البسيطة لإنشاء بوتك ونسخ الـ Token.'}
-                </li>
-                <li>
-                  {lang === 'fr' ? 'Pour trouver votre Chat ID personnel, ouvrez ' : 'لمعرفة Chat ID لحسابك، افتح '}
-                  <a href="https://t.me/userinfobot" target="_blank" rel="noreferrer" className="text-sky-600 font-black underline inline-flex items-center gap-0.5">
-                    @userinfobot <ExternalLink size={11} />
-                  </a>
-                  {lang === 'fr' ? ' ou ' : ' أو '}
-                  <a href="https://t.me/getidsbot" target="_blank" rel="noreferrer" className="text-sky-600 font-black underline inline-flex items-center gap-0.5">
-                    @getidsbot <ExternalLink size={11} />
-                  </a>
-                  {lang === 'fr' ? ' et copiez le numéro Id affiché.' : ' وانسخ رقم المعرف (Id) الظاهر.'}
-                </li>
-                <li>
-                  {lang === 'fr'
-                    ? 'IMPORTANT : Démarrez une conversation avec votre bot créé et cliquez sur « Démarrer / Start » pour qu\'il puisse vous envoyer des messages.'
-                    : 'هام جداً: افتح محادثة مع البوت الذي أنشأته واضغط على زر « ابدأ / Start » لكي يسمح له تيليغرام بإرسال الرسائل إليك.'}
-                </li>
-                <li>
-                  {lang === 'fr'
-                    ? 'Pour recevoir les alertes dans un GROUPE : Ajoutez votre bot au groupe et entrez l\'Id du groupe (commence généralement par -100).'
-                    : 'إذا أردت استقبال الإشعارات في مجموعة (Group): أضف البوت إلى المجموعة وضع معرف المجموعة (يبدأ عادة بـ -100).'}
-                </li>
-              </ol>
-            </div>
-          )}
-
-          {/* Telegram Bot Token Input */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-black text-slate-700">
-                {lang === 'fr' ? 'Telegram Bot Token' : 'رمز البوت السري (Telegram Bot Token)'} :
+          {/* Configuration Options Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Filter Selection */}
+            <div className="bg-slate-50/80 p-5 rounded-3xl border border-slate-200/70 space-y-3">
+              <label className="text-xs font-black text-slate-800 flex items-center gap-2">
+                <Users size={16} className="text-sky-600" />
+                {isRtl ? 'تحديد الأطباء المشمولين بالكشف الأسبوعي :' : 'Médecins ciblés pour le relevé :'}
               </label>
-              <a
-                href="https://t.me/BotFather"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] font-bold text-sky-600 hover:text-sky-700 underline inline-flex items-center gap-1"
-              >
-                <span>{lang === 'fr' ? 'Obtenir via @BotFather' : 'الحصول على الرمز من @BotFather'}</span>
-                <ExternalLink size={10} />
-              </a>
-            </div>
-            <div className="relative">
-              <input
-                type={showTgToken ? 'text' : 'password'}
-                value={config.telegram.botToken || ''}
-                onChange={(e) => setConfig((prev) => ({
-                  ...prev,
-                  telegram: { ...prev.telegram, botToken: e.target.value }
-                }))}
-                placeholder="7291823791:AAHkZ9x7Q2P0mN8b-1kL..."
-                className={`w-full bg-white border rounded-xl py-3 px-4 font-mono text-xs text-slate-800 focus:outline-hidden pr-10 ${
-                  config.telegram.botToken && (!config.telegram.botToken.includes(':') || config.telegram.botToken.includes('@'))
-                    ? 'border-amber-400 focus:border-amber-500 bg-amber-50/20'
-                    : 'border-slate-200 focus:border-sky-500'
-                }`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowTgToken((prev) => !prev)}
-                className={`absolute top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 ${isRtl ? 'left-2.5' : 'right-2.5'}`}
-              >
-                {showTgToken ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
+              
+              <div className="space-y-2">
+                {[
+                  {
+                    id: 'debtors_only',
+                    title: isRtl ? 'الأطباء المدينون فقط (عليهم ديون متبقية) 🔴' : 'Médecins avec dettes impayées uniquement',
+                    desc: isRtl ? 'موصى به: يرسل فقط لمن عليهم مبالغ غير مسددة لترشيد الرسائل والتركيز على التحصيل' : 'Recommandé: se concentre sur les créances actives',
+                  },
+                  {
+                    id: 'all',
+                    title: isRtl ? 'جميع الأطباء المسجلين 👥' : 'Tous les médecins inscrits',
+                    desc: isRtl ? 'يرسل كشف حساب كامل لكل طبيب مسجل في التطبيق حتى لو كان حسابه 0 دج' : 'Envoie le relevé à tous les médecins du système',
+                  },
+                  {
+                    id: 'active_only',
+                    title: isRtl ? 'الأطباء أصحاب الطلبيات السابقة فقط 🛍️' : 'Médecins avec historique de commandes',
+                    desc: isRtl ? 'يرسل فقط لمن قام بطلبية واحدة على الأقل في المتجر' : 'Exclut les comptes sans aucune commande',
+                  },
+                ].map((opt) => {
+                  const isSel = weeklyConfig.filter === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setWeeklyConfig((prev) => ({ ...prev, filter: opt.id as any }))}
+                      className={`w-full p-3.5 rounded-2xl border text-start transition-all cursor-pointer flex items-start gap-3 ${
+                        isSel
+                          ? 'bg-white border-sky-500 ring-2 ring-sky-500/20 shadow-xs'
+                          : 'bg-white/60 border-slate-200 hover:bg-white'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
+                        isSel ? 'border-sky-600 bg-sky-600' : 'border-slate-300 bg-white'
+                      }`}>
+                        {isSel && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-black text-xs text-slate-800">{opt.title}</p>
+                        <p className="text-[10px] text-slate-500 font-semibold mt-0.5">{opt.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Warning if invalid format entered */}
-            {config.telegram.botToken && (!config.telegram.botToken.includes(':') || config.telegram.botToken.includes('@') || config.telegram.botToken.length < 15) && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs space-y-1 animate-fade-in">
-                <p className="font-extrabold flex items-center gap-1.5">
-                  <AlertCircle size={14} className="text-amber-600 shrink-0" />
-                  <span>{lang === 'fr' ? 'Format du Bot Token incorrect !' : 'تنبيه: صيغة الـ Bot Token غير صحيحة!'}</span>
-                </p>
-                <p className="text-[11px] leading-relaxed text-amber-800">
-                  {lang === 'fr'
-                    ? 'Le token du bot doit contenir des chiffres suivis de deux points puis une clé secrète (ex: 789123456:AAHkZ...). Il est généré par @BotFather, ce n\'est ni un numéro de téléphone ni un mot de passe.'
-                    : 'رمز البوت (Bot Token) يتكون دائماً من أرقام تليها نقطتان ثم رمز عشوائي طويل (مثال: 789123456:AAHkZ9...). يُنسخ مباشرة من محادثة @BotFather بعد كتابة /newbot (وليس رقم هاتف أو اسم مستخدم أو كلمة مرور).'}
-                </p>
+            {/* General Settings */}
+            <div className="bg-slate-50/80 p-5 rounded-3xl border border-slate-200/70 space-y-4">
+              <label className="text-xs font-black text-slate-800 flex items-center gap-2">
+                <Sparkles size={16} className="text-purple-600" />
+                {isRtl ? 'خيارات المحتوى والتقرير الشامل :' : 'Options du contenu et rapport global :'}
+              </label>
+
+              <label className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200/80 cursor-pointer hover:border-sky-300 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={weeklyConfig.includeSummaryMessage}
+                  onChange={(e) => setWeeklyConfig((prev) => ({ ...prev, includeSummaryMessage: e.target.checked }))}
+                  className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500"
+                />
+                <div>
+                  <p className="font-extrabold text-xs text-slate-800">
+                    {isRtl ? 'إرسال رسالة ملخص إجمالي في نهاية الدفعة 📈' : 'Envoyer un résumé global à la fin du lot'}
+                  </p>
+                  <p className="text-[10px] text-slate-500 font-semibold">
+                    {isRtl ? 'تتضمن إجمالي عدد الأطباء، مجموع الديون الإجمالية، والمبيعات' : 'Affiche le total des dettes, ventes et encaissements'}
+                  </p>
+                </div>
+              </label>
+
+              {/* Bot Token Configuration */}
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200/80 space-y-2.5">
+                <label className="flex items-center gap-2.5 text-xs font-extrabold text-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={weeklyConfig.useMainTelegramBot}
+                    onChange={(e) => setWeeklyConfig((prev) => ({ ...prev, useMainTelegramBot: e.target.checked }))}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500"
+                  />
+                  <span>
+                    {isRtl ? 'استخدام نفس Telegram Bot Token الأساسي' : 'Utiliser le même Bot Token Telegram principal'}
+                  </span>
+                </label>
+
+                {!weeklyConfig.useMainTelegramBot && (
+                  <div className="space-y-1 pt-1 animate-fade-in">
+                    <label className="text-[11px] font-bold text-slate-600">
+                      {isRtl ? 'Telegram Bot Token مخصص لكشوفات الحساب :' : 'Bot Token personnalisé :'}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showWeeklyCustomToken ? 'text' : 'password'}
+                        placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ..."
+                        value={weeklyConfig.customBotToken || ''}
+                        onChange={(e) => setWeeklyConfig((prev) => ({ ...prev, customBotToken: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowWeeklyCustomToken(!showWeeklyCustomToken)}
+                        className="absolute end-2 top-2 text-slate-400 hover:text-slate-600"
+                      >
+                        {showWeeklyCustomToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Telegram Recipients List (Multi-Recipient) */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-black text-slate-700 flex items-center gap-2">
-                <span>{lang === 'fr' ? 'Destinataires Telegram (Chat IDs)' : 'قائمة المستلمين وحسابات تيليغرام (Chat IDs)'} :</span>
-                <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[10px] font-black">
-                  {config.telegram.recipients.length}
+          {/* SECTION: Telegram Recipients for Weekly Statements */}
+          <div className="bg-slate-50/80 p-5 md:p-6 rounded-3xl border border-slate-200/70 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-3">
+              <div>
+                <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                  <Send size={16} className="text-sky-500" />
+                  <span>{isRtl ? 'حسابات ومجموعات تيليجرام المستلمة لكشوفات الحساب :' : 'Comptes / Groupes Telegram destinataires des relevés :'}</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 font-semibold">
+                  {isRtl
+                    ? 'أضف معرف الشات (Chat ID) للحساب أو المجموعة التي ترغب في وصول كشوفات الحسابات الأسبوعية إليها.'
+                    : 'Ajoutez les Chat IDs des comptes recevant les relevés hebdomadaires.'}
+                </p>
+              </div>
+
+              {/* Bot Info Helper */}
+              {config.telegram.botToken && (
+                <span className="px-2.5 py-1 bg-sky-100 text-sky-800 rounded-lg text-[10px] font-black border border-sky-200 self-start sm:self-auto">
+                  Bot Token: {config.telegram.botToken.slice(0, 8)}••••
                 </span>
-              </label>
+              )}
             </div>
 
-            {/* Add New Recipient Row */}
-            <div className="bg-white p-3.5 rounded-2xl border border-sky-200 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+            {/* Add Weekly Recipient Input Form */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              <div className="sm:col-span-6">
+                <input
+                  type="text"
+                  placeholder={isRtl ? 'معرف الشات Chat ID (مثال: 123456789 أو -100... للمجموعات)' : 'Chat ID (ex: 123456789)...'}
+                  value={newWeeklyTgChatId}
+                  onChange={(e) => setNewWeeklyTgChatId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-mono font-bold focus:border-sky-500 shadow-2xs"
+                />
+              </div>
               <div className="sm:col-span-4">
                 <input
                   type="text"
-                  placeholder={lang === 'fr' ? 'Nom/Rôle (ex: Gérant)' : 'تسمية الحساب (مثال: المدير العام)'}
-                  value={newTgLabel}
-                  onChange={(e) => setNewTgLabel(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-semibold focus:outline-hidden focus:border-sky-500"
+                  placeholder={isRtl ? 'اسم المستلم (مثال: المحاسبة / الإدارة)' : 'Libellé (ex: Comptabilité)'}
+                  value={newWeeklyTgLabel}
+                  onChange={(e) => setNewWeeklyTgLabel(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold focus:border-sky-500 shadow-2xs"
                 />
               </div>
-              <div className="sm:col-span-5">
-                <input
-                  type="text"
-                  placeholder={lang === 'fr' ? 'Chat ID (ex: 123456789 ou -100...)' : 'Chat ID (مثال: 582910293 أو -100...)'}
-                  value={newTgChatId}
-                  onChange={(e) => setNewTgChatId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold focus:outline-hidden focus:border-sky-500"
-                />
-              </div>
-              <div className="sm:col-span-3">
+              <div className="sm:col-span-2">
                 <button
                   type="button"
-                  onClick={handleAddTelegramRecipient}
-                  className="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                  onClick={handleAddWeeklyRecipient}
+                  className="w-full h-full bg-sky-600 hover:bg-sky-700 text-white font-black text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
                 >
-                  <Plus size={14} />
-                  <span>{lang === 'fr' ? 'Ajouter' : 'إضافة مستلم'}</span>
+                  <Plus size={15} />
+                  <span>{isRtl ? 'إضافة' : 'Ajouter'}</span>
                 </button>
               </div>
             </div>
 
-            {/* List of Telegram Recipients */}
-            {config.telegram.recipients.length === 0 ? (
-              <div className="text-center py-6 bg-white/60 rounded-2xl border border-dashed border-sky-200">
-                <p className="text-xs font-bold text-slate-400">
-                  {lang === 'fr' ? 'Aucun destinataire configuré. Ajoutez au moins un Chat ID.' : 'لم يتم إضافة أي مستلم بعد. أضف Chat ID واحد على الأقل لتلقي الرسائل.'}
-                </p>
+            {/* Recipients List */}
+            {(!weeklyConfig.recipients || weeklyConfig.recipients.length === 0) ? (
+              <div className="bg-amber-50/80 border border-amber-200/80 p-4 rounded-2xl flex items-start gap-3 text-xs text-amber-900">
+                <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-black">
+                    {isRtl ? 'لم تضف حسابات تيليجرام مخصصة لكشوفات الحساب بعد.' : 'Aucun destinataire spécifique configuré.'}
+                  </p>
+                  <p className="text-[11px] text-amber-700 font-semibold mt-0.5">
+                    {isRtl
+                      ? 'سيتم تلقائياً استخدام حسابات تيليجرام المحددة في تبويب "إشعارات الطلبيات الفورية" كوجهة افتراضية.'
+                      : 'Les destinataires principaux seront utilisés par défaut.'}
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="space-y-2">
-                {config.telegram.recipients.map((rec) => (
+                {weeklyConfig.recipients.map((rec) => (
                   <div
                     key={rec.id}
-                    className="bg-white p-3 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-3 text-xs shadow-2xs hover:border-sky-200 transition-colors"
+                    className="bg-white p-3 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-3 text-xs shadow-2xs hover:border-sky-300 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-2.5 h-2.5 rounded-full ${rec.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                      <div className={`w-2.5 h-2.5 rounded-full ${rec.enabled ? 'bg-sky-500' : 'bg-slate-300'}`} />
                       <div className="min-w-0">
                         <p className="font-extrabold text-slate-800 truncate">{rec.label}</p>
-                        <p className="font-mono text-[11px] text-slate-400 font-bold">{rec.chatId}</p>
+                        <p className="font-mono text-[11px] text-slate-400 font-bold">Chat ID: {rec.chatId}</p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => handleToggleTelegramRecipient(rec.id)}
+                        onClick={() => handleToggleWeeklyRecipient(rec.id)}
                         className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
                           rec.enabled
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            ? 'bg-sky-50 text-sky-700 border border-sky-200'
                             : 'bg-slate-100 text-slate-500 border border-slate-200'
                         }`}
                       >
-                        {rec.enabled ? (lang === 'fr' ? 'Activé' : 'مفعل') : (lang === 'fr' ? 'Désactivé' : 'معطل')}
+                        {rec.enabled ? (isRtl ? 'مفعل' : 'Activé') : (isRtl ? 'معطل' : 'Désactivé')}
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => handleDeleteTelegramRecipient(rec.id)}
+                        onClick={() => handleDeleteWeeklyRecipient(rec.id)}
                         className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                        title={lang === 'fr' ? 'Supprimer' : 'حذف'}
+                        title={isRtl ? 'حذف' : 'Supprimer'}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -699,229 +941,424 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
             )}
           </div>
 
-          {/* Test Telegram Button */}
-          <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-sky-100">
+          {/* SECTION: Live Preview & Testing */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+            {/* Live Message & PDF Attachment Preview */}
+            <div className="space-y-2.5">
+              <h4 className="font-black text-slate-800 text-xs flex items-center gap-2">
+                <FileSpreadsheet size={16} className="text-sky-500" />
+                <span>{isRtl ? 'معاينة ملف الـ PDF ورسالة الكابشن على تيليجرام :' : 'Aperçu du document PDF et légende sur Telegram :'}</span>
+              </h4>
+
+              {/* PDF Document Attachment Card Mockup */}
+              <div className="p-4 rounded-3xl bg-slate-900 text-sky-200 border border-slate-800 space-y-3 shadow-inner">
+                {/* PDF File Bubble */}
+                <div className="bg-slate-800/90 border border-slate-700/80 p-3 rounded-2xl flex items-center gap-3">
+                  <div className="p-2.5 bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/30 shrink-0">
+                    <FileText size={22} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black text-xs text-white truncate">Releve_Dettes_Dr_Youssef_Cherif.pdf</p>
+                    <p className="text-[10px] text-slate-400 font-mono mt-0.5">142 KB • Document PDF</p>
+                  </div>
+                </div>
+
+                {/* Caption text */}
+                <div className="text-xs font-mono leading-relaxed whitespace-pre-wrap text-sky-100 border-t border-slate-800 pt-2">
+                  {buildDoctorStatementPDFCaption(
+                    sampleDoctorSummary,
+                    config.template?.shopTitle || 'JUST SMILE'
+                  ).replace(/<[^>]+>/g, '')}
+                </div>
+              </div>
+            </div>
+
+            {/* Test Actions & Execution Status */}
+            <div className="bg-slate-50/80 p-5 rounded-3xl border border-slate-200/70 space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <h4 className="font-black text-slate-800 text-xs flex items-center gap-2">
+                  <Play size={16} className="text-emerald-600" />
+                  <span>{isRtl ? 'الإرسال اليدوي والاختبار الفوري :' : 'Envoi manuel et test :'}</span>
+                </h4>
+                <p className="text-xs text-slate-600 font-semibold leading-relaxed">
+                  {isRtl
+                    ? 'يمكنك توليد وإرسال ملفات PDF الخاصة بديون الأطباء فوراً إلى حساب تيليجرام دون انتظار ليلة الجمعة، أو إرسال ملف PDF تجريبي لطبيب واحد للتأكد.'
+                    : 'Vous pouvez déclencher l\'envoi manuel immédiat des fichiers PDF à tous les médecins débiteurs à tout moment.'}
+                </p>
+
+                {/* Last Execution Info */}
+                {weeklyConfig.lastSentAt && (
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 text-xs space-y-1">
+                    <p className="font-bold text-slate-700 flex items-center gap-1.5">
+                      <Clock size={13} className="text-slate-400" />
+                      {isRtl ? 'آخر إرسال أسبوعي لملفات PDF تم في:' : 'Dernier envoi :'}
+                      <span className="font-extrabold text-slate-900">
+                        {new Date(weeklyConfig.lastSentAt).toLocaleString(isRtl ? 'ar-DZ' : 'fr-DZ')}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-slate-500 font-semibold">
+                      {isRtl ? `تم إرسال: ${weeklyConfig.lastSendCount || 0} ملف PDF • الحالة: ` : `Envoyé: ${weeklyConfig.lastSendCount || 0} fichiers PDF • État: `}
+                      <span className={`font-black ${weeklyConfig.lastSendStatus === 'success' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {weeklyConfig.lastSendStatus === 'success' ? (isRtl ? 'ناجح بنسبة 100%' : 'Succès') : weeklyConfig.lastSendStatus}
+                      </span>
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2.5 pt-2">
+                {/* Single Test Button */}
+                <button
+                  type="button"
+                  onClick={handleSendSingleTestDoctor}
+                  disabled={testingSingleDoctor || batchRunning}
+                  className="w-full bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 font-black text-xs py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-2xs disabled:opacity-50 cursor-pointer"
+                >
+                  {testingSingleDoctor ? <RefreshCw size={14} className="animate-spin text-sky-600" /> : <FileText size={14} className="text-rose-500" />}
+                  <span>{isRtl ? 'إرسال ملف PDF تجريبي لطبيب واحد 📑' : 'Envoyer un fichier PDF test'}</span>
+                </button>
+
+                {/* Run Full Batch Button */}
+                <button
+                  type="button"
+                  onClick={handleRunWeeklyBatchNow}
+                  disabled={batchRunning || testingSingleDoctor}
+                  className="w-full bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-black text-xs py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 cursor-pointer"
+                >
+                  {batchRunning ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
+                  <span>{isRtl ? '🚀 إرسال ملفات PDF الديون الآن لجميع الأطباء المدينين' : '🚀 Lancer l\'envoi de tous les PDF maintenant'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Batch Progress Modal / Inline Status */}
+          {batchRunning && batchProgress && (
+            <div className="bg-sky-50 border border-sky-200 p-5 rounded-3xl space-y-3 animate-fade-in shadow-sm">
+              <div className="flex items-center justify-between text-xs font-black text-sky-950">
+                <span className="flex items-center gap-2">
+                  <RefreshCw size={14} className="animate-spin text-sky-600" />
+                  {isRtl
+                    ? `جاري الإرسال للطبيب: د. ${batchProgress.currentDoctorName}...`
+                    : `Envoi en cours: Dr ${batchProgress.currentDoctorName}...`}
+                </span>
+                <span>{batchProgress.currentIndex} / {batchProgress.total}</span>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full bg-sky-200/80 rounded-full h-3 overflow-hidden shadow-inner">
+                <div
+                  className="bg-gradient-to-r from-sky-600 to-indigo-600 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${Math.round((batchProgress.currentIndex / Math.max(1, batchProgress.total)) * 100)}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] font-bold text-sky-800">
+                <span>{isRtl ? `نجح: ${batchProgress.successCount}` : `Succès: ${batchProgress.successCount}`}</span>
+                <span>{Math.round((batchProgress.currentIndex / Math.max(1, batchProgress.total)) * 100)}%</span>
+              </div>
+            </div>
+          )}
+
+          {/* Batch Result Report */}
+          {batchResult && (
+            <div className={`p-5 rounded-3xl border text-xs space-y-2 animate-fade-in ${
+              batchResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-950' : 'bg-rose-50 border-rose-200 text-rose-950'
+            }`}>
+              <div className="flex items-center gap-2 font-black text-sm">
+                {batchResult.success ? <CheckCircle2 size={18} className="text-emerald-600" /> : <AlertTriangle size={18} className="text-rose-600" />}
+                <span>
+                  {batchResult.success
+                    ? (isRtl ? `اكتمل الإرسال بنجاح! تم إرسال ${batchResult.sentCount} كشف حساب على تيليجرام.` : `Envoi terminé avec succès (${batchResult.sentCount} relevés envoyés).`)
+                    : (isRtl ? 'حدثت أخطاء أثناء الإرسال.' : 'Des erreurs sont survenues.')}
+                </span>
+              </div>
+              {batchResult.errors.length > 0 && (
+                <div className="pt-2 border-t border-rose-200 text-[11px] text-rose-800 space-y-1 font-mono">
+                  {batchResult.errors.slice(0, 5).map((err, i) => (
+                    <p key={i}>• {err}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Save Action Footer */}
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
             <button
               type="button"
-              onClick={handleTestTelegram}
-              disabled={testingTelegram || !config.telegram.botToken || config.telegram.recipients.length === 0}
-              className="bg-white hover:bg-sky-50 text-sky-700 border border-sky-300 font-extrabold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center gap-2 shadow-2xs disabled:opacity-50 cursor-pointer"
+              onClick={handleSaveWeeklyConfig}
+              disabled={savingWeekly}
+              className="bg-brand-cyan hover:bg-brand-cyan/90 text-white font-black text-xs py-3 px-6 rounded-xl transition-all flex items-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 cursor-pointer"
             >
-              {testingTelegram ? <RefreshCw size={14} className="animate-spin text-sky-600" /> : <Send size={14} />}
-              <span>{lang === 'fr' ? 'Envoyer une alerte test Telegram' : 'إرسال رسالة تجريبية لتيليغرام (Test)'}</span>
+              {savingWeekly ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+              <span>{isRtl ? 'حفظ إعدادات الكشوفات الأسبوعية' : 'Enregistrer la configuration'}</span>
             </button>
-
-            {testResultTelegram && (
-              <div
-                className={`text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 ${
-                  testResultTelegram.success
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-rose-50 text-rose-800 border-rose-200'
-                }`}
-              >
-                {testResultTelegram.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-                <span className="truncate max-w-xs">{testResultTelegram.message}</span>
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {/* SECTION 2: WhatsApp Settings */}
-      {(config.channel === 'whatsapp' || config.channel === 'both') && (
-        <div className="border border-emerald-100 bg-emerald-50/20 rounded-3xl p-6 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-100 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-500 text-white rounded-2xl shadow-xs shadow-emerald-500/20">
-                <MessageSquare size={20} />
-              </div>
-              <div>
-                <h4 className="font-black text-slate-900 text-base">
-                  {lang === 'fr' ? 'Configuration WhatsApp' : 'إعدادات وقناة واتساب (WhatsApp)'}
-                </h4>
-                <p className="text-xs text-slate-500 font-semibold">
-                  {lang === 'fr'
-                    ? 'Permet d\'envoyer des alertes directement aux numéros WhatsApp des administrateurs.'
-                    : 'إرسال تفاصيل الطلبية مباشرة إلى أرقام هواتف الإدارة عبر واتساب.'}
-                </p>
-              </div>
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 2: INSTANT ORDER NOTIFICATIONS                                    */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {activeMainTab === 'orders' && (
+        <div className="space-y-8 animate-fade-in">
+          {/* Master Enable Toggle */}
+          <div className="border-b border-slate-100 pb-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h4 className="text-base font-black text-slate-900">
+                {isRtl ? 'إشعارات الطلبيات الفورية (Real-time)' : 'Notifications des commandes instantanées'}
+              </h4>
+              <p className="text-xs text-slate-500 mt-0.5 font-semibold">
+                {isRtl ? 'إرسال إشعار فوري عند قيام أي طبيب بطلب جديد عبر التطبيق أو المتجر.' : 'Alerte immédiate à chaque nouvelle commande.'}
+              </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-4 py-2.5 rounded-2xl self-start md:self-auto shadow-2xs">
+              <div>
+                <p className="text-xs font-black text-slate-800">
+                  {lang === 'fr' ? 'Service d\'alertes' : 'حالة نظام الإشعارات'}
+                </p>
+                <p className="text-[10px] font-bold text-slate-400">
+                  {config.enabled
+                    ? (lang === 'fr' ? 'Actif en temps réel' : 'مفعل ويعمل في الخلفية')
+                    : (lang === 'fr' ? 'Désactivé' : 'معطل حالياً')}
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowWaGuide((prev) => !prev)}
-                className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-100/70 hover:bg-emerald-100 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <HelpCircle size={14} />
-                <span>{lang === 'fr' ? 'Guide WhatsApp' : 'طريقة تفعيل واتساب'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConfig((prev) => ({
-                  ...prev,
-                  whatsapp: { ...prev.whatsapp, enabled: !prev.whatsapp.enabled }
-                }))}
-                className={`w-10 h-5 rounded-full transition-all relative shrink-0 cursor-pointer ${
-                  config.whatsapp.enabled ? 'bg-emerald-500' : 'bg-slate-300'
+                onClick={() => setConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                className={`w-12 h-6 rounded-full transition-all relative shrink-0 cursor-pointer ${
+                  config.enabled ? 'bg-emerald-500 shadow-xs shadow-emerald-500/30' : 'bg-slate-300'
                 }`}
               >
                 <div
-                  className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.75 transition-all shadow-sm ${
-                    config.whatsapp.enabled ? (isRtl ? 'left-0.75' : 'right-0.75') : (isRtl ? 'right-0.75' : 'left-0.75')
+                  className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all shadow-sm ${
+                    config.enabled ? (isRtl ? 'left-1' : 'right-1') : (isRtl ? 'right-1' : 'left-1')
                   }`}
                 />
               </button>
             </div>
           </div>
 
-          {/* Quick WhatsApp Guide */}
-          {showWaGuide && (
-            <div className="bg-white p-5 rounded-2xl border border-emerald-200 text-xs space-y-3 shadow-sm animate-scale-up">
-              <h5 className="font-black text-emerald-900 flex items-center gap-2 text-sm">
-                <ShieldCheck size={16} className="text-emerald-600" />
-                {lang === 'fr' ? 'Configuration CallMeBot WhatsApp (100% Gratuite) :' : 'تفعيل خدمة CallMeBot المجانية لواتساب في دقيقة واحدة :'}
-              </h5>
-              <ol className="list-decimal list-inside space-y-2 text-slate-700 font-semibold leading-relaxed">
-                <li>
-                  {lang === 'fr' ? 'Enregistrez le numéro de bot CallMeBot dans vos contacts WhatsApp : ' : 'احفظ رقم بوت CallMeBot في جهات اتصالك: '}
-                  <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md dir-ltr inline-block">
-                    +34 644 59 71 67
-                  </span>
-                  {lang === 'fr' ? ' ou ' : ' أو '}
-                  <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md dir-ltr inline-block">
-                    +34 644 10 55 84
-                  </span>
-                </li>
-                <li>
-                  {lang === 'fr' ? 'Envoyez le message WhatsApp suivant au bot : ' : 'افتح محادثة مع الرقم في واتساب وأرسل النص التالي حرفياً: '}
-                  <code className="bg-slate-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md text-[11px]">
-                    I allow callmebot to send me messages
-                  </code>
-                </li>
-                <li>
-                  {lang === 'fr'
-                    ? 'Le bot vous répondra immédiatement avec votre API Key (ex: 1234567). Copiez ce numéro et ajoutez-le ci-dessous avec votre numéro de téléphone.'
-                    : 'سيرد عليك البوت مباشرة برسالة تحتوي على مفتاحك الخاص (apikey: 123456). انسخ المفتاح وأضفه في الحقل أدناه مع رقم هاتفك.'}
-                </li>
-              </ol>
-            </div>
-          )}
-
-          {/* WhatsApp Provider Selector */}
-          <div className="space-y-2">
-            <label className="text-xs font-black text-slate-700 block">
-              {lang === 'fr' ? 'Méthode d\'envoi WhatsApp :' : 'مزود خدمة واتساب:'}
+          {/* Main Channel Selector */}
+          <div className="space-y-3">
+            <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">
+              {lang === 'fr' ? 'Canal d\'envoi principal :' : 'قناة إرسال الإشعارات المطلوبة:'}
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
-                { id: 'callmebot', name: 'CallMeBot (مجاني وسهل)', desc: 'موصى به للأرقام الشخصية والإدارية' },
-                { id: 'ultramsg', name: 'UltraMsg Gateway', desc: 'بوابة إرسال مدفوعة عبر Instance' },
-                { id: 'generic_webhook', name: 'Custom Webhook (Zapier/Make)', desc: 'ربط مخصص عبر رابط Webhook' },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setConfig((prev) => ({
-                    ...prev,
-                    whatsapp: { ...prev.whatsapp, provider: p.id as any }
-                  }))}
-                  className={`p-3 rounded-xl border text-start transition-all cursor-pointer ${
-                    config.whatsapp.provider === p.id
-                      ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                      : 'bg-white/60 border-slate-200 hover:bg-white'
-                  }`}
-                >
-                  <p className="font-bold text-slate-800 text-xs">{p.name}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{p.desc}</p>
-                </button>
-              ))}
+                {
+                  id: 'telegram',
+                  title: lang === 'fr' ? 'Telegram uniquement' : 'تيليغرام فقط',
+                  sub: lang === 'fr' ? 'Gratuit, rapide et illimité' : 'سريع ومجاني 100% وبدون قيود',
+                  icon: Send,
+                  color: 'text-sky-500 bg-sky-50 border-sky-200',
+                  activeColor: 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/50'
+                },
+                {
+                  id: 'whatsapp',
+                  title: lang === 'fr' ? 'WhatsApp uniquement' : 'واتساب فقط',
+                  sub: lang === 'fr' ? 'Messages directs aux numéros' : 'رسائل فورية للأرقام المحددة',
+                  icon: MessageSquare,
+                  color: 'text-emerald-500 bg-emerald-50 border-emerald-200',
+                  activeColor: 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/50'
+                },
+                {
+                  id: 'both',
+                  title: lang === 'fr' ? 'Telegram + WhatsApp' : 'تيليغرام وواتساب معاً',
+                  sub: lang === 'fr' ? 'Envoi simultané sur les deux' : 'إرسال متزامن للقناتين في نفس الوقت',
+                  icon: Sparkles,
+                  color: 'text-purple-500 bg-purple-50 border-purple-200',
+                  activeColor: 'border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/50'
+                },
+              ].map((ch) => {
+                const isSelected = config.channel === ch.id;
+                const Icon = ch.icon;
+                return (
+                  <button
+                    key={ch.id}
+                    type="button"
+                    onClick={() => setConfig((prev) => ({ ...prev, channel: ch.id as any }))}
+                    className={`p-4 rounded-2xl border text-start transition-all cursor-pointer flex items-start gap-3 relative ${
+                      isSelected ? ch.activeColor : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className={`p-2.5 rounded-xl border ${ch.color} shrink-0`}>
+                      <Icon size={18} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-extrabold text-slate-800 text-xs">{ch.title}</p>
+                      <p className="text-[11px] text-slate-500 font-semibold truncate mt-0.5">{ch.sub}</p>
+                    </div>
+                    {isSelected && (
+                      <div className="absolute top-3 end-3 text-brand-cyan">
+                        <CheckCircle2 size={16} />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Provider 1: CallMeBot Multi-Recipient Form & List */}
-          {config.whatsapp.provider === 'callmebot' && (
-            <div className="space-y-4">
-              <label className="text-xs font-black text-slate-700 flex items-center justify-between">
-                <span>{lang === 'fr' ? 'Numéros WhatsApp & Clés API CallMeBot :' : 'أرقام هواتف ومفاتيح الـ API للمستلمين:'}</span>
-                <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-black">
-                  {config.whatsapp.callmebotRecipients.length}
-                </span>
-              </label>
-
-              {/* Add New CallMeBot Recipient Row */}
-              <div className="bg-white p-3.5 rounded-2xl border border-emerald-200 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
-                <div className="sm:col-span-3">
-                  <input
-                    type="text"
-                    placeholder={lang === 'fr' ? 'Label (ex: Admin 1)' : 'تسمية الرقم (مثال: هاتف الإدارة)'}
-                    value={newWaLabel}
-                    onChange={(e) => setNewWaLabel(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-semibold focus:outline-hidden focus:border-emerald-500"
-                  />
-                </div>
-                <div className="sm:col-span-4">
-                  <input
-                    type="text"
-                    placeholder={lang === 'fr' ? 'N° Téléphone (ex: 0770821021)' : 'رقم الهاتف (مثال: 0770821021)'}
-                    value={newWaPhone}
-                    onChange={(e) => setNewWaPhone(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold focus:outline-hidden focus:border-emerald-500"
-                  />
-                </div>
-                <div className="sm:col-span-3">
-                  <input
-                    type="text"
-                    placeholder={lang === 'fr' ? 'Clé API (ex: 1234567)' : 'مفتاح API Key (مثال: 1234567)'}
-                    value={newWaApiKey}
-                    onChange={(e) => setNewWaApiKey(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold focus:outline-hidden focus:border-emerald-500"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <button
-                    type="button"
-                    onClick={handleAddCallMeBotRecipient}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer"
-                  >
-                    <Plus size={14} />
-                    <span>{lang === 'fr' ? 'Ajouter' : 'إضافة'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* List of CallMeBot Recipients */}
-              {config.whatsapp.callmebotRecipients.length === 0 ? (
-                <div className="text-center py-6 bg-white/60 rounded-2xl border border-dashed border-emerald-200">
-                  <p className="text-xs font-bold text-slate-400">
-                    {lang === 'fr' ? 'Aucun numéro WhatsApp configuré. Ajoutez au moins un numéro et sa clé API.' : 'لم يتم إضافة أي رقم هاتف بعد. أضف رقم هاتف ورمز API الخاص به للبدء.'}
+          {/* Trigger Triggers Selection */}
+          <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/80 space-y-2">
+            <label className="text-xs font-black text-slate-700 block">
+              {lang === 'fr' ? 'Déclencheurs des notifications :' : 'حالات إرسال الإشعار :'}
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200/80 cursor-pointer hover:border-brand-cyan/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={config.notifyOnWebOrders}
+                  onChange={(e) => setConfig((prev) => ({ ...prev, notifyOnWebOrders: e.target.checked }))}
+                  className="w-4 h-4 rounded text-brand-cyan focus:ring-brand-cyan"
+                />
+                <div>
+                  <p className="font-extrabold text-xs text-slate-800">
+                    {lang === 'fr' ? 'Commandes passées par les clients (Web)' : 'طلبيات الزبائن والأطباء من المتجر الإلكتروني'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-semibold">
+                    {lang === 'fr' ? 'Lorsqu\'un médecin valide son panier' : 'إشعار فوري عند إتمام أي طلبية من طرف الطبيب'}
                   </p>
                 </div>
-              ) : (
+              </label>
+
+              <label className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200/80 cursor-pointer hover:border-brand-cyan/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={config.notifyOnAdminOrders}
+                  onChange={(e) => setConfig((prev) => ({ ...prev, notifyOnAdminOrders: e.target.checked }))}
+                  className="w-4 h-4 rounded text-brand-cyan focus:ring-brand-cyan"
+                />
+                <div>
+                  <p className="font-extrabold text-xs text-slate-800">
+                    {lang === 'fr' ? 'Factures créées manuellement (Admin)' : 'الفواتير والطلبيات المنشأة يدوياً من لوحة التحكم'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-semibold">
+                    {lang === 'fr' ? 'Lors de la création depuis l\'interface admin' : 'إشعار عند إضافة فاتورة جديدة من طرف الإدارة'}
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* TELEGRAM SECTION */}
+          {(config.channel === 'telegram' || config.channel === 'both') && (
+            <div className="bg-sky-50/40 p-5 md:p-6 rounded-3xl border border-sky-200/80 space-y-6 animate-fade-in">
+              <div className="flex items-center justify-between gap-4 border-b border-sky-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-sky-500 text-white rounded-2xl shadow-xs">
+                    <Send size={20} />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">
+                      {lang === 'fr' ? 'Configuration de Telegram Bot' : 'إعدادات روبوت تيليغرام (Telegram Bot)'}
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-semibold">
+                      {lang === 'fr' ? 'Gratuit, instantané et sans frais de service.' : 'مجاني 100% وسريع جداً لإرسال التنبيهات لأي عدد من الحسابات.'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowTgGuide(!showTgGuide)}
+                  className="text-sky-700 bg-sky-100/80 hover:bg-sky-200/80 px-3 py-1.5 rounded-xl text-xs font-black transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <HelpCircle size={14} />
+                  <span>{lang === 'fr' ? 'Guide d\'installation' : 'دليل الإعداد خطوة بخطوة'}</span>
+                </button>
+              </div>
+
+              {/* Bot Token Input */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                    <ShieldCheck size={14} className="text-sky-600" />
+                    <span>{lang === 'fr' ? 'Token du Bot Telegram (Bot Token) :' : 'رمز البوت السري (Telegram Bot Token) :'}</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowTgToken(!showTgToken)}
+                    className="text-[11px] text-sky-700 font-bold hover:underline flex items-center gap-1"
+                  >
+                    {showTgToken ? <EyeOff size={13} /> : <Eye size={13} />}
+                    <span>{showTgToken ? (lang === 'fr' ? 'Masquer' : 'إخفاء') : (lang === 'fr' ? 'Afficher' : 'إظهار')}</span>
+                  </button>
+                </div>
+                <input
+                  type={showTgToken ? 'text' : 'password'}
+                  placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ..."
+                  value={config.telegram.botToken || ''}
+                  onChange={(e) => setConfig((prev) => ({
+                    ...prev,
+                    telegram: { ...prev.telegram, botToken: e.target.value }
+                  }))}
+                  className="w-full bg-white border border-sky-200 rounded-2xl py-2.5 px-4 text-xs font-mono font-bold focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-2xs"
+                />
+              </div>
+
+              {/* Telegram Recipients Manager */}
+              <div className="space-y-3">
+                <label className="text-xs font-black text-slate-700 block">
+                  {lang === 'fr' ? 'Comptes & Groupes destinataires (Chat IDs) :' : 'الحسابات والمجموعات المستلمة للتنبيهات (Chat IDs) :'}
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                  <div className="sm:col-span-6">
+                    <input
+                      type="text"
+                      placeholder={lang === 'fr' ? 'Chat ID (ex: 123456789 ou -100123...)' : 'معرف الشات Chat ID (مثال: 123456789)'}
+                      value={newTgChatId}
+                      onChange={(e) => setNewTgChatId(e.target.value)}
+                      className="w-full bg-white border border-sky-200 rounded-xl py-2.5 px-3 text-xs font-mono font-bold focus:border-sky-500 shadow-2xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-4">
+                    <input
+                      type="text"
+                      placeholder={lang === 'fr' ? 'Nom / Rôle (ex: Mon Téléphone)' : 'اسم الحساب (مثال: هاتفي الشخصي)'}
+                      value={newTgLabel}
+                      onChange={(e) => setNewTgLabel(e.target.value)}
+                      className="w-full bg-white border border-sky-200 rounded-xl py-2.5 px-3 text-xs font-bold focus:border-sky-500 shadow-2xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <button
+                      type="button"
+                      onClick={handleAddTelegramRecipient}
+                      className="w-full h-full bg-sky-600 hover:bg-sky-700 text-white font-black text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                    >
+                      <Plus size={15} />
+                      <span>{lang === 'fr' ? 'Ajouter' : 'إضافة'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* List of active recipients */}
                 <div className="space-y-2">
-                  {config.whatsapp.callmebotRecipients.map((rec) => (
+                  {config.telegram.recipients.map((rec) => (
                     <div
                       key={rec.id}
-                      className="bg-white p-3 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-3 text-xs shadow-2xs hover:border-emerald-200 transition-colors"
+                      className="bg-white p-3 rounded-2xl border border-sky-100 flex items-center justify-between gap-3 text-xs shadow-2xs hover:border-sky-300 transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-2.5 h-2.5 rounded-full ${rec.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                        <div className={`w-2.5 h-2.5 rounded-full ${rec.enabled ? 'bg-sky-500' : 'bg-slate-300'}`} />
                         <div className="min-w-0">
                           <p className="font-extrabold text-slate-800 truncate">{rec.label}</p>
-                          <p className="font-mono text-[11px] text-slate-500 font-bold">
-                            {rec.phone} • <span className="text-slate-400 font-normal">API: {rec.apiKey.slice(0, 3)}••••</span>
-                          </p>
+                          <p className="font-mono text-[11px] text-slate-400 font-bold">Chat ID: {rec.chatId}</p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
-                          onClick={() => handleToggleCallMeBotRecipient(rec.id)}
+                          onClick={() => handleToggleTelegramRecipient(rec.id)}
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
                             rec.enabled
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              ? 'bg-sky-50 text-sky-700 border border-sky-200'
                               : 'bg-slate-100 text-slate-500 border border-slate-200'
                           }`}
                         >
@@ -930,7 +1367,7 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
 
                         <button
                           type="button"
-                          onClick={() => handleDeleteCallMeBotRecipient(rec.id)}
+                          onClick={() => handleDeleteTelegramRecipient(rec.id)}
                           className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                           title={lang === 'fr' ? 'Supprimer' : 'حذف'}
                         >
@@ -940,266 +1377,50 @@ export const NotificationSettingsManager: React.FC<NotificationSettingsManagerPr
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Provider 2: UltraMsg Inputs */}
-          {config.whatsapp.provider === 'ultramsg' && (
-            <div className="space-y-4 bg-white p-4 rounded-2xl border border-emerald-200">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-600">UltraMsg Instance ID</label>
-                  <input
-                    type="text"
-                    placeholder="instance12345"
-                    value={config.whatsapp.ultramsg.instanceId || ''}
-                    onChange={(e) => setConfig((prev) => ({
-                      ...prev,
-                      whatsapp: {
-                        ...prev.whatsapp,
-                        ultramsg: { ...prev.whatsapp.ultramsg, instanceId: e.target.value }
-                      }
-                    }))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-600">UltraMsg Token</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••••••••••"
-                    value={config.whatsapp.ultramsg.token || ''}
-                    onChange={(e) => setConfig((prev) => ({
-                      ...prev,
-                      whatsapp: {
-                        ...prev.whatsapp,
-                        ultramsg: { ...prev.whatsapp.ultramsg, token: e.target.value }
-                      }
-                    }))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold"
-                  />
-                </div>
               </div>
 
-              {/* Phone numbers list */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-600">{lang === 'fr' ? 'Numéros destinataires :' : 'أرقام الهواتف المستلمة :'}</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="+213770821021"
-                    value={newUltraMsgPhone}
-                    onChange={(e) => setNewUltraMsgPhone(e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddUltraMsgPhone}
-                    className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-xl"
+              {/* Test Button */}
+              <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-sky-100">
+                <button
+                  type="button"
+                  onClick={handleTestTelegram}
+                  disabled={testingTelegram}
+                  className="bg-white hover:bg-sky-50 text-sky-700 border border-sky-300 font-extrabold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center gap-2 shadow-2xs disabled:opacity-50 cursor-pointer"
+                >
+                  {testingTelegram ? <RefreshCw size={14} className="animate-spin text-sky-600" /> : <Send size={14} />}
+                  <span>{lang === 'fr' ? 'Envoyer une alerte test Telegram' : 'إرسال رسالة تجريبية لتيليغرام (Test)'}</span>
+                </button>
+
+                {testResultTelegram && (
+                  <div
+                    className={`text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 ${
+                      testResultTelegram.success
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-rose-50 text-rose-800 border-rose-200'
+                    }`}
                   >
-                    <Plus size={14} />
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1.5 mt-1">
-                  {config.whatsapp.ultramsg.phoneNumbers.map((phone) => (
-                    <span key={phone} className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-                      {phone}
-                      <button type="button" onClick={() => handleDeleteUltraMsgPhone(phone)} className="text-rose-500 hover:text-rose-700">
-                        <Trash2 size={12} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
+                    {testResultTelegram.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                    <span className="truncate max-w-xs">{testResultTelegram.message}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* Provider 3: Generic Webhook Inputs */}
-          {config.whatsapp.provider === 'generic_webhook' && (
-            <div className="space-y-3 bg-white p-4 rounded-2xl border border-emerald-200">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-600">Webhook URL (Zapier / Make / n8n / Server)</label>
-                <input
-                  type="url"
-                  placeholder="https://hook.eu1.make.com/..."
-                  value={config.whatsapp.genericWebhook.url || ''}
-                  onChange={(e) => setConfig((prev) => ({
-                    ...prev,
-                    whatsapp: {
-                      ...prev.whatsapp,
-                      genericWebhook: { ...prev.whatsapp.genericWebhook, url: e.target.value }
-                    }
-                  }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-600">Secret / Authorization Header (Optionnel)</label>
-                <input
-                  type="password"
-                  placeholder="Bearer token..."
-                  value={config.whatsapp.genericWebhook.secretHeader || ''}
-                  onChange={(e) => setConfig((prev) => ({
-                    ...prev,
-                    whatsapp: {
-                      ...prev.whatsapp,
-                      genericWebhook: { ...prev.whatsapp.genericWebhook, secretHeader: e.target.value }
-                    }
-                  }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Test WhatsApp Button */}
-          <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-emerald-100">
+          {/* Save Action Footer */}
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
             <button
               type="button"
-              onClick={handleTestWhatsApp}
-              disabled={testingWhatsApp}
-              className="bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 font-extrabold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center gap-2 shadow-2xs disabled:opacity-50 cursor-pointer"
+              onClick={handleSaveOrderConfig}
+              disabled={saving}
+              className="bg-brand-cyan hover:bg-brand-cyan/90 text-white font-black text-xs py-3 px-6 rounded-xl transition-all flex items-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 cursor-pointer"
             >
-              {testingWhatsApp ? <RefreshCw size={14} className="animate-spin text-emerald-600" /> : <MessageSquare size={14} />}
-              <span>{lang === 'fr' ? 'Envoyer une alerte test WhatsApp' : 'إرسال رسالة تجريبية لواتساب (Test)'}</span>
+              {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+              <span>{lang === 'fr' ? 'Sauvegarder les paramètres de notification' : 'حفظ إعدادات إشعارات الطلبيات'}</span>
             </button>
-
-            {testResultWhatsApp && (
-              <div
-                className={`text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 ${
-                  testResultWhatsApp.success
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-rose-50 text-rose-800 border-rose-200'
-                }`}
-              >
-                {testResultWhatsApp.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-                <span className="truncate max-w-xs">{testResultWhatsApp.message}</span>
-              </div>
-            )}
           </div>
         </div>
       )}
-
-      {/* SECTION 3: Content Customization & Live Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2 border-t border-slate-100">
-        {/* Template Options */}
-        <div className="space-y-4">
-          <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
-            <Sparkles size={16} className="text-purple-600" />
-            {lang === 'fr' ? 'Contenu & Options du message' : 'تخصيص محتوى الرسالة وتفاصيل الطلبية :'}
-          </h4>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-600">{lang === 'fr' ? 'Nom / En-tête de la boutique' : 'عنوان ورأس الرسالة'}</label>
-            <input
-              type="text"
-              value={config.template?.shopTitle || ''}
-              onChange={(e) => setConfig((prev) => ({
-                ...prev,
-                template: { ...prev.template, shopTitle: e.target.value }
-              }))}
-              placeholder="JUST SMILE - مستلزمات طب الأسنان"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold"
-            />
-          </div>
-
-          <div className="space-y-2.5 pt-1">
-            {[
-              {
-                key: 'includeItemsList',
-                label: lang === 'fr' ? 'Inclure la liste détaillée des articles et quantités' : 'تضمين قائمة المنتجات والكميات والأسعار بالتفصيل'
-              },
-              {
-                key: 'includeDeliveryDetails',
-                label: lang === 'fr' ? 'Inclure l\'adresse et le mode de livraison' : 'تضمين الولاية والبلدية ونوع التوصيل'
-              },
-              {
-                key: 'includeNotes',
-                label: lang === 'fr' ? 'Inclure les remarques et notes du client' : 'تضمين ملاحظات وتعليمات العميل'
-              },
-            ].map((opt) => (
-              <label key={opt.key} className="flex items-center gap-2.5 text-xs font-bold text-slate-700 cursor-pointer p-2 hover:bg-slate-50 rounded-xl transition-colors">
-                <input
-                  type="checkbox"
-                  checked={Boolean((config.template as any)[opt.key])}
-                  onChange={(e) => setConfig((prev) => ({
-                    ...prev,
-                    template: { ...prev.template, [opt.key]: e.target.checked }
-                  }))}
-                  className="w-4 h-4 rounded text-brand-cyan focus:ring-brand-cyan"
-                />
-                <span>{opt.label}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="space-y-1 pt-1">
-            <label className="text-xs font-bold text-slate-600">{lang === 'fr' ? 'Pied de message personnalisé (facultatif)' : 'ملاحظة أو تذييل مخصص أسفل الرسالة (اختياري)'}</label>
-            <input
-              type="text"
-              value={config.template?.customNoteFooter || ''}
-              onChange={(e) => setConfig((prev) => ({
-                ...prev,
-                template: { ...prev.template, customNoteFooter: e.target.value }
-              }))}
-              placeholder={lang === 'fr' ? 'Ex: Merci pour votre confiance !' : 'مثال: يرجى تجهيز الطلبية فوراً وإرسالها لشركة الشحن.'}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs"
-            />
-          </div>
-        </div>
-
-        {/* Live Message Preview */}
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between">
-            <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-              <Smartphone size={16} className="text-slate-500" />
-              {lang === 'fr' ? 'Aperçu en direct du message' : 'معاينة حية لشكل الرسالة المستلمة :'}
-            </h4>
-            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold">
-              <button
-                type="button"
-                onClick={() => setPreviewTab('telegram')}
-                className={`px-2 py-0.5 rounded-md transition-all ${previewTab === 'telegram' ? 'bg-white text-sky-600 shadow-xs' : 'text-slate-500'}`}
-              >
-                Telegram
-              </button>
-              <button
-                type="button"
-                onClick={() => setPreviewTab('whatsapp')}
-                className={`px-2 py-0.5 rounded-md transition-all ${previewTab === 'whatsapp' ? 'bg-white text-emerald-600 shadow-xs' : 'text-slate-500'}`}
-              >
-                WhatsApp
-              </button>
-            </div>
-          </div>
-
-          <div
-            className={`p-4 rounded-2xl border text-xs font-mono leading-relaxed whitespace-pre-wrap max-h-72 overflow-y-auto shadow-inner ${
-              previewTab === 'telegram'
-                ? 'bg-slate-900 text-sky-200 border-slate-800'
-                : 'bg-emerald-950 text-emerald-100 border-emerald-900'
-            }`}
-          >
-            {previewTab === 'telegram'
-              ? buildTelegramMessage(sampleOrder, config).replace(/<[^>]+>/g, '')
-              : buildWhatsAppMessage(sampleOrder, config)}
-          </div>
-        </div>
-      </div>
-
-      {/* Save Action Footer */}
-      <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="bg-brand-cyan hover:bg-brand-cyan/90 text-white font-black text-xs py-3 px-6 rounded-xl transition-all flex items-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 cursor-pointer"
-        >
-          {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-          <span>{lang === 'fr' ? 'Sauvegarder les paramètres de notification' : 'حفظ إعدادات الإشعارات بالكامل'}</span>
-        </button>
-      </div>
     </div>
   );
 };

@@ -9,10 +9,11 @@ import { exportAllDebtsPDF } from '../utils/exportAllDebtsPDF';
 import { computeAllClientsFinancials, ClientFinancialSummary } from '../utils/clientFinancials';
 import { logActivity } from '../utils/activityLogger';
 import { cleanFirestoreData } from '../utils/firestoreHelpers';
+import { sendSingleDoctorStatementToTelegram } from '../utils/weeklyStatementService';
 import {
   Search, User, ShoppingBag, CreditCard, RotateCcw, FileText, Plus, X,
   Printer, Pencil, Trash2, Edit3, FileDown, Users, ArrowLeft, ArrowRight,
-  CheckCircle2, AlertCircle, Eye, RefreshCw, Filter
+  CheckCircle2, AlertCircle, Eye, RefreshCw, Filter, Send
 } from 'lucide-react';
 
 interface ClientSituationViewProps {
@@ -518,6 +519,30 @@ export default function ClientSituationView({
     });
   };
 
+  const [sendingTgStatement, setSendingTgStatement] = useState(false);
+
+  const handleSendTelegramStatement = async () => {
+    if (!selectedClient) return;
+    setSendingTgStatement(true);
+    try {
+      const res = await sendSingleDoctorStatementToTelegram(
+        selectedClient,
+        ordersList,
+        paymentsList,
+        returnsList
+      );
+      if (res.success) {
+        alert(res.message, 'success');
+      } else {
+        alert(res.message, 'error');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error sending to Telegram', 'error');
+    } finally {
+      setSendingTgStatement(false);
+    }
+  };
+
   const handleExportAllDebts = () => {
     exportAllDebtsPDF({
       doctors,
@@ -921,6 +946,17 @@ export default function ClientSituationView({
                   >
                     <FileText size={16} />
                     {lang === 'fr' ? 'Imprimer Relevé Client' : 'كشف حساب الزبون (PDF) 📑'}
+                  </button>
+                  <button
+                    onClick={handleSendTelegramStatement}
+                    disabled={sendingTgStatement}
+                    className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    title={lang === 'fr' ? 'Envoyer le relevé à Telegram' : 'إرسال كشف الحساب المالي الحالي فوراً إلى حساب تيليجرام'}
+                  >
+                    <Send size={16} className={sendingTgStatement ? 'animate-spin' : ''} />
+                    {sendingTgStatement
+                      ? (lang === 'fr' ? 'Envoi...' : 'جاري الإرسال...')
+                      : (lang === 'fr' ? 'Envoyer Telegram' : 'إرسال لتيليجرام 📲')}
                   </button>
                 </div>
               </div>

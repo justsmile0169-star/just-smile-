@@ -505,11 +505,11 @@ export default function App() {
               return items;
             }
             // Merge initial 30 items updating any changed details
-            const updatedMap = new Map(prev.map((p) => [p.id, p]));
+            const updatedMap = new Map<string, Product>(prev.map((p) => [p.id, p]));
             for (const item of items) {
               updatedMap.set(item.id, item);
             }
-            const merged = Array.from(updatedMap.values());
+            const merged: Product[] = Array.from(updatedMap.values());
             setStoredProducts(merged);
             return merged;
           });
@@ -624,6 +624,7 @@ export default function App() {
           }
           return null;
         });
+        const results = await Promise.all(promises);
         const validFavs = results.filter((p): p is Product => p !== null);
         validFavs.sort((a, b) => {
           const inStockA = Number(a.stock || 0) > 0 ? 1 : 0;
