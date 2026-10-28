@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { collection, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Order, Payment, ProductReturn, ShopInfo, UserProfile } from '../types';
@@ -6,7 +6,7 @@ import { Language, getTranslation } from '../translations';
 import { useAppDialog } from '../context/AppDialogContext';
 import { exportFinancialStatement } from '../utils/exportFinancialStatement';
 import { exportAllDebtsPDF } from '../utils/exportAllDebtsPDF';
-import { computeAllClientsFinancials, ClientFinancialSummary } from '../utils/clientFinancials';
+import { computeAllClientsFinancials, computeEffectiveClientOrders, ClientFinancialSummary } from '../utils/clientFinancials';
 import { logActivity } from '../utils/activityLogger';
 import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { sendSingleDoctorStatementToTelegram } from '../utils/weeklyStatementService';
@@ -130,6 +130,60 @@ export default function ClientSituationView({
               paymentStatus: updatedStatus
             });
           }
+        } else if (delta !== 0) {
+          // General payment on account: distribute positive delta to oldest unpaid active orders,
+          // or deduct negative delta from newest paid active orders so doctor account orders stay in sync
+          const clientActiveOrders = ordersList.filter(
+            (o) => o.userId === editingPayment.userId && o.status !== 'cancelled'
+          );
+
+          if (delta > 0) {
+            let remainingToDistribute = delta;
+            const unpaidOrders = [...clientActiveOrders]
+              .filter((o) => {
+                const rem = o.remainingBalance !== undefined ? o.remainingBalance : Math.max(0, o.totalAfterDiscount - (o.paidAmount || 0));
+                return rem > 0;
+              })
+              .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+
+            for (const order of unpaidOrders) {
+              if (remainingToDistribute <= 0) break;
+              const currentPaid = order.paidAmount || 0;
+              const currentRem = order.remainingBalance !== undefined ? order.remainingBalance : Math.max(0, order.totalAfterDiscount - currentPaid);
+              const payForThisOrder = Math.min(currentRem, remainingToDistribute);
+              const newPaid = currentPaid + payForThisOrder;
+              const newRemaining = Math.max(0, order.totalAfterDiscount - newPaid);
+              const newPaymentStatus = newRemaining <= 0 ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
+
+              await updateDoc(doc(db, 'orders', order.id), {
+                paidAmount: newPaid,
+                remainingBalance: newRemaining,
+                paymentStatus: newPaymentStatus
+              });
+              remainingToDistribute -= payForThisOrder;
+            }
+          } else {
+            let remainingToDeduct = Math.abs(delta);
+            const paidOrdersNewestFirst = [...clientActiveOrders]
+              .filter((o) => (o.paidAmount || 0) > 0)
+              .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+            for (const order of paidOrdersNewestFirst) {
+              if (remainingToDeduct <= 0) break;
+              const currentPaid = order.paidAmount || 0;
+              const deductFromThisOrder = Math.min(currentPaid, remainingToDeduct);
+              const newPaid = Math.max(0, currentPaid - deductFromThisOrder);
+              const newRemaining = Math.max(0, order.totalAfterDiscount - newPaid);
+              const newPaymentStatus = newRemaining <= 0 ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
+
+              await updateDoc(doc(db, 'orders', order.id), {
+                paidAmount: newPaid,
+                remainingBalance: newRemaining,
+                paymentStatus: newPaymentStatus
+              });
+              remainingToDeduct -= deductFromThisOrder;
+            }
+          }
         }
 
         if (currentUser) {
@@ -196,6 +250,28 @@ export default function ClientSituationView({
               remainingBalance: updatedRemaining,
               paymentStatus: updatedStatus
             });
+          }
+        } else {
+          // General payment on account deleted: deduct its amount from newest paid active orders
+          let remainingToDeduct = Number(deletingPayment.amount) || 0;
+          const paidOrdersNewestFirst = ordersList
+            .filter((o) => o.userId === deletingPayment.userId && o.status !== 'cancelled' && (o.paidAmount || 0) > 0)
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+          for (const order of paidOrdersNewestFirst) {
+            if (remainingToDeduct <= 0) break;
+            const currentPaid = order.paidAmount || 0;
+            const deductFromThisOrder = Math.min(currentPaid, remainingToDeduct);
+            const newPaid = Math.max(0, currentPaid - deductFromThisOrder);
+            const newRemaining = Math.max(0, order.totalAfterDiscount - newPaid);
+            const newPaymentStatus = newRemaining <= 0 ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
+
+            await updateDoc(doc(db, 'orders', order.id), {
+              paidAmount: newPaid,
+              remainingBalance: newRemaining,
+              paymentStatus: newPaymentStatus
+            });
+            remainingToDeduct -= deductFromThisOrder;
           }
         }
 
@@ -409,6 +485,46 @@ export default function ClientSituationView({
 
   const statusLabel = (status: string) => getTranslation(lang, `status_${status}` as any) || status;
 
+  // Auto-reconcile any orders in Firestore where a general payment was previously added/edited
+  // without updating the order's paidAmount and remainingBalance
+  useEffect(() => {
+    if (!ordersList.length || !paymentsList.length) return;
+
+    const reconcileMismatchedOrders = async () => {
+      for (const doctor of doctors) {
+        const rawDoctorOrders = ordersList.filter((o) => o.userId === doctor.uid && o.status !== 'cancelled');
+        if (rawDoctorOrders.length === 0) continue;
+
+        const effectiveDoctorOrders = computeEffectiveClientOrders(ordersList, paymentsList, [], doctor.uid);
+        for (const effOrder of effectiveDoctorOrders) {
+          if (effOrder.status === 'cancelled') continue;
+          const rawOrder = rawDoctorOrders.find((o) => o.id === effOrder.id);
+          if (!rawOrder) continue;
+
+          const rawPaid = Number(rawOrder.paidAmount) || 0;
+          const rawRem = rawOrder.remainingBalance !== undefined
+            ? Number(rawOrder.remainingBalance)
+            : Math.max(0, rawOrder.totalAfterDiscount - rawPaid);
+
+          if (effOrder.paidAmount !== rawPaid || effOrder.remainingBalance !== rawRem) {
+            const newStatus = effOrder.remainingBalance <= 0 ? 'paid' : effOrder.paidAmount > 0 ? 'partial' : 'unpaid';
+            try {
+              await updateDoc(doc(db, 'orders', effOrder.id), {
+                paidAmount: effOrder.paidAmount,
+                remainingBalance: effOrder.remainingBalance,
+                paymentStatus: newStatus
+              });
+            } catch (err) {
+              console.warn('Could not auto-reconcile order payment balance:', err);
+            }
+          }
+        }
+      }
+    };
+
+    reconcileMismatchedOrders();
+  }, [doctors, ordersList, paymentsList]);
+
   const handleRegisterGeneralPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedClient || generalPaymentAmount <= 0) {
@@ -421,15 +537,20 @@ export default function ClientSituationView({
       let remainingToDistribute = generalPaymentAmount;
 
       const unpaidOrders = activeOrders
-        .filter((o) => o.remainingBalance > 0)
+        .filter((o) => {
+          const rem = o.remainingBalance !== undefined ? o.remainingBalance : Math.max(0, o.totalAfterDiscount - (o.paidAmount || 0));
+          return rem > 0;
+        })
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
       for (const order of unpaidOrders) {
         if (remainingToDistribute <= 0) break;
 
-        const payForThisOrder = Math.min(order.remainingBalance, remainingToDistribute);
-        const newPaid = (order.paidAmount || 0) + payForThisOrder;
-        const newRemaining = Math.max(0, order.remainingBalance - payForThisOrder);
+        const currentPaid = order.paidAmount || 0;
+        const currentRem = order.remainingBalance !== undefined ? order.remainingBalance : Math.max(0, order.totalAfterDiscount - currentPaid);
+        const payForThisOrder = Math.min(currentRem, remainingToDistribute);
+        const newPaid = currentPaid + payForThisOrder;
+        const newRemaining = Math.max(0, order.totalAfterDiscount - newPaid);
         const newPaymentStatus = newRemaining <= 0 ? 'paid' : 'partial';
 
         await updateDoc(doc(db, 'orders', order.id), {

@@ -364,6 +364,8 @@ export default function AdminDashboard({
   // --- Create New Order / Invoice State ---
   const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
   const [newOrderDoctorId, setNewOrderDoctorId] = useState('');
+  const [newOrderDoctorSearch, setNewOrderDoctorSearch] = useState('');
+  const [showNewOrderDoctorDropdown, setShowNewOrderDoctorDropdown] = useState(false);
   const [newOrderDoctorName, setNewOrderDoctorName] = useState('');
   const [newOrderDoctorClinic, setNewOrderDoctorClinic] = useState('');
   const [newOrderDoctorPhone, setNewOrderDoctorPhone] = useState('');
@@ -439,7 +441,26 @@ export default function AdminDashboard({
     setNewOrderSelectedProduct(null);
   };
 
+  const matchedNewOrderDoctors = useMemo(() => {
+    const doctors = (usersList || []).filter((u) => !u.isDeleted && u.role === 'doctor');
+    if (!newOrderDoctorSearch.trim()) return doctors;
+    const q = newOrderDoctorSearch.trim().toLowerCase();
+    return doctors.filter(
+      (doc) =>
+        (doc.name && doc.name.toLowerCase().includes(q)) ||
+        (doc.phone && doc.phone.toLowerCase().includes(q)) ||
+        (doc.clinicName && doc.clinicName.toLowerCase().includes(q))
+    );
+  }, [newOrderDoctorSearch, usersList]);
+
+  const selectedNewOrderDoctor = useMemo(() => {
+    if (!newOrderDoctorId) return null;
+    return (usersList || []).find((u) => u.uid === newOrderDoctorId) || null;
+  }, [newOrderDoctorId, usersList]);
+
   const handleSelectDoctorForNewOrder = (doctorId: string) => {
+    setNewOrderDoctorSearch('');
+    setShowNewOrderDoctorDropdown(false);
     setNewOrderDoctorId(doctorId);
     const doc = usersList.find((u) => u.uid === doctorId);
     if (doc) {
@@ -449,6 +470,13 @@ export default function AdminDashboard({
       setNewOrderWilayaCode(doc.wilayaCode || '');
       setNewOrderWilayaName(doc.wilayaName || '');
       setNewOrderCommuneName(doc.communeName || '');
+    } else {
+      setNewOrderDoctorName('');
+      setNewOrderDoctorClinic('');
+      setNewOrderDoctorPhone('');
+      setNewOrderWilayaCode('');
+      setNewOrderWilayaName('');
+      setNewOrderCommuneName('');
     }
   };
 
@@ -1892,6 +1920,8 @@ export default function AdminDashboard({
                     type="button"
                     onClick={() => {
                       setNewOrderDoctorId('');
+                      setNewOrderDoctorSearch('');
+                      setShowNewOrderDoctorDropdown(false);
                       setNewOrderDoctorName('');
                       setNewOrderDoctorClinic('');
                       setNewOrderDoctorPhone('');
@@ -4497,22 +4527,99 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-1">
+                  <div className="space-y-1 relative">
                     <label className="text-[10px] font-bold text-slate-500">{lang === 'fr' ? 'Médecin inscrit :' : 'اختر طبيباً مسجلاً :'}</label>
-                    <select
-                      value={newOrderDoctorId}
-                      onChange={(e) => handleSelectDoctorForNewOrder(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
-                    >
-                      <option value="">{lang === 'fr' ? '-- Médecin / Client non listé --' : '-- عميل / طبيب غير مسجل --'}</option>
-                      {usersList
-                        .filter((u) => !u.isDeleted && u.role === 'doctor')
-                        .map((doc) => (
-                          <option key={doc.uid} value={doc.uid}>
-                            {doc.name} {doc.clinicName ? `(${doc.clinicName})` : ''} - {doc.phone || ''}
-                          </option>
-                        ))}
-                    </select>
+                    <div className="relative">
+                      <Search size={14} className="absolute top-2.5 right-3 text-slate-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={
+                          showNewOrderDoctorDropdown
+                            ? newOrderDoctorSearch
+                            : selectedNewOrderDoctor
+                              ? `${selectedNewOrderDoctor.name}${selectedNewOrderDoctor.clinicName ? ` (${selectedNewOrderDoctor.clinicName})` : ''}${selectedNewOrderDoctor.phone ? ` - ${selectedNewOrderDoctor.phone}` : ''}`
+                              : newOrderDoctorSearch
+                        }
+                        onFocus={() => setShowNewOrderDoctorDropdown(true)}
+                        onBlur={() => setShowNewOrderDoctorDropdown(false)}
+                        onChange={(e) => {
+                          setNewOrderDoctorSearch(e.target.value);
+                          setShowNewOrderDoctorDropdown(true);
+                        }}
+                        placeholder={
+                          lang === 'fr'
+                            ? 'Rechercher un médecin par nom ou téléphone...'
+                            : 'ابحث عن الطبيب بالاسم أو رقم الهاتف...'
+                        }
+                        className={`w-full bg-white border rounded-xl py-2 pr-8 pl-7 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan transition-colors ${
+                          selectedNewOrderDoctor ? 'border-brand-cyan/60 bg-brand-cyan/5' : 'border-slate-200'
+                        }`}
+                      />
+                      {(newOrderDoctorSearch || newOrderDoctorId) && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleSelectDoctorForNewOrder('')}
+                          title={lang === 'fr' ? 'Effacer la sélection' : 'مسح الاختيار'}
+                          className="absolute top-2 left-2 p-0.5 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+
+                      {showNewOrderDoctorDropdown && (
+                        <div
+                          onMouseDown={(e) => e.preventDefault()}
+                          className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200 shadow-xl max-h-60 overflow-y-auto z-50 divide-y divide-slate-100"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleSelectDoctorForNewOrder('')}
+                            className={`w-full text-right px-3 py-2 text-xs font-bold transition-colors flex items-center justify-between cursor-pointer ${
+                              !newOrderDoctorId ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span>{lang === 'fr' ? '-- Médecin / Client non listé --' : '-- عميل / طبيب غير مسجل --'}</span>
+                            {!newOrderDoctorId && <Check size={13} className="text-brand-cyan shrink-0" />}
+                          </button>
+
+                          {matchedNewOrderDoctors.length === 0 ? (
+                            <div className="p-3 text-center text-xs text-slate-400 font-bold">
+                              {lang === 'fr' ? 'Aucun médecin trouvé' : 'لم يتم العثور على أي طبيب مطابق'}
+                            </div>
+                          ) : (
+                            matchedNewOrderDoctors.map((doc) => {
+                              const isSelected = newOrderDoctorId === doc.uid;
+                              return (
+                                <button
+                                  key={doc.uid}
+                                  type="button"
+                                  onClick={() => handleSelectDoctorForNewOrder(doc.uid)}
+                                  className={`w-full text-right px-3 py-2.5 hover:bg-brand-cyan/5 transition-colors flex items-center justify-between gap-2 cursor-pointer ${
+                                    isSelected ? 'bg-brand-cyan/10' : ''
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-extrabold text-slate-800 text-xs truncate">
+                                      {doc.name}
+                                      {doc.clinicName && (
+                                        <span className="text-slate-500 font-bold"> ({doc.clinicName})</span>
+                                      )}
+                                    </div>
+                                    {doc.phone && (
+                                      <div className="text-[10px] text-slate-500 font-mono mt-0.5" dir="ltr">
+                                        {doc.phone}
+                                      </div>
+                                    )}
+                                  </div>
+                                  {isSelected && <Check size={14} className="text-brand-cyan shrink-0" />}
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-1">

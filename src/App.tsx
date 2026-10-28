@@ -778,12 +778,16 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) {
       setUserOrders([]);
+      setPaymentsList([]);
+      setReturnsList([]);
       setNotifications([]);
       setFavorites([]);
       return;
     }
 
     let unsubscribeOrders = () => { };
+    let unsubscribeDoctorPayments = () => { };
+    let unsubscribeDoctorReturns = () => { };
     let unsubscribeNotifications = () => { };
     let unsubscribeFavorites = () => { };
 
@@ -798,6 +802,30 @@ export default function App() {
         setUserOrders(items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
       }, (err) => {
         console.error("Error syncing doctor orders:", err);
+      });
+
+      // Sync doctor payments so financial totals & statements stay in sync with ClientSituationView
+      const doctorPaymentsQuery = query(collection(db, 'payments'), where('userId', '==', currentUser.uid));
+      unsubscribeDoctorPayments = onSnapshot(doctorPaymentsQuery, (snapshot) => {
+        const items: Payment[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<Payment, 'id'>) });
+        });
+        setPaymentsList(items.sort((a, b) => (b.paymentDate || '').localeCompare(a.paymentDate || '')));
+      }, (err) => {
+        console.error("Error syncing doctor payments:", err);
+      });
+
+      // Sync doctor returns so financial totals & statements stay in sync with ClientSituationView
+      const doctorReturnsQuery = query(collection(db, 'returns'), where('userId', '==', currentUser.uid));
+      unsubscribeDoctorReturns = onSnapshot(doctorReturnsQuery, (snapshot) => {
+        const items: ProductReturn[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...(docSnap.data() as Omit<ProductReturn, 'id'>) });
+        });
+        setReturnsList(items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+      }, (err) => {
+        console.error("Error syncing doctor returns:", err);
       });
 
       // Sync doctor notifications
@@ -1049,6 +1077,8 @@ export default function App() {
 
     return () => {
       unsubscribeOrders();
+      unsubscribeDoctorPayments();
+      unsubscribeDoctorReturns();
       unsubscribeNotifications();
       unsubscribeFavorites();
     };

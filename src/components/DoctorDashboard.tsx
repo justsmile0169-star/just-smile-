@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Order, Payment, Product, ProductReturn, UserProfile, ProfileUpdateRequest } from '../types';
 import { Language, getTranslation } from '../translations';
 import { ShoppingBag, FileText, Heart, Clock, AlertTriangle, RefreshCw, Eye, CheckCircle, HelpCircle, LayoutGrid, Activity, Syringe, Scissors, Smile, ShieldCheck, Layers, MessageSquare, Send, X, Trash2, User, MapPin, Building, Phone, ChevronDown, Truck, BarChart3, Lock, Printer, Key, Edit3 } from 'lucide-react';
@@ -9,6 +9,7 @@ import { hashPassword } from '../utils/crypto';
 import { useAppDialog } from '../context/AppDialogContext';
 import { getWilayas, getCommunesByWilaya, WilayaOption, CommuneOption, isFreeDelivery } from '../utils/algeriaData';
 import { exportFinancialStatement } from '../utils/exportFinancialStatement';
+import { computeClientFinancials, computeEffectiveClientOrders } from '../utils/clientFinancials';
 import { isProductInStock } from '../utils/productSearch';
 import DoctorAnalytics from './DoctorAnalytics';
 import SearchableWilayaCommuneSelector from './SearchableWilayaCommuneSelector';
@@ -376,26 +377,50 @@ export default function DoctorDashboard({
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
   };
 
-  // --- Credit and Debt calculations ---
-  const totals = orders.reduce(
-    (acc, order) => {
-      if (order.paymentMethod === 'cash') {
-        acc.cashRemaining += order.remainingBalance;
-        acc.cashTotal += order.totalAfterDiscount;
-      } else {
-        acc.creditRemaining += order.remainingBalance;
-        acc.creditTotal += order.totalAfterDiscount;
-      }
-      acc.totalDebt += order.totalAfterDiscount;
-      acc.paidAmount += order.paidAmount;
-      acc.remainingBalance += order.remainingBalance;
-      return acc;
-    },
-    { totalDebt: 0, paidAmount: 0, remainingBalance: 0, creditRemaining: 0, creditTotal: 0, cashRemaining: 0, cashTotal: 0 }
+  // --- Credit and Debt calculations (synchronized with ClientSituationView) ---
+  const userId = user.uid || (user as any).id;
+
+  const effectiveOrders = useMemo(
+    () => computeEffectiveClientOrders(orders, paymentsList || [], returnsList || [], userId),
+    [orders, paymentsList, returnsList, userId]
   );
 
+  const financialSummary = useMemo(
+    () => computeClientFinancials({ ...user, uid: userId }, orders, paymentsList || [], returnsList || []),
+    [user, userId, orders, paymentsList, returnsList]
+  );
+
+  const totals = useMemo(() => {
+    const activeEffective = effectiveOrders.filter((o) => o.status !== 'cancelled');
+    let creditRemaining = 0;
+    let creditTotal = 0;
+    let cashRemaining = 0;
+    let cashTotal = 0;
+
+    activeEffective.forEach((order) => {
+      if (order.paymentMethod === 'cash') {
+        cashRemaining += order.remainingBalance;
+        cashTotal += order.totalAfterDiscount;
+      } else {
+        creditRemaining += order.remainingBalance;
+        creditTotal += order.totalAfterDiscount;
+      }
+    });
+
+    return {
+      totalDebt: financialSummary.totalPurchases,
+      paidAmount: financialSummary.totalPaid,
+      remainingBalance: financialSummary.debt,
+      creditRemaining,
+      creditTotal,
+      cashRemaining,
+      cashTotal
+    };
+  }, [effectiveOrders, financialSummary]);
+
   // Check if any invoice is overdue (> 20 days and remainingBalance > 0)
-  const overdueOrders = orders.filter((order) => {
+  const overdueOrders = effectiveOrders.filter((order) => {
+    if (order.status === 'cancelled') return false;
     if (order.remainingBalance <= 0) return false;
     if (order.paymentMethod === 'cash') return false; // cash on delivery is not on credit
     const deadline = new Date(order.deadlineDate);
@@ -427,7 +452,6 @@ export default function DoctorDashboard({
     });
 
   const handleExportStatement = () => {
-    const userId = user.uid || (user as any).id;
     const userPayments = (paymentsList || []).filter(
       (p) => p.userId === userId
     );
@@ -436,7 +460,7 @@ export default function DoctorDashboard({
     );
     exportFinancialStatement({
       client: user,
-      orders,
+      orders: effectiveOrders,
       payments: userPayments,
       returns: userReturns,
       lang
@@ -728,14 +752,14 @@ export default function DoctorDashboard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {orders.map((order) => {
+                    {effectiveOrders.map((order) => {
                       // Check order level overdue state
                       const deadline = new Date(order.deadlineDate);
                       const extraDays = user?.extraGraceDays || 0;
                       if (extraDays > 0) {
                         deadline.setDate(deadline.getDate() + extraDays);
                       }
-                      const isOrderOverdue = order.remainingBalance > 0 && order.paymentMethod !== 'cash' && new Date() > deadline;
+                      const isOrderOverdue = order.status !== 'cancelled' && order.remainingBalance > 0 && order.paymentMethod !== 'cash' && new Date() > deadline;
 
                       return (
                         <tr key={order.id} className="text-sm hover:bg-slate-50/50 transition-colors">
@@ -821,7 +845,7 @@ export default function DoctorDashboard({
             )}
           </div>
           ) : (
-            <DoctorAnalytics orders={orders} lang={lang} />
+            <DoctorAnalytics orders={effectiveOrders} lang={lang} />
           )}
         </div>
 
