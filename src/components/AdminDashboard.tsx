@@ -2564,7 +2564,7 @@ export default function AdminDashboard({
       {activeSubTab === 'catalog' && hasPermission(currentUser, 'view_analytics') && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
           <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
-            <CatalogGenerator products={productsList} lang={lang} />
+            <CatalogGenerator products={productsList} lang={lang} shopInfo={shopInfo} />
           </Suspense>
         </div>
       )}
