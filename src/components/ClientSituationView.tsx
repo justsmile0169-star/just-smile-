@@ -340,10 +340,20 @@ export default function ClientSituationView({
     }
   };
 
-  const doctors = useMemo(
-    () => usersList.filter((u) => u.role === 'doctor'),
-    [usersList]
-  );
+  const doctors = useMemo(() => {
+    const staffEmails = new Set(
+      usersList
+        .filter((u) => !u.isDeleted && u.role !== 'doctor' && u.email)
+        .map((u) => u.email.trim().toLowerCase())
+    );
+    return usersList.filter(
+      (u) =>
+        !u.isDeleted &&
+        u.role === 'doctor' &&
+        u.clinicName !== 'Staff' &&
+        (!u.email || !staffEmails.has(u.email.trim().toLowerCase()))
+    );
+  }, [usersList]);
 
   const allDoctorFinancials = useMemo(() => {
     return computeAllClientsFinancials(doctors, ordersList, paymentsList, returnsList);

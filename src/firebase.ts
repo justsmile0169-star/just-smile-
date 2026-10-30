@@ -39,5 +39,5 @@ const functions = getFunctions(app);
 // Initialize Firebase Storage
 const storage = getStorage(app);
 
-export { app, db, auth, functions, storage };
+export { app, db, auth, functions, storage, firebaseConfig };
 export default app;

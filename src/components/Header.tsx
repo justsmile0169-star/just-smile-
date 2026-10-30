@@ -3,6 +3,7 @@ import { Language, getTranslation } from '../translations';
 import LanguageSelector from './LanguageSelector';
 import { ShoppingCart, Heart, Bell, User, LogOut, Shield, Stethoscope, LogIn, Sun, Moon, Menu, X, UserCircle, Flame, ShoppingBag } from 'lucide-react';
 import { UserProfile } from '../types';
+import { getRoleLabel } from '../utils/permissions';
 import { getLogoUrl } from '../constants/brand';
 
 interface HeaderProps {
@@ -47,7 +48,7 @@ export default function Header({
           <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-xs font-semibold text-brand-cyan">
             <UserCircle size={14} />
             <span>
-              {lang === 'fr' ? 'Connecté en tant que' : 'مسجل الدخول كـ'}: {user.name} ({user.role})
+              {lang === 'fr' ? 'Connecté en tant que' : 'مسجل الدخول كـ'}: {user.name} ({getRoleLabel(user.role, lang)})
             </span>
           </div>
         </div>

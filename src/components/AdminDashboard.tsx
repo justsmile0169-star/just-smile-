@@ -7,6 +7,7 @@ import { getLogoUrl } from '../constants/brand';
 import { useAppDialog } from '../context/AppDialogContext';
 import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { hasPermission } from '../utils/permissions';
+import { ensureStaffFirebaseAuth, syncStaffDirectory } from '../utils/staffAuth';
 import { logActivity } from '../utils/activityLogger';
 import { deleteProductFully } from '../utils/productFirestore';
 import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../utils/yalidineService';
@@ -119,8 +120,88 @@ export default function AdminDashboard({
     return new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'ar-DZ').format(num) + ' ' + getTranslation(lang, 'currency');
   };
 
-  const approvedDoctors = usersList.filter((u) => u.role === 'doctor');
-  const allDoctors = usersList.filter((u) => u.role === 'doctor');
+  const staffEmailsSet = useMemo(() => {
+    const set = new Set<string>();
+    usersList.forEach((u) => {
+      if (!u.isDeleted && u.role !== 'doctor' && u.email) {
+        set.add(u.email.trim().toLowerCase());
+      }
+    });
+    return set;
+  }, [usersList]);
+
+  const approvedDoctors = useMemo(
+    () =>
+      usersList.filter(
+        (u) =>
+          !u.isDeleted &&
+          u.role === 'doctor' &&
+          u.clinicName !== 'Staff' &&
+          (!u.email || !staffEmailsSet.has(u.email.trim().toLowerCase()))
+      ),
+    [usersList, staffEmailsSet]
+  );
+  const allDoctors = approvedDoctors;
+
+  // Automatically reconcile any staff member who was previously misclassified as a doctor on login
+  // and ensure every staff account has a dedicated Firebase Auth credential synced to `settings/staff_directory`
+  useEffect(() => {
+    if ((currentUser.role !== 'admin' && currentUser.role !== 'manager') || !usersList || usersList.length === 0) return;
+
+    const healStaffAccounts = async () => {
+      const staffMembers = usersList.filter((u) => !u.isDeleted && u.role !== 'doctor');
+      const doctorRecords = usersList.filter((u) => !u.isDeleted && u.role === 'doctor');
+      let hasChanges = false;
+
+      if (currentUser.role === 'admin') {
+        for (const staff of staffMembers) {
+          if (!staff.email) continue;
+          const emailLower = staff.email.trim().toLowerCase();
+          const duplicateDocs = doctorRecords.filter(
+            (d) => d.email && d.email.trim().toLowerCase() === emailLower && d.uid !== staff.uid
+          );
+
+          for (const dup of duplicateDocs) {
+            try {
+              await deleteDoc(doc(db, 'users', dup.uid));
+              hasChanges = true;
+            } catch (err) {
+              console.warn('Could not remove duplicate doctor record for staff:', err);
+            }
+          }
+
+          if (staff.uid !== currentUser.uid && staff.password && !staff.authEmail) {
+            try {
+              const { uid: authUid, authEmail } = await ensureStaffFirebaseAuth(staff.password);
+              const migratedStaff: UserProfile = {
+                ...staff,
+                uid: authUid,
+                email: emailLower,
+                authEmail,
+                clinicName: 'Staff',
+                location: 'Main Office',
+                status: 'active',
+                isProfileComplete: true
+              };
+              await setDoc(doc(db, 'users', authUid), migratedStaff);
+              if (staff.uid !== authUid) {
+                await deleteDoc(doc(db, 'users', staff.uid)).catch(() => {});
+              }
+              hasChanges = true;
+            } catch (err) {
+              console.warn('Could not auto-provision Firebase Auth for staff:', err);
+            }
+          }
+        }
+      }
+
+      if (!hasChanges) {
+        await syncStaffDirectory(usersList);
+      }
+    };
+
+    healStaffAccounts();
+  }, [currentUser.role, currentUser.uid, usersList]);
 
   const [doctorSearchQuery, setDoctorSearchQuery] = useState('');
   const [isMigratingImages, setIsMigratingImages] = useState(false);

@@ -26,6 +26,7 @@ export interface UserProfile {
   allowCreditPayment?: boolean; // if true, doctor can pay by credit (20 days debt). if false, only cash payment allowed
   extraGraceDays?: number; // extra grace period days added by admin for debt payment
   password?: string; // for staff accounts login
+  authEmail?: string; // dedicated Firebase Auth email alias for staff accounts
   lastLoginAt?: string; // track last login time
   isProfileComplete?: boolean; // check if Google Auth user has completed profile details
   isDeleted?: boolean; // Soft delete flag

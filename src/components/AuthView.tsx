@@ -4,7 +4,7 @@ import { doc, setDoc, getDoc, getDocFromServer, updateDoc, collection, query, wh
 import { auth, db } from '../firebase';
 import { Language, getTranslation } from '../translations';
 import { UserProfile } from '../types';
-import { signInStaff, saveStaffSession } from '../utils/staffAuth';
+import { signInStaff, saveStaffSession, checkStaffDirectoryEmail } from '../utils/staffAuth';
 import {
   getWilayas, getCommunesByWilaya, isFreeDelivery,
   WilayaOption, CommuneOption,
@@ -157,8 +157,27 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
         const emailTrimmed = email.trim();
         const emailLower   = emailTrimmed.toLowerCase();
 
+        // 1. Check Staff Directory first (prevents blind 400 errors on accounts:signInWithPassword
+        //    and works prior to authentication when `users` collection cannot be queried)
+        const staffCheck = await checkStaffDirectoryEmail(emailLower);
+        if (staffCheck.isStaff) {
+          const staffProfile = await signInStaff(emailLower, password);
+          if (staffProfile) {
+            saveStaffSession(staffProfile);
+            updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
+            onAuthSuccess(staffProfile);
+            setLoading(false);
+            return;
+          }
+          if (staffCheck.hasDedicatedAuth) {
+            setErrorMsg(lang === 'fr' ? 'E-mail ou mot de passe incorrect.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+            setLoading(false);
+            return;
+          }
+        }
+
         try {
-          // Fast primary path: Firebase Auth login
+          // 2. Primary Firebase Auth path (for Doctors & direct Firebase Auth Admin accounts)
           const userCredential = await signInWithEmailAndPassword(auth, emailTrimmed, password);
           let userDocSnap = await getDoc(doc(db, 'users', userCredential.user.uid)).catch(() => null);
 
@@ -194,6 +213,10 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
             return;
           }
 
+          if (doctorProfile.role !== 'doctor') {
+            saveStaffSession(doctorProfile);
+          }
+
           // Non-blocking async last login update
           updateDoc(doc(db, 'users', doctorProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
           
@@ -202,29 +225,14 @@ export default function AuthView({ lang, currentUser, onAuthSuccess }: AuthViewP
           setLoading(false);
           return;
         } catch (fastAuthError: any) {
-          // Fallback path: search Firestore for custom staff or email casing mismatch
-          const usersRef = collection(db, 'users');
-          let userSnapshot = await getDocs(query(usersRef, where('email', '==', emailLower))).catch(() => null);
-          if ((!userSnapshot || userSnapshot.empty) && emailTrimmed !== emailLower) {
-            userSnapshot = await getDocs(query(usersRef, where('email', '==', emailTrimmed))).catch(() => null);
-          }
-
-          let userData: UserProfile | null = null;
-          let storedEmail = emailTrimmed;
-          if (userSnapshot && !userSnapshot.empty) {
-            userData = userSnapshot.docs[0].data() as UserProfile;
-            if (userData.email) storedEmail = userData.email;
-          }
-
-          if (userData && userData.role !== 'doctor') {
-            const staffProfile = await signInStaff(storedEmail, password);
-            if (staffProfile) {
-              saveStaffSession(staffProfile);
-              updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
-              onAuthSuccess(staffProfile);
-              setLoading(false);
-              return;
-            }
+          // Fallback path: attempt signInStaff directly
+          const staffProfile = await signInStaff(emailLower, password);
+          if (staffProfile) {
+            saveStaffSession(staffProfile);
+            updateDoc(doc(db, 'users', staffProfile.uid), { lastLoginAt: new Date().toISOString() }).catch(() => {});
+            onAuthSuccess(staffProfile);
+            setLoading(false);
+            return;
           }
 
           // Show clear error message

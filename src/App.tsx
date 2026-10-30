@@ -319,39 +319,50 @@ export default function App() {
               return;
             }
 
-            // Only change tab if we didn't have a user before
+            // Switch to admin tab if user is staff (either initial load or upgraded from doctor stub)
             setCurrentUser((prev) => {
+              const isStaffRole =
+                profile.role === 'admin' ||
+                profile.role === 'manager' ||
+                profile.role === 'cashier' ||
+                profile.role === 'accountant';
               if (!prev) {
-                if (profile.role === 'admin' || profile.role === 'manager' || profile.role === 'cashier' || profile.role === 'accountant') {
-                  setActiveTab('admin');
-                } else {
-                  setActiveTab('browse');
-                }
+                setActiveTab(isStaffRole ? 'admin' : 'browse');
+              } else if (isStaffRole && prev.role === 'doctor') {
+                setActiveTab('admin');
               }
               return profile;
             });
             setLoadingUser(false);
           } else {
-            // Profile not found for this Firebase Auth UID. Auto-create a default doctor profile in Firestore.
-            const defaultDoctorProfile: UserProfile = {
-              uid: firebaseUser.uid,
-              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'طبيب',
-              email: firebaseUser.email || '',
-              role: 'doctor',
-              clinicName: 'عيادة طب الأسنان',
-              phone: '',
-              location: '',
-              allowCreditPayment: true,
-              status: 'approved',
-              createdAt: new Date().toISOString()
-            };
-            try {
-              await setDoc(doc(db, 'users', firebaseUser.uid), defaultDoctorProfile);
-              setCurrentUser(defaultDoctorProfile);
-            } catch (createErr) {
-              console.warn('Could not auto-create Firestore user profile:', createErr);
-            }
-            setLoadingUser(false);
+            // Wait briefly before auto-creating a default profile to avoid racing with AuthView / StaffManager setDoc
+            setTimeout(async () => {
+              try {
+                const recheckSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+                if (recheckSnap.exists()) {
+                  setLoadingUser(false);
+                  return;
+                }
+                const defaultDoctorProfile: UserProfile = {
+                  uid: firebaseUser.uid,
+                  name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'طبيب',
+                  email: firebaseUser.email || '',
+                  role: 'doctor',
+                  clinicName: 'عيادة طب الأسنان',
+                  phone: '',
+                  location: '',
+                  allowCreditPayment: true,
+                  status: 'approved',
+                  createdAt: new Date().toISOString()
+                };
+                await setDoc(doc(db, 'users', firebaseUser.uid), defaultDoctorProfile);
+                setCurrentUser(defaultDoctorProfile);
+              } catch (createErr) {
+                console.warn('Could not auto-create Firestore user profile:', createErr);
+              } finally {
+                setLoadingUser(false);
+              }
+            }, 1200);
           }
         }, (error) => {
           console.error('Error listening to user document:', error);
