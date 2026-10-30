@@ -1838,12 +1838,12 @@ export default function AdminDashboard({
             <Tag size={16} />{lang === 'fr' ? 'Promotions' : 'العروض'}
           </button>
         )}
-        {hasPermission(currentUser, 'view_analytics') && (
+        {(hasPermission(currentUser, 'view_catalog') || hasPermission(currentUser, 'view_analytics')) && (
           <button onClick={() => setActiveSubTab('catalog')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'catalog' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <FileText size={16} />{lang === 'fr' ? 'Catalogue' : 'كتالوج'}
           </button>
         )}
-        {hasPermission(currentUser, 'view_analytics') && (
+        {(hasPermission(currentUser, 'view_doctors_map') || hasPermission(currentUser, 'view_analytics')) && (
           <button onClick={() => setActiveSubTab('doctorsMap')} className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'doctorsMap' ? 'bg-brand-cyan text-white shadow-xs' : 'text-slate-500 hover:bg-slate-50'}`}>
             <MapPin size={16} />{lang === 'fr' ? 'Carte Médecins' : 'خريطة الأطباء'}
           </button>
@@ -1853,7 +1853,7 @@ export default function AdminDashboard({
             <Wallet size={16} />{lang === 'fr' ? 'Dépenses' : 'المصروفات'}
           </button>
         )}
-        {hasPermission(currentUser, 'view_doctors') && (
+        {(currentUser.role === 'admin' || currentUser.role === 'manager') && (
           <button
             onClick={() => setActiveSubTab('discounts')}
             className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap ${activeSubTab === 'discounts'
@@ -1996,7 +1996,7 @@ export default function AdminDashboard({
 
               {/* Action buttons & Status Filter */}
               <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end flex-wrap">
-                {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier' || currentUser.role === 'accountant') && (
+                {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'cashier' || currentUser.role === 'accountant' || currentUser.role === 'commercial') && (
                   <button
                     type="button"
                     onClick={() => {
@@ -2214,13 +2214,15 @@ export default function AdminDashboard({
 
                           {/* Quick Action Buttons */}
                           <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
-                            <button
-                              onClick={() => handleStartEditOrder(order)}
-                              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-all flex items-center gap-1"
-                            >
-                              <Edit3 size={14} />
-                              {lang === 'fr' ? 'Modifier' : 'تعديل الطلب'}
-                            </button>
+                            {currentUser.role !== 'commercial' && (
+                              <button
+                                onClick={() => handleStartEditOrder(order)}
+                                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-all flex items-center gap-1"
+                              >
+                                <Edit3 size={14} />
+                                {lang === 'fr' ? 'Modifier' : 'تعديل الطلب'}
+                              </button>
+                            )}
 
                             <button
                               onClick={() => setSelectedOrderForDetail(order)}
@@ -2642,18 +2644,23 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {activeSubTab === 'catalog' && hasPermission(currentUser, 'view_analytics') && (
+      {activeSubTab === 'catalog' && (hasPermission(currentUser, 'view_catalog') || hasPermission(currentUser, 'view_analytics')) && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
           <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
-            <CatalogGenerator products={productsList} lang={lang} shopInfo={shopInfo} />
+            <CatalogGenerator
+              products={productsList}
+              lang={lang}
+              shopInfo={shopInfo}
+              hidePurchasePrices={!hasPermission(currentUser, 'view_purchase_prices')}
+            />
           </Suspense>
         </div>
       )}
 
-      {activeSubTab === 'doctorsMap' && hasPermission(currentUser, 'view_analytics') && (
+      {activeSubTab === 'doctorsMap' && (hasPermission(currentUser, 'view_doctors_map') || hasPermission(currentUser, 'view_analytics')) && (
         <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
           <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
-            <DoctorMap doctors={usersList.filter(u => u.role === 'doctor')} orders={ordersList} lang={lang} />
+            <DoctorMap doctors={allDoctors} orders={ordersList} lang={lang} />
           </Suspense>
         </div>
       )}
@@ -2823,8 +2830,8 @@ export default function AdminDashboard({
                             </td>
                             <td className="py-3">
                               <button
-                                onClick={() => handleToggleDoctorCredit(docProfile)}
-                                disabled={loading}
+                                onClick={() => currentUser.role !== 'commercial' && handleToggleDoctorCredit(docProfile)}
+                                disabled={loading || currentUser.role === 'commercial'}
                                 className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${docProfile.allowCreditPayment !== false
                                     ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                                     : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
@@ -2846,17 +2853,19 @@ export default function AdminDashboard({
                                     ? `+${docProfile.extraGraceDays} ${lang === 'fr' ? 'j' : 'أيام'}`
                                     : (lang === 'fr' ? '15j' : '15 يوم')}
                                 </span>
-                                <button
-                                  onClick={() => {
-                                    setSelectedDoctorForGrace(docProfile);
-                                    setGraceDaysInput(docProfile.extraGraceDays || 0);
-                                    setExtendUnpaidOrders(true);
-                                  }}
-                                  className="p-1 text-slate-500 hover:text-brand-cyan hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                                  title={lang === 'fr' ? 'Prolonger la grâce' : 'تمديد مهلة الدين'}
-                                >
-                                  <Clock size={14} />
-                                </button>
+                                {currentUser.role !== 'commercial' && (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDoctorForGrace(docProfile);
+                                      setGraceDaysInput(docProfile.extraGraceDays || 0);
+                                      setExtendUnpaidOrders(true);
+                                    }}
+                                    className="p-1 text-slate-500 hover:text-brand-cyan hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                    title={lang === 'fr' ? 'Prolonger la grâce' : 'تمديد مهلة الدين'}
+                                  >
+                                    <Clock size={14} />
+                                  </button>
+                                )}
                               </div>
                             </td>
                             <td className="py-3 font-mono text-[10px] text-slate-400 max-w-[120px] truncate">
@@ -3382,7 +3391,7 @@ export default function AdminDashboard({
                           <td className="py-4 text-rose-600 font-black">{formatPrice(order.remainingBalance)}</td>
                           <td className="py-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {orderDocProfile && (
+                              {orderDocProfile && currentUser.role !== 'commercial' && (
                                 <button
                                   onClick={() => {
                                     setSelectedDoctorForGrace(orderDocProfile);
@@ -3410,16 +3419,18 @@ export default function AdminDashboard({
                               >
                                 <FileText size={14} />
                               </button>
-                              <button
-                                onClick={() => {
-                                  setSelectedOrderForEditPayment(order);
-                                  setEditOrderPaidAmount(order.paidAmount || 0);
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                                title={lang === 'fr' ? 'Modifier le montant payé' : 'تعديل المبلغ المدفوع'}
-                              >
-                                <Pencil size={14} />
-                              </button>
+                              {currentUser.role !== 'commercial' && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedOrderForEditPayment(order);
+                                    setEditOrderPaidAmount(order.paidAmount || 0);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                  title={lang === 'fr' ? 'Modifier le montant payé' : 'تعديل المبلغ المدفوع'}
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                              )}
                               {order.remainingBalance > 0 ? (
                                 <button
                                   onClick={() => setSelectedOrderForPayment(order)}

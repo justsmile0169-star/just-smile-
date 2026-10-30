@@ -16,7 +16,7 @@ interface StaffManagerProps {
   currentUser: UserProfile;
 }
 
-const STAFF_ROLES: UserRole[] = ['admin', 'manager', 'cashier', 'accountant'];
+const STAFF_ROLES: UserRole[] = ['admin', 'manager', 'cashier', 'accountant', 'commercial'];
 
 export default function StaffManager({ lang, usersList, currentUser }: StaffManagerProps) {
   const { alert, confirm } = useAppDialog();
@@ -320,8 +320,8 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
             </h3>
             <p className="text-xs text-slate-400 mt-1">
               {lang === 'fr'
-                ? 'Caissier: ventes | Manager: rapports | Comptable: factures | Admin: tout.'
-                : 'كاشير: بيع | مدير: تقارير | محاسب: فواتير | مدير عام: الكل.'}
+                ? 'Commercial: ventes & médecins | Caissier: ventes | Manager: rapports | Comptable: factures | Admin: tout.'
+                : 'مندوب مبيعات: طلبيات وأطباء وكتالوج | كاشير: بيع | مدير: تقارير | محاسب: فواتير | مدير عام: الكل.'}
             </p>
           </div>
           <button
@@ -409,8 +409,9 @@ export default function StaffManager({ lang, usersList, currentUser }: StaffMana
         </form>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
         {[
+          { role: 'commercial', fr: 'Commercial — commandes, tous les médecins, carte, catalogue (vente), encaissements', ar: 'مندوب مبيعات — إنشاء طلبيات، رؤية جميع الأطباء وخريطتهم، الكتالوج (سعر البيع فقط)، وتحصيل الدفعات' },
           { role: 'cashier', fr: 'Caissier — ventes et paiements uniquement', ar: 'كاشير — البيع والدفع فقط' },
           { role: 'accountant', fr: 'Comptable — factures, dépenses, paiements', ar: 'محاسب — فواتير ومصروفات' },
           { role: 'manager', fr: 'Manager — stocks, promos, analytics', ar: 'مدير — مخزون وعروض وتقارير' },

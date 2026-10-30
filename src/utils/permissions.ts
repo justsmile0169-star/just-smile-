@@ -16,6 +16,9 @@ export type Permission =
   | 'view_client_situation'
   | 'use_scanner'
   | 'view_doctors'
+  | 'view_doctors_map'
+  | 'view_catalog'
+  | 'view_purchase_prices'
   | 'manage_suppliers'
   | 'view_suppliers'
   | 'manage_settings';
@@ -25,18 +28,30 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view_analytics', 'manage_inventory', 'manage_promotions', 'manage_expenses',
     'view_expenses', 'manage_payments', 'edit_invoices', 'view_reports', 'manage_staff',
     'view_activity_logs', 'manage_backup', 'sell', 'view_client_situation', 'use_scanner',
-    'view_doctors', 'manage_suppliers', 'view_suppliers', 'manage_settings'
+    'view_doctors', 'view_doctors_map', 'view_catalog', 'view_purchase_prices',
+    'manage_suppliers', 'view_suppliers', 'manage_settings'
   ],
   manager: [
     'view_analytics', 'manage_inventory', 'manage_promotions', 'manage_expenses',
     'view_expenses', 'manage_payments', 'view_reports', 'view_activity_logs', 'sell',
-    'view_client_situation', 'use_scanner', 'view_doctors', 'manage_suppliers', 'view_suppliers'
+    'view_client_situation', 'use_scanner', 'view_doctors', 'view_doctors_map',
+    'view_catalog', 'view_purchase_prices', 'manage_suppliers', 'view_suppliers'
   ],
   accountant: [
     'view_expenses', 'manage_expenses', 'manage_payments', 'edit_invoices',
-    'view_reports', 'view_analytics', 'view_client_situation', 'manage_suppliers', 'view_suppliers'
+    'view_reports', 'view_analytics', 'view_client_situation', 'view_purchase_prices',
+    'manage_suppliers', 'view_suppliers'
   ],
   cashier: ['manage_payments', 'use_scanner', 'sell', 'manage_inventory'],
+  commercial: [
+    'sell',
+    'use_scanner',
+    'view_doctors',
+    'view_doctors_map',
+    'view_catalog',
+    'view_client_situation',
+    'manage_payments'
+  ],
   doctor: ['sell', 'use_scanner']
 };
 
@@ -64,7 +79,8 @@ export function getRoleLabel(role: UserRole, lang: 'fr' | 'ar'): string {
     manager: { fr: 'Manager', ar: 'مدير فرع' },
     cashier: { fr: 'Caissier', ar: 'كاشير' },
     accountant: { fr: 'Comptable', ar: 'محاسب' },
+    commercial: { fr: 'Commercial (Représentant)', ar: 'مندوب مبيعات' },
     doctor: { fr: 'Praticien', ar: 'طبيب' }
   };
-  return labels[role][lang];
+  return labels[role]?.[lang] || role;
 }

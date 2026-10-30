@@ -56,7 +56,7 @@ export async function syncStaffDirectory(usersList: UserProfile[]): Promise<void
       .filter(
         (u) =>
           !u.isDeleted &&
-          ['admin', 'manager', 'cashier', 'accountant'].includes(u.role) &&
+          ['admin', 'manager', 'cashier', 'accountant', 'commercial'].includes(u.role) &&
           u.status !== 'rejected'
       )
       .map((u) => ({
@@ -243,5 +243,5 @@ export function clearStaffSession(): void {
  */
 export function isStaffUser(user: UserProfile | null): boolean {
   if (!user) return false;
-  return ['admin', 'manager', 'cashier', 'accountant'].includes(user.role);
+  return ['admin', 'manager', 'cashier', 'accountant', 'commercial'].includes(user.role);
 }

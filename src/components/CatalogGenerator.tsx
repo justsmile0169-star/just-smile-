@@ -13,6 +13,7 @@ interface CatalogGeneratorProps {
   products: Product[];
   lang: Language;
   shopInfo?: ShopInfo;
+  hidePurchasePrices?: boolean;
 }
 
 export interface CatalogColumnsConfig {
@@ -44,7 +45,7 @@ type StockFilterOption = 'all' | 'in_stock' | 'low_stock' | 'out_of_stock';
 
 type PresetType = 'client_catalog' | 'admin_inventory' | 'price_list' | 'custom';
 
-export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGeneratorProps) {
+export default function CatalogGenerator({ products, lang, shopInfo, hidePurchasePrices = false }: CatalogGeneratorProps) {
   const isRtl = lang === 'ar';
 
   // Active valid products
@@ -1221,26 +1222,37 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
     URL.revokeObjectURL(url);
   };
 
-  const columnOptionDefs: {
-    key: keyof CatalogColumnsConfig;
-    labelAr: string;
-    labelFr: string;
-    badge?: string;
-  }[] = [
-    { key: 'showIndex', labelAr: 'الرقم التسلسلي (#)', labelFr: 'Numéro (#)' },
-    { key: 'showImage', labelAr: 'صورة المنتج المصغرة', labelFr: 'Miniature Image' },
-    { key: 'showBarcode', labelAr: 'الباركود / المرجع', labelFr: 'Code-barres / Réf' },
-    { key: 'showVariants', labelAr: 'الخيارات والمقاسات', labelFr: 'Variantes & Tailles' },
-    { key: 'showDescription', labelAr: 'الوصف المختصر للمنتج', labelFr: 'Description courte' },
-    { key: 'showSellingPrice', labelAr: 'سعر البيع', labelFr: 'Prix de Vente', badge: 'أساسي' },
-    { key: 'showPurchasePrice', labelAr: 'سعر الشراء (التكلفة)', labelFr: 'Prix d\'Achat', badge: 'إداري' },
-    { key: 'showProfitMargin', labelAr: 'ربح الوحدة وهامش الربح %', labelFr: 'Marge bénéficiaire', badge: 'إداري' },
-    { key: 'showStockQty', labelAr: 'الكمية المتبقية بالعدد', labelFr: 'Quantité restante exacte' },
-    { key: 'showStockStatus', labelAr: 'حالة التوفر (متوفر / نفذت)', labelFr: 'Statut de disponibilité' },
-    { key: 'showTotalPurchaseValue', labelAr: 'إجمالي قيمة الشراء للمخزون', labelFr: 'Valeur totale d\'achat', badge: 'إداري' },
-    { key: 'showTotalSellingValue', labelAr: 'إجمالي قيمة البيع للمخزون', labelFr: 'Valeur totale de vente', badge: 'إداري' },
-    { key: 'showExpiryDate', labelAr: 'تاريخ انتهاء الصلاحية', labelFr: 'Date d\'expiration' }
-  ];
+  const columnOptionDefs = useMemo(() => {
+    const allDefs: {
+      key: keyof CatalogColumnsConfig;
+      labelAr: string;
+      labelFr: string;
+      badge?: string;
+    }[] = [
+      { key: 'showIndex', labelAr: 'الرقم التسلسلي (#)', labelFr: 'Numéro (#)' },
+      { key: 'showImage', labelAr: 'صورة المنتج المصغرة', labelFr: 'Miniature Image' },
+      { key: 'showBarcode', labelAr: 'الباركود / المرجع', labelFr: 'Code-barres / Réf' },
+      { key: 'showVariants', labelAr: 'الخيارات والمقاسات', labelFr: 'Variantes & Tailles' },
+      { key: 'showDescription', labelAr: 'الوصف المختصر للمنتج', labelFr: 'Description courte' },
+      { key: 'showSellingPrice', labelAr: 'سعر البيع', labelFr: 'Prix de Vente', badge: 'أساسي' },
+      { key: 'showPurchasePrice', labelAr: 'سعر الشراء (التكلفة)', labelFr: 'Prix d\'Achat', badge: 'إداري' },
+      { key: 'showProfitMargin', labelAr: 'ربح الوحدة وهامش الربح %', labelFr: 'Marge bénéficiaire', badge: 'إداري' },
+      { key: 'showStockQty', labelAr: 'الكمية المتبقية بالعدد', labelFr: 'Quantité restante exacte' },
+      { key: 'showStockStatus', labelAr: 'حالة التوفر (متوفر / نفذت)', labelFr: 'Statut de disponibilité' },
+      { key: 'showTotalPurchaseValue', labelAr: 'إجمالي قيمة الشراء للمخزون', labelFr: 'Valeur totale d\'achat', badge: 'إداري' },
+      { key: 'showTotalSellingValue', labelAr: 'إجمالي قيمة البيع للمخزون', labelFr: 'Valeur totale de vente', badge: 'إداري' },
+      { key: 'showExpiryDate', labelAr: 'تاريخ انتهاء الصلاحية', labelFr: 'Date d\'expiration' }
+    ];
+    if (hidePurchasePrices) {
+      return allDefs.filter(
+        (d) =>
+          d.key !== 'showPurchasePrice' &&
+          d.key !== 'showProfitMargin' &&
+          d.key !== 'showTotalPurchaseValue'
+      );
+    }
+    return allDefs;
+  }, [hidePurchasePrices]);
 
   return (
     <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -1308,7 +1320,7 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className={`grid grid-cols-1 ${hidePurchasePrices ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-3`}>
           <button
             type="button"
             onClick={() => applyPreset('client_catalog')}
@@ -1331,27 +1343,29 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
             </p>
           </button>
 
-          <button
-            type="button"
-            onClick={() => applyPreset('admin_inventory')}
-            className={`p-3.5 rounded-xl border text-right rtl:text-right ltr:text-left transition-all cursor-pointer ${
-              activePreset === 'admin_inventory'
-                ? 'bg-white border-brand-cyan ring-2 ring-brand-cyan/20 shadow-xs'
-                : 'bg-white/70 border-slate-200 hover:bg-white'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-black text-slate-900">
-                {isRtl ? '📊 جرد الإدارة الشامل (شراء + بيع + كميات + أرباح)' : '📊 Inventaire Admin (Achat + Vente + Stock + Marges)'}
-              </span>
-              {activePreset === 'admin_inventory' && <Check size={15} className="text-brand-cyan" />}
-            </div>
-            <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-              {isRtl
-                ? 'تقرير مالي وإداري متكامل يعرض الكمية المتبقية، سعر الشراء، سعر البيع، ربح الوحدة، وإجمالي رأس المال والأرباح.'
-                : 'Rapport complet incluant quantité restante, prix d\'achat, prix de vente, marge et valorisation totale.'}
-            </p>
-          </button>
+          {!hidePurchasePrices && (
+            <button
+              type="button"
+              onClick={() => applyPreset('admin_inventory')}
+              className={`p-3.5 rounded-xl border text-right rtl:text-right ltr:text-left transition-all cursor-pointer ${
+                activePreset === 'admin_inventory'
+                  ? 'bg-white border-brand-cyan ring-2 ring-brand-cyan/20 shadow-xs'
+                  : 'bg-white/70 border-slate-200 hover:bg-white'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-black text-slate-900">
+                  {isRtl ? '📊 جرد الإدارة الشامل (شراء + بيع + كميات + أرباح)' : '📊 Inventaire Admin (Achat + Vente + Stock + Marges)'}
+                </span>
+                {activePreset === 'admin_inventory' && <Check size={15} className="text-brand-cyan" />}
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                {isRtl
+                  ? 'تقرير مالي وإداري متكامل يعرض الكمية المتبقية، سعر الشراء، سعر البيع، ربح الوحدة، وإجمالي رأس المال والأرباح.'
+                  : 'Rapport complet incluant quantité restante, prix d\'achat, prix de vente, marge et valorisation totale.'}
+              </p>
+            </button>
+          )}
 
           <button
             type="button"
@@ -1532,7 +1546,7 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
       </div>
 
       {/* Live Financial & Stock Summary Bar for Selected Products */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className={`grid grid-cols-2 ${hidePurchasePrices ? 'md:grid-cols-3' : 'md:grid-cols-4'} gap-3`}>
         <div className="bg-cyan-50/70 border border-cyan-200 rounded-2xl p-3.5">
           <div className="flex items-center gap-1.5 text-cyan-700 text-[11px] font-black">
             <Package size={15} />
@@ -1557,18 +1571,20 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
           </p>
         </div>
 
-        <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-3.5">
-          <div className="flex items-center gap-1.5 text-amber-700 text-[11px] font-black">
-            <DollarSign size={15} />
-            <span>{isRtl ? 'إجمالي التكلفة (بسعر الشراء)' : 'Valeur Totale d\'Achat'}</span>
+        {!hidePurchasePrices && (
+          <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-3.5">
+            <div className="flex items-center gap-1.5 text-amber-700 text-[11px] font-black">
+              <DollarSign size={15} />
+              <span>{isRtl ? 'إجمالي التكلفة (بسعر الشراء)' : 'Valeur Totale d\'Achat'}</span>
+            </div>
+            <p className="text-lg font-black text-slate-900 mt-1">
+              {fmtNum(catalogStats.totalPurchaseValue)} {currency}
+            </p>
+            <p className="text-[10px] font-bold text-amber-700">
+              {isRtl ? 'قيمة المخزون المحدد بسعر الشراء' : 'Coût du stock sélectionné'}
+            </p>
           </div>
-          <p className="text-lg font-black text-slate-900 mt-1">
-            {fmtNum(catalogStats.totalPurchaseValue)} {currency}
-          </p>
-          <p className="text-[10px] font-bold text-amber-700">
-            {isRtl ? 'قيمة المخزون المحدد بسعر الشراء' : 'Coût du stock sélectionné'}
-          </p>
-        </div>
+        )}
 
         <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3.5">
           <div className="flex items-center gap-1.5 text-emerald-700 text-[11px] font-black">
@@ -1578,9 +1594,11 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
           <p className="text-lg font-black text-emerald-800 mt-1">
             {fmtNum(catalogStats.totalSellingValue)} {currency}
           </p>
-          <p className="text-[10px] font-bold text-emerald-600">
-            {isRtl ? 'الربح المتوقع:' : 'Marge prévue:'} +{fmtNum(catalogStats.expectedProfit)} {currency}
-          </p>
+          {!hidePurchasePrices && (
+            <p className="text-[10px] font-bold text-emerald-600">
+              {isRtl ? 'الربح المتوقع:' : 'Marge prévue:'} +{fmtNum(catalogStats.expectedProfit)} {currency}
+            </p>
+          )}
         </div>
       </div>
 
@@ -1666,7 +1684,9 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
                   <th className="py-2.5 px-3 text-right rtl:text-right ltr:text-left">{isRtl ? 'المنتج' : 'Produit'}</th>
                   <th className="py-2.5 px-3 text-right rtl:text-right ltr:text-left">{isRtl ? 'الفئة' : 'Catégorie'}</th>
                   <th className="py-2.5 px-3 text-center">{isRtl ? 'الكمية المتبقية' : 'Qté Restante'}</th>
-                  <th className="py-2.5 px-3 text-right rtl:text-right ltr:text-left">{isRtl ? 'سعر الشراء' : 'Prix d\'Achat'}</th>
+                  {!hidePurchasePrices && (
+                    <th className="py-2.5 px-3 text-right rtl:text-right ltr:text-left">{isRtl ? 'سعر الشراء' : 'Prix d\'Achat'}</th>
+                  )}
                   <th className="py-2.5 px-3 text-right rtl:text-right ltr:text-left">{isRtl ? 'سعر البيع' : 'Prix de Vente'}</th>
                 </tr>
               </thead>
@@ -1713,9 +1733,11 @@ export default function CatalogGenerator({ products, lang, shopInfo }: CatalogGe
                           {st > 0 ? `${fmtNum(st)} ${isRtl ? 'متوفر' : 'en stock'}` : isRtl ? 'نفذت (0)' : 'Rupture (0)'}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 font-bold text-slate-500">
-                        {buy > 0 ? `${fmtNum(buy)} ${currency}` : '-'}
-                      </td>
+                      {!hidePurchasePrices && (
+                        <td className="py-2.5 px-3 font-bold text-slate-500">
+                          {buy > 0 ? `${fmtNum(buy)} ${currency}` : '-'}
+                        </td>
+                      )}
                       <td className="py-2.5 px-3 font-black text-brand-cyan">
                         {fmtNum(effSell)} {currency}
                       </td>

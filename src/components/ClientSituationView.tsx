@@ -1181,15 +1181,17 @@ export default function ClientSituationView({
                             </td>
                             <td className="py-2 px-3 text-right">
                               <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditOrderPayment(order)}
-                                  className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-bold cursor-pointer"
-                                  title={lang === 'fr' ? 'Modifier le montant payé' : 'تعديل المبلغ المدفوع'}
-                                >
-                                  <Pencil size={14} />
-                                  <span className="hidden sm:inline">{lang === 'fr' ? 'Payé' : 'تعديل الدفع'}</span>
-                                </button>
+                                {currentUser?.role !== 'commercial' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditOrderPayment(order)}
+                                    className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-bold cursor-pointer"
+                                    title={lang === 'fr' ? 'Modifier le montant payé' : 'تعديل المبلغ المدفوع'}
+                                  >
+                                    <Pencil size={14} />
+                                    <span className="hidden sm:inline">{lang === 'fr' ? 'Payé' : 'تعديل الدفع'}</span>
+                                  </button>
+                                )}
                                 {onPrintInvoice && (
                                   <button
                                     type="button"
@@ -1311,24 +1313,26 @@ export default function ClientSituationView({
                             <td className="py-2 px-3 font-bold text-emerald-600">{formatPrice(payment.amount)}</td>
                             <td className="py-2 px-3 text-xs text-slate-500">{payment.notes || '-'}</td>
                             <td className="py-2 px-3 text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditPayment(payment)}
-                                  className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
-                                  title={lang === 'fr' ? 'Modifier ce paiement' : 'تعديل هذه الدفعة'}
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDeletingPayment(payment)}
-                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                  title={lang === 'fr' ? 'Supprimer ce paiement' : 'حذف هذه الدفعة'}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
+                              {currentUser?.role !== 'commercial' && (
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditPayment(payment)}
+                                    className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                                    title={lang === 'fr' ? 'Modifier ce paiement' : 'تعديل هذه الدفعة'}
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeletingPayment(payment)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    title={lang === 'fr' ? 'Supprimer ce paiement' : 'حذف هذه الدفعة'}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         ))

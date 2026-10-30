@@ -28,7 +28,7 @@ service cloud.firestore {
 
     // Check if user is staff
     function isStaff() {
-      return isAuthenticated() && userExists() && userRole() in ['admin', 'manager', 'cashier', 'accountant'];
+      return isAuthenticated() && userExists() && userRole() in ['admin', 'manager', 'cashier', 'accountant', 'commercial'];
     }
 
     function isManagerOrAdmin() {
@@ -48,9 +48,9 @@ service cloud.firestore {
                       request.resource.data.role == 'doctor' &&
                       request.resource.data.status in ['pending', 'active'];
 
-      // Only Admin can create staff accounts (admin, manager, cashier, accountant)
+      // Only Admin can create staff accounts (admin, manager, cashier, accountant, commercial)
       allow create: if isAdmin() &&
-                      request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant'];
+                      request.resource.data.role in ['admin', 'manager', 'cashier', 'accountant', 'commercial'];
 
       // Allow update:
       // 1. Admin can update any profile (including role, credit status, grace days, etc.)
@@ -88,7 +88,7 @@ service cloud.firestore {
       allow list: if isStaff() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow create: if true;
       // Staff can update orders. Doctors can only cancel their own pending order (cannot modify financial totals)
-      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || (
+      allow update: if isAdmin() || userRole() == 'accountant' || userRole() == 'cashier' || userRole() == 'manager' || userRole() == 'commercial' || (
         isAuthenticated() && resource.data.userId == request.auth.uid &&
         resource.data.status == 'pending' &&
         request.resource.data.status == 'cancelled' &&

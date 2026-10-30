@@ -325,7 +325,8 @@ export default function App() {
                 profile.role === 'admin' ||
                 profile.role === 'manager' ||
                 profile.role === 'cashier' ||
-                profile.role === 'accountant';
+                profile.role === 'accountant' ||
+                profile.role === 'commercial';
               if (!prev) {
                 setActiveTab(isStaffRole ? 'admin' : 'browse');
               } else if (isStaffRole && prev.role === 'doctor') {

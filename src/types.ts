@@ -2,7 +2,7 @@
  * JUST SMILE B2B Dental E-commerce Types
  */
 
-export type UserRole = 'admin' | 'manager' | 'cashier' | 'accountant' | 'doctor';
+export type UserRole = 'admin' | 'manager' | 'cashier' | 'accountant' | 'commercial' | 'doctor';
 export type UserStatus = 'pending' | 'approved' | 'active' | 'rejected';
 
 export interface UserProfile {
