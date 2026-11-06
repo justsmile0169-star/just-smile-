@@ -361,3 +361,29 @@ export interface ProfileUpdateRequest {
   reviewedByName?: string;
 }
 
+
+export interface VisitorViewedProduct {
+  productId: string;
+  productName: string;
+  category?: string;
+  viewedAt: string;
+}
+
+export interface VisitorSession {
+  id: string;
+  dateKey: string; // 'YYYY-MM-DD'
+  visitorId: string;
+  isDoctor: boolean;
+  doctorId?: string;
+  doctorName?: string;
+  doctorClinic?: string;
+  doctorPhone?: string;
+  wilayaName?: string;
+  firstVisitAt: string;
+  lastActiveAt: string;
+  hourOfDay: number; // 0 - 23
+  pageViews: number;
+  viewedProducts: VisitorViewedProduct[];
+  cartItemsCount?: number;
+  deviceType: 'mobile' | 'desktop';
+}

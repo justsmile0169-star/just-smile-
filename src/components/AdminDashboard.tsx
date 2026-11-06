@@ -14,6 +14,7 @@ import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../
 import { compressImage } from '../utils/localProductStorage';
 import { uploadImageToCloud, migrateAllProductsToCloud, MigrationProgress } from '../utils/cloudImageStorage';
 import { sendOrderNotifications } from '../utils/orderNotificationService';
+import { filterAndRankProducts, isProductInStock } from '../utils/productSearch';
 import {
   DollarSign, Package, Tag, AlertTriangle, Calendar,
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
@@ -36,6 +37,7 @@ const AnnouncementsSection = lazy(() => import('./AnnouncementsSection'));
 const CatalogGenerator = lazy(() => import('./CatalogGenerator'));
 const DoctorMap = lazy(() => import('./DoctorMap'));
 const SupplierManager = lazy(() => import('./admin/SupplierManager'));
+const VisitorAnalyticsView = lazy(() => import('./admin/VisitorAnalyticsView'));
 const NotificationSettingsManager = lazy(() => import('./admin/NotificationSettingsManager').then(m => ({ default: m.NotificationSettingsManager })));
 
 interface AdminDashboardProps {
@@ -64,7 +66,7 @@ interface AdminDashboardProps {
 }
 
 type AdminSubTab =
-  | 'orders' | 'analytics' | 'doctors' | 'clientSituation' | 'debts' | 'inventory' | 'suppliers'
+  | 'orders' | 'analytics' | 'visitors' | 'doctors' | 'clientSituation' | 'debts' | 'inventory' | 'suppliers'
   | 'promotions' | 'catalog' | 'doctorsMap' | 'expenses' | 'discounts' | 'staff' | 'activityLogs' | 'backup' | 'settings' | 'messages' | 'announcements';
 
 export default function AdminDashboard({
@@ -380,16 +382,8 @@ export default function AdminDashboard({
 
   const matchedOrderProducts = useMemo(() => {
     if (!orderProductSearch.trim() || !productsList || productsList.length === 0) return [];
-    const q = orderProductSearch.trim().toLowerCase();
-    return productsList
-      .filter((p) => !p.isDeleted)
-      .filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q))
-      )
-      .slice(0, 10);
+    const activeProducts = productsList.filter((p) => !p.isDeleted);
+    return filterAndRankProducts(activeProducts, orderProductSearch, 'all').slice(0, 15);
   }, [orderProductSearch, productsList]);
 
   const handleAddProductToOrderEdit = (product: Product, variant?: ProductVariant) => {
@@ -461,22 +455,37 @@ export default function AdminDashboard({
   const [newOrderProductSearch, setNewOrderProductSearch] = useState('');
   const [showNewOrderProductDropdown, setShowNewOrderProductDropdown] = useState(false);
   const [newOrderSelectedProduct, setNewOrderSelectedProduct] = useState<Product | null>(null);
+  const [newOrderCategoryFilter, setNewOrderCategoryFilter] = useState<string>('all');
+  const [newOrderStockFilter, setNewOrderStockFilter] = useState<'all' | 'in_stock' | 'discounted'>('all');
+  const [newOrderViewMode, setNewOrderViewMode] = useState<'list' | 'grid'>('list');
+  const [newOrderPreviewImage, setNewOrderPreviewImage] = useState<{ url: string; title: string } | null>(null);
+  const [recentlyAddedToNewOrderProductId, setRecentlyAddedToNewOrderProductId] = useState<string | null>(null);
+
+  const newOrderCategories = useMemo(() => {
+    const cats = new Set<string>();
+    (productsList || []).forEach((p) => {
+      if (!p.isDeleted && p.category && p.category.trim()) {
+        cats.add(p.category.trim());
+      }
+    });
+    return Array.from(cats).sort();
+  }, [productsList]);
 
   const matchedNewOrderProducts = useMemo(() => {
-    if (!newOrderProductSearch.trim() || !productsList || productsList.length === 0) return [];
-    const q = newOrderProductSearch.trim().toLowerCase();
-    return productsList
-      .filter((p) => !p.isDeleted)
-      .filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q))
-      )
-      .slice(0, 10);
-  }, [newOrderProductSearch, productsList]);
+    if (!productsList || productsList.length === 0) return [];
+    const activeProducts = productsList.filter((p) => !p.isDeleted);
+    let results = filterAndRankProducts(activeProducts, newOrderProductSearch, newOrderCategoryFilter);
 
-  const handleAddProductToNewOrder = (product: Product, variant?: ProductVariant) => {
+    if (newOrderStockFilter === 'in_stock') {
+      results = results.filter((p) => isProductInStock(p));
+    } else if (newOrderStockFilter === 'discounted') {
+      results = results.filter((p) => (p.discountPercent || 0) > 0);
+    }
+
+    return results.slice(0, 36);
+  }, [newOrderProductSearch, newOrderCategoryFilter, newOrderStockFilter, productsList]);
+
+  const handleAddProductToNewOrder = (product: Product, variant?: ProductVariant, qtyToAdd: number = 1) => {
     const finalPrice = variant?.price ?? (
       product.discountPercent
         ? Math.round(product.price * (1 - product.discountPercent / 100))
@@ -493,16 +502,16 @@ export default function AdminDashboard({
         const updated = [...prev];
         updated[existingIndex] = {
           ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + 1
+          quantity: Math.max(1, updated[existingIndex].quantity + qtyToAdd)
         };
         return updated;
       });
-    } else {
+    } else if (qtyToAdd > 0) {
       const newItem: Order['items'][0] = {
         productId: product.id,
         name: product.name,
         price: finalPrice,
-        quantity: 1,
+        quantity: qtyToAdd,
         category: product.category,
         discountPercent: product.discountPercent || 0,
         ...(variant ? {
@@ -517,9 +526,34 @@ export default function AdminDashboard({
       setNewOrderItems((prev) => [...prev, newItem]);
     }
 
+    const trackId = variant ? `${product.id}_${variant.id}` : product.id;
+    setRecentlyAddedToNewOrderProductId(trackId);
+    setTimeout(() => setRecentlyAddedToNewOrderProductId(null), 1200);
     setNewOrderProductSearch('');
     setShowNewOrderProductDropdown(false);
     setNewOrderSelectedProduct(null);
+    setNewOrderCategoryFilter('all');
+    setNewOrderStockFilter('all');
+  };
+
+  const handleDecrementNewOrderProduct = (product: Product, variant?: ProductVariant) => {
+    const existingIndex = newOrderItems.findIndex(
+      (it) => it.productId === product.id && (variant ? it.variantId === variant.id : !it.variantId)
+    );
+    if (existingIndex < 0) return;
+
+    setNewOrderItems((prev) => {
+      const updated = [...prev];
+      const currentQty = updated[existingIndex].quantity;
+      if (currentQty <= 1) {
+        return updated.filter((_, idx) => idx !== existingIndex);
+      }
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        quantity: currentQty - 1
+      };
+      return updated;
+    });
   };
 
   const matchedNewOrderDoctors = useMemo(() => {
@@ -1758,6 +1792,20 @@ export default function AdminDashboard({
             <BarChart3 size={16} />{lang === 'fr' ? 'Analytics' : 'التحليلات'}
           </button>
         )}
+        {(hasPermission(currentUser, 'view_analytics') || hasPermission(currentUser, 'view_doctors')) && (
+          <button
+            onClick={() => setActiveSubTab('visitors')}
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+              activeSubTab === 'visitors'
+                ? 'bg-brand-cyan text-white shadow-xs'
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Eye size={16} />
+            {lang === 'fr' ? 'Visiteurs & Radar' : 'الزوار والرادار'}
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          </button>
+        )}
         {hasPermission(currentUser, 'view_doctors') && (
           <button
             onClick={() => setActiveSubTab('doctors')}
@@ -2631,6 +2679,19 @@ export default function AdminDashboard({
               expensesList={expensesList}
               productsList={productsList}
               onViewDebts={() => setActiveSubTab('clientSituation')}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {activeSubTab === 'visitors' && (hasPermission(currentUser, 'view_analytics') || hasPermission(currentUser, 'view_doctors')) && (
+        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-xs">
+          <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={32} /></div>}>
+            <VisitorAnalyticsView
+              lang={lang}
+              ordersList={ordersList}
+              productsList={productsList}
+              usersList={usersList}
             />
           </Suspense>
         </div>
@@ -4359,7 +4420,7 @@ export default function AdminDashboard({
 
                   {/* Dropdown Results */}
                   {showOrderProductDropdown && orderProductSearch.trim().length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200 shadow-xl max-h-60 overflow-y-auto z-50 divide-y divide-slate-100">
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200 shadow-xl max-h-72 overflow-y-auto z-50 divide-y divide-slate-100">
                       {matchedOrderProducts.length === 0 ? (
                         <div className="p-3 text-center text-xs text-slate-400 font-bold">
                           {lang === 'fr' ? 'Aucun produit trouvé' : 'لم يتم العثور على أي منتج'}
@@ -4369,34 +4430,78 @@ export default function AdminDashboard({
                           const hasDiscount = (p.discountPercent || 0) > 0;
                           const effectivePrice = hasDiscount ? Math.round(p.price * (1 - p.discountPercent! / 100)) : p.price;
                           const isJustAdded = recentlyAddedToOrderProductId === p.id;
+                          const inInvoiceCount = editingOrderItems
+                            .filter((it) => it.productId === p.id)
+                            .reduce((sum, it) => sum + it.quantity, 0);
 
                           return (
-                            <div key={p.id} className="p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2 transition-colors">
+                            <div
+                              key={p.id}
+                              onClick={() => {
+                                if (p.isVariable && p.variants && p.variants.length > 0) {
+                                  setOrderSelectedProduct(p);
+                                  setOrderProductSearch('');
+                                  setShowOrderProductDropdown(false);
+                                } else {
+                                  handleAddProductToOrderEdit(p);
+                                }
+                              }}
+                              className="p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2.5 transition-colors cursor-pointer"
+                            >
+                              <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                                {p.image ? (
+                                  <img
+                                    src={p.image}
+                                    alt={p.name}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <Package size={16} className="text-slate-400" />
+                                )}
+                              </div>
+
                               <div className="min-w-0 flex-1">
-                                <p className="font-bold text-xs text-slate-800 truncate">{p.name}</p>
-                                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="font-bold text-xs text-slate-800 truncate">{p.name}</p>
+                                  {inInvoiceCount > 0 && (
+                                    <span className="bg-emerald-100 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0">
+                                      {lang === 'fr' ? `Dans facture: ${inInvoiceCount}` : `في الفاتورة: ${inInvoiceCount}`}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5 text-[10px] text-slate-500">
                                   <span className="bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-bold">{p.category}</span>
                                   {p.barcode && <span className="font-mono text-slate-400">#{p.barcode}</span>}
                                   <span className="font-black text-brand-dark">{formatPrice(effectivePrice)}</span>
-                                  <span className="text-slate-400">({p.stock} en stock)</span>
+                                  <span className={`${p.stock > 0 ? 'text-emerald-600' : 'text-rose-500'} font-bold`}>
+                                    ({p.stock > 0 ? `${p.stock} ${lang === 'fr' ? 'en stock' : 'متوفر'}` : (lang === 'fr' ? 'Rupture' : 'نفذ')})
+                                  </span>
                                 </div>
                               </div>
 
-                              <div>
+                              <div className="shrink-0">
                                 {p.isVariable && p.variants && p.variants.length > 0 ? (
                                   <button
                                     type="button"
-                                    onClick={() => setOrderSelectedProduct(orderSelectedProduct?.id === p.id ? null : p)}
-                                    className="px-2.5 py-1 bg-purple-100 text-purple-800 rounded-lg text-[10px] font-black hover:bg-purple-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOrderSelectedProduct(p);
+                                      setOrderProductSearch('');
+                                      setShowOrderProductDropdown(false);
+                                    }}
+                                    className="px-2.5 py-1.5 bg-purple-100 text-purple-800 rounded-lg text-[10px] font-black hover:bg-purple-200 transition-colors flex items-center gap-1 cursor-pointer"
                                   >
-                                    <Layers size={10} />
+                                    <Layers size={11} />
                                     <span>{lang === 'fr' ? 'Variantes' : 'الخيارات'} ({p.variants.length})</span>
                                   </button>
                                 ) : (
                                   <button
                                     type="button"
-                                    onClick={() => handleAddProductToOrderEdit(p)}
-                                    className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAddProductToOrderEdit(p);
+                                    }}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${
                                       isJustAdded ? 'bg-emerald-600 text-white' : 'bg-brand-cyan text-white hover:bg-brand-cyan/90'
                                     }`}
                                   >
@@ -4416,26 +4521,47 @@ export default function AdminDashboard({
                 {/* If variable product selected, show its variants to pick */}
                 {orderSelectedProduct && orderSelectedProduct.variants && (
                   <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 space-y-2">
-                    <p className="text-[11px] font-black text-purple-900">
-                      {lang === 'fr' ? `Choisir une variante pour ${orderSelectedProduct.name} :` : `اختر النوع / المقاس المطلوب لـ ${orderSelectedProduct.name}:`}
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-black text-purple-900">
+                        {lang === 'fr' ? `Choisir une variante pour ${orderSelectedProduct.name} :` : `اختر النوع / المقاس المطلوب لـ ${orderSelectedProduct.name}:`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setOrderSelectedProduct(null)}
+                        className="text-purple-500 hover:text-purple-700 p-0.5"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {orderSelectedProduct.variants.map((v) => (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => handleAddProductToOrderEdit(orderSelectedProduct, v)}
-                          className="p-2 bg-white rounded-lg border border-purple-200 hover:border-purple-400 text-left flex items-center justify-between text-xs font-bold transition-all cursor-pointer hover:shadow-xs"
-                        >
-                          <div>
-                            <span className="block text-slate-800">{v.name}</span>
-                            <span className="text-[10px] text-slate-500">{formatPrice(v.price)}</span>
-                          </div>
-                          <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black">
-                            + {lang === 'fr' ? 'Ajouter' : 'إضافة'}
-                          </span>
-                        </button>
-                      ))}
+                      {orderSelectedProduct.variants.map((v) => {
+                        const vImg = v.image || orderSelectedProduct.image;
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => handleAddProductToOrderEdit(orderSelectedProduct, v)}
+                            className="p-2 bg-white rounded-lg border border-purple-200 hover:border-purple-400 text-left flex items-center justify-between gap-2 text-xs font-bold transition-all cursor-pointer hover:shadow-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                                {vImg ? (
+                                  <img src={vImg} alt={v.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Layers size={12} className="text-purple-400" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <span className="block text-slate-800 truncate">{v.name}</span>
+                                <span className="text-[10px] text-slate-500">{formatPrice(v.price)} • ({v.stock})</span>
+                              </div>
+                            </div>
+                            <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black shrink-0">
+                              + {lang === 'fr' ? 'Ajouter' : 'إضافة'}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -4587,7 +4713,7 @@ export default function AdminDashboard({
       {/* New Order / Invoice Modal Overlay */}
       {showCreateOrderModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-8 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-6 animate-fade-in">
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
               <div className="flex items-center gap-2">
@@ -4605,7 +4731,7 @@ export default function AdminDashboard({
               </button>
             </div>
 
-            <div className="p-6 space-y-5 text-xs max-h-[75vh] overflow-y-auto">
+            <div className="p-6 space-y-5 text-xs max-h-[80vh] overflow-y-auto">
               {/* Doctor / Client Selection */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between">
@@ -4750,193 +4876,825 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              {/* Direct Product Search & Add Section */}
+              {/* Advanced Visual Product Search & POS Picker Section */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5">
-                    <Search size={14} className="text-brand-cyan" />
-                    <span>{lang === 'fr' ? 'Rechercher et ajouter des produits à la facture' : 'البحث وإضافة المنتجات إلى الفاتورة'}</span>
+                    <Search size={15} className="text-brand-cyan" />
+                    <span>
+                      {lang === 'fr'
+                        ? 'Moteur de Recherche Visuel & Catalogue Produits'
+                        : 'محرك البحث الذكي والكتالوج المصور للمنتجات'}
+                    </span>
                   </label>
-                  <span className="text-[10px] text-slate-400 font-bold">
-                    {lang === 'fr' ? `${productsList.length} produits au catalogue` : `${productsList.length} منتج متاح`}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-white border border-slate-200 px-2.5 py-1 rounded-full text-slate-500 font-bold">
+                      {lang === 'fr'
+                        ? `${matchedNewOrderProducts.length} / ${productsList.filter((p) => !p.isDeleted).length} produits`
+                        : `عرض ${matchedNewOrderProducts.length} من أصل ${productsList.filter((p) => !p.isDeleted).length} منتج`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewOrderProductDropdown((prev) => !prev)}
+                      className={`px-3 py-1 rounded-xl text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                        showNewOrderProductDropdown
+                          ? 'bg-slate-800 text-white'
+                          : 'bg-brand-cyan/10 text-brand-cyan hover:bg-brand-cyan/20'
+                      }`}
+                    >
+                      <ShoppingBag size={12} />
+                      <span>
+                        {showNewOrderProductDropdown
+                          ? (lang === 'fr' ? 'Masquer le catalogue' : 'إخفاء المتصفح المصور')
+                          : (lang === 'fr' ? 'Parcourir le catalogue' : 'تصفح الكتالوج المصور')}
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={newOrderProductSearch}
-                    onFocus={() => setShowNewOrderProductDropdown(true)}
-                    onChange={(e) => {
-                      setNewOrderProductSearch(e.target.value);
-                      setShowNewOrderProductDropdown(true);
-                    }}
-                    placeholder={
-                      lang === 'fr'
-                        ? 'Rechercher un produit par nom, catégorie ou code-barres...'
-                        : 'ابحث عن المنتج بالاسم، الفئة أو الباركود لإضافته...'
-                    }
-                    className="w-full bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan"
-                  />
-                  {newOrderProductSearch && (
+                {/* Search Input + Quick Controls */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search size={15} className="absolute top-2.5 right-3 text-slate-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={newOrderProductSearch}
+                      onFocus={() => {
+                        setNewOrderSelectedProduct(null);
+                        setShowNewOrderProductDropdown(true);
+                      }}
+                      onChange={(e) => {
+                        setNewOrderProductSearch(e.target.value);
+                        setNewOrderSelectedProduct(null);
+                        setShowNewOrderProductDropdown(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const q = newOrderProductSearch.trim().toLowerCase();
+                          if (!q) return;
+                          // Exact barcode match first
+                          const exactBarcode = productsList.find(
+                            (p) => !p.isDeleted && p.barcode && p.barcode.trim().toLowerCase() === q
+                          );
+                          const targetProd = exactBarcode || (matchedNewOrderProducts.length === 1 ? matchedNewOrderProducts[0] : null);
+                          if (targetProd) {
+                            if (targetProd.isVariable && targetProd.variants && targetProd.variants.length > 0) {
+                              setNewOrderSelectedProduct(targetProd);
+                              setNewOrderProductSearch('');
+                              setShowNewOrderProductDropdown(false);
+                            } else {
+                              handleAddProductToNewOrder(targetProd, undefined, 1);
+                            }
+                          }
+                        }
+                      }}
+                      placeholder={
+                        lang === 'fr'
+                          ? 'Rechercher par nom, catégorie, code-barres, variante (Entrée = ajout rapide)...'
+                          : 'ابحث بالاسم، الفئة، الباركود، أو المقاس (اضغط Enter للإضافة السريعة بالباركود)...'
+                      }
+                      className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pr-9 pl-8 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan shadow-2xs"
+                    />
+                    {newOrderProductSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setNewOrderProductSearch('')}
+                        className="absolute top-2.5 left-2.5 p-0.5 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                        title={lang === 'fr' ? 'Effacer' : 'مسح البحث'}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Stock Filter & View Mode Toggles */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex bg-white border border-slate-200 rounded-xl p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewOrderStockFilter('all');
+                          setShowNewOrderProductDropdown(true);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                          newOrderStockFilter === 'all'
+                            ? 'bg-slate-800 text-white'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'Tous' : 'الكل'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewOrderStockFilter('in_stock');
+                          setShowNewOrderProductDropdown(true);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                          newOrderStockFilter === 'in_stock'
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-slate-500 hover:text-emerald-700'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'En stock' : 'المتوفر فقط'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewOrderStockFilter('discounted');
+                          setShowNewOrderProductDropdown(true);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                          newOrderStockFilter === 'discounted'
+                            ? 'bg-rose-600 text-white'
+                            : 'text-slate-500 hover:text-rose-600'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'Promos' : 'العروض %'}
+                      </button>
+                    </div>
+
+                    <div className="flex bg-white border border-slate-200 rounded-xl p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewOrderViewMode('list');
+                          setShowNewOrderProductDropdown(true);
+                        }}
+                        title={lang === 'fr' ? 'Vue Liste détaillée' : 'عرض قائمة مفصلة'}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                          newOrderViewMode === 'list'
+                            ? 'bg-brand-cyan text-white'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'Liste' : 'قائمة'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewOrderViewMode('grid');
+                          setShowNewOrderProductDropdown(true);
+                        }}
+                        title={lang === 'fr' ? 'Vue Grille avec grandes images' : 'عرض شبكة مصورة كبيرة'}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                          newOrderViewMode === 'grid'
+                            ? 'bg-brand-cyan text-white'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'Grille' : 'شبكة مصورة'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category Filter Pills */}
+                {newOrderCategories.length > 0 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
                     <button
                       type="button"
                       onClick={() => {
-                        setNewOrderProductSearch('');
-                        setShowNewOrderProductDropdown(false);
+                        setNewOrderCategoryFilter('all');
+                        setShowNewOrderProductDropdown(true);
                       }}
-                      className="absolute top-2.5 right-2.5 p-0.5 text-slate-400 hover:text-slate-600 rounded"
+                      className={`px-3 py-1 rounded-full text-[10px] font-extrabold whitespace-nowrap transition-all cursor-pointer ${
+                        newOrderCategoryFilter === 'all'
+                          ? 'bg-brand-cyan text-white shadow-2xs'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:border-brand-cyan/50'
+                      }`}
                     >
-                      <X size={14} />
+                      {lang === 'fr' ? 'Toutes les catégories' : 'جميع الفئات'}
                     </button>
-                  )}
+                    {newOrderCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          setNewOrderCategoryFilter(cat);
+                          setShowNewOrderProductDropdown(true);
+                        }}
+                        className={`px-3 py-1 rounded-full text-[10px] font-extrabold whitespace-nowrap transition-all cursor-pointer ${
+                          newOrderCategoryFilter === cat
+                            ? 'bg-brand-cyan text-white shadow-2xs'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:border-brand-cyan/50'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-                  {/* Dropdown Results */}
-                  {showNewOrderProductDropdown && newOrderProductSearch.trim().length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200 shadow-xl max-h-60 overflow-y-auto z-50 divide-y divide-slate-100">
-                      {matchedNewOrderProducts.length === 0 ? (
-                        <div className="p-3 text-center text-xs text-slate-400 font-bold">
-                          {lang === 'fr' ? 'Aucun produit trouvé' : 'لم يتم العثور على أي منتج'}
-                        </div>
-                      ) : (
-                        matchedNewOrderProducts.map((p) => {
+                {/* Visual Search & Catalog Results Panel */}
+                {!newOrderSelectedProduct && (showNewOrderProductDropdown || newOrderProductSearch.trim().length > 0) && (
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-lg overflow-hidden">
+                    <div className="px-3.5 py-2 bg-slate-100/80 border-b border-slate-200 flex items-center justify-between text-[10px] font-bold text-slate-500">
+                      <span>
+                        {newOrderProductSearch.trim()
+                          ? (lang === 'fr'
+                              ? `Résultats pour "${newOrderProductSearch}" (${matchedNewOrderProducts.length})`
+                              : `نتائج البحث عن "${newOrderProductSearch}" (${matchedNewOrderProducts.length})`)
+                          : (lang === 'fr'
+                              ? `Catalogue visuel (${matchedNewOrderProducts.length} produits)`
+                              : `الكتالوج المصور السريع (${matchedNewOrderProducts.length} منتج)`)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewOrderProductDropdown(false);
+                          setNewOrderSelectedProduct(null);
+                        }}
+                        className="text-slate-400 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>{lang === 'fr' ? 'Fermer' : 'إغلاق'}</span>
+                        <X size={12} />
+                      </button>
+                    </div>
+
+                    {matchedNewOrderProducts.length === 0 ? (
+                      <div className="p-8 text-center space-y-2">
+                        <Package size={28} className="mx-auto text-slate-300" />
+                        <p className="text-xs text-slate-500 font-extrabold">
+                          {lang === 'fr' ? 'Aucun produit correspondant trouvé' : 'لم يتم العثور على أي منتج مطابق للبحث'}
+                        </p>
+                        {(newOrderCategoryFilter !== 'all' || newOrderStockFilter !== 'all' || newOrderProductSearch) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewOrderProductSearch('');
+                              setNewOrderCategoryFilter('all');
+                              setNewOrderStockFilter('all');
+                            }}
+                            className="text-[11px] text-brand-cyan font-black hover:underline cursor-pointer"
+                          >
+                            {lang === 'fr' ? 'Réinitialiser les filtres' : 'إعادة تعيين جميع الفلاتر'}
+                          </button>
+                        )}
+                      </div>
+                    ) : newOrderViewMode === 'grid' ? (
+                      /* GRID VIEW (POS Visual Cards with Large Product Images) */
+                      <div className="p-3 max-h-96 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {matchedNewOrderProducts.map((p) => {
                           const hasDiscount = (p.discountPercent || 0) > 0;
                           const effectivePrice = hasDiscount ? Math.round(p.price * (1 - p.discountPercent! / 100)) : p.price;
+                          const inStock = isProductInStock(p);
+                          const inInvoiceQty = newOrderItems
+                            .filter((it) => it.productId === p.id)
+                            .reduce((sum, it) => sum + it.quantity, 0);
+                          const isJustAdded = recentlyAddedToNewOrderProductId === p.id;
+                          const isExpandedVariants = newOrderSelectedProduct?.id === p.id;
 
                           return (
-                            <div key={p.id} className="p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2 transition-colors">
-                              <div className="min-w-0 flex-1">
-                                <p className="font-bold text-xs text-slate-800 truncate">{p.name}</p>
-                                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
-                                  <span className="bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-bold">{p.category}</span>
-                                  {p.barcode && <span className="font-mono text-slate-400">#{p.barcode}</span>}
-                                  <span className="font-black text-brand-dark">{formatPrice(effectivePrice)}</span>
-                                  <span className="text-slate-400">({p.stock} en stock)</span>
+                            <div
+                              key={p.id}
+                              onClick={() => {
+                                if (p.isVariable && p.variants && p.variants.length > 0) {
+                                  setNewOrderSelectedProduct(p);
+                                  setNewOrderProductSearch('');
+                                  setShowNewOrderProductDropdown(false);
+                                } else {
+                                  handleAddProductToNewOrder(p, undefined, 1);
+                                }
+                              }}
+                              className={`group rounded-2xl border p-2.5 flex flex-col justify-between transition-all cursor-pointer ${
+                                inInvoiceQty > 0
+                                  ? 'border-emerald-400 bg-emerald-50/30 shadow-xs'
+                                  : isExpandedVariants
+                                    ? 'border-purple-400 bg-purple-50/20'
+                                    : 'border-slate-200 bg-white hover:border-brand-cyan/60 hover:shadow-sm'
+                              }`}
+                            >
+                              <div>
+                                {/* Product Thumbnail Image */}
+                                <div className="relative w-full h-28 rounded-xl bg-slate-100 border border-slate-100 overflow-hidden mb-2 flex items-center justify-center">
+                                  {p.image ? (
+                                    <>
+                                      <img
+                                        src={p.image}
+                                        alt={p.name}
+                                        loading="lazy"
+                                        className="w-full h-full object-contain bg-white group-hover:scale-105 transition-transform duration-200"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setNewOrderPreviewImage({ url: p.image, title: p.name });
+                                        }}
+                                        title={lang === 'fr' ? 'Agrandir l’image' : 'تكبير صورة المنتج'}
+                                        className="absolute bottom-1.5 left-1.5 p-1 rounded-lg bg-slate-900/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                      >
+                                        <Eye size={12} />
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <div className="flex flex-col items-center justify-center text-slate-300">
+                                      <ImageIcon size={24} />
+                                      <span className="text-[9px] font-bold mt-1">{lang === 'fr' ? 'Sans image' : 'بدون صورة'}</span>
+                                    </div>
+                                  )}
+
+                                  {/* Top Badges */}
+                                  <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 items-end">
+                                    {hasDiscount && (
+                                      <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-2xs">
+                                        -{p.discountPercent}%
+                                      </span>
+                                    )}
+                                    {inInvoiceQty > 0 && (
+                                      <span className="bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-2xs">
+                                        {lang === 'fr' ? `Facture: ${inInvoiceQty}` : `بالفاتورة: ${inInvoiceQty}`}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <span
+                                    className={`absolute bottom-1.5 right-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-md ${
+                                      inStock ? 'bg-emerald-100/95 text-emerald-800' : 'bg-rose-100/95 text-rose-800'
+                                    }`}
+                                  >
+                                    {inStock ? `${lang === 'fr' ? 'Stock:' : 'متوفر:'} ${p.stock}` : (lang === 'fr' ? 'Rupture' : 'نفذ المخزون')}
+                                  </span>
+                                </div>
+
+                                {/* Product Title & Category */}
+                                <p className="font-extrabold text-xs text-slate-800 line-clamp-2 leading-snug" title={p.name}>
+                                  {p.name}
+                                </p>
+                                <div className="flex items-center justify-between gap-1 mt-1">
+                                  <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold truncate">
+                                    {p.category}
+                                  </span>
+                                  {p.barcode && (
+                                    <span className="text-[9px] font-mono text-slate-400 truncate">#{p.barcode}</span>
+                                  )}
                                 </div>
                               </div>
 
-                              <div>
+                              {/* Price & Action Footer */}
+                              <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                                <div>
+                                  <span className="block font-black text-xs text-brand-dark">{formatPrice(effectivePrice)}</span>
+                                  {hasDiscount && (
+                                    <span className="block text-[9px] text-slate-400 line-through">{formatPrice(p.price)}</span>
+                                  )}
+                                </div>
+
                                 {p.isVariable && p.variants && p.variants.length > 0 ? (
                                   <button
                                     type="button"
-                                    onClick={() => setNewOrderSelectedProduct(newOrderSelectedProduct?.id === p.id ? null : p)}
-                                    className="px-2.5 py-1 bg-purple-100 text-purple-800 rounded-lg text-[10px] font-black hover:bg-purple-200 transition-colors flex items-center gap-1 cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNewOrderSelectedProduct(p);
+                                      setNewOrderProductSearch('');
+                                      setShowNewOrderProductDropdown(false);
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer bg-purple-100 text-purple-800 hover:bg-purple-200"
                                   >
-                                    <Layers size={10} />
-                                    <span>{lang === 'fr' ? 'Variantes' : 'الخيارات'} ({p.variants.length})</span>
+                                    <Layers size={11} />
+                                    <span>{p.variants.length} {lang === 'fr' ? 'options' : 'خيارات'}</span>
                                   </button>
                                 ) : (
                                   <button
                                     type="button"
-                                    onClick={() => handleAddProductToNewOrder(p)}
-                                    className="px-3 py-1 rounded-lg text-xs font-black bg-brand-cyan text-white hover:bg-brand-cyan/90 transition-all flex items-center gap-1 cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAddProductToNewOrder(p, undefined, 1);
+                                    }}
+                                    className={`px-3 py-1.5 rounded-xl text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                                      isJustAdded
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-brand-cyan text-white hover:bg-brand-cyan/90'
+                                    }`}
                                   >
                                     <Plus size={12} />
-                                    <span>{lang === 'fr' ? 'Ajouter' : 'إضافة'}</span>
+                                    <span>{lang === 'fr' ? 'Choisir' : 'اختيار'}</span>
                                   </button>
                                 )}
                               </div>
                             </div>
                           );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
+                        })}
+                      </div>
+                    ) : (
+                      /* DETAILED LIST VIEW WITH PRODUCT IMAGES */
+                      <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                        {matchedNewOrderProducts.map((p) => {
+                          const hasDiscount = (p.discountPercent || 0) > 0;
+                          const effectivePrice = hasDiscount ? Math.round(p.price * (1 - p.discountPercent! / 100)) : p.price;
+                          const inStock = isProductInStock(p);
+                          const inInvoiceQty = newOrderItems
+                            .filter((it) => it.productId === p.id)
+                            .reduce((sum, it) => sum + it.quantity, 0);
+                          const isJustAdded = recentlyAddedToNewOrderProductId === p.id;
 
-                {/* If variable product selected, show its variants to pick */}
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => {
+                                if (p.isVariable && p.variants && p.variants.length > 0) {
+                                  setNewOrderSelectedProduct(p);
+                                  setNewOrderProductSearch('');
+                                  setShowNewOrderProductDropdown(false);
+                                } else {
+                                  handleAddProductToNewOrder(p, undefined, 1);
+                                }
+                              }}
+                              className={`p-2.5 hover:bg-slate-50/90 flex items-center justify-between gap-3 transition-colors cursor-pointer ${
+                                inInvoiceQty > 0 ? 'bg-emerald-50/30' : ''
+                              }`}
+                            >
+                              {/* Product Image Thumbnail */}
+                              <div className="relative w-14 h-14 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center group">
+                                {p.image ? (
+                                  <>
+                                    <img
+                                      src={p.image}
+                                      alt={p.name}
+                                      loading="lazy"
+                                      className="w-full h-full object-contain bg-white group-hover:scale-105 transition-transform"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setNewOrderPreviewImage({ url: p.image, title: p.name });
+                                      }}
+                                      title={lang === 'fr' ? 'Zoomer l’image' : 'تكبير الصورة'}
+                                      className="absolute inset-0 bg-slate-900/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer"
+                                    >
+                                      <Eye size={14} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <Package size={20} className="text-slate-300" />
+                                )}
+                                {hasDiscount && (
+                                  <span className="absolute top-0.5 right-0.5 bg-rose-600 text-white text-[8px] font-black px-1 rounded">
+                                    -{p.discountPercent}%
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Product Info */}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="font-extrabold text-xs text-slate-800 truncate">{p.name}</p>
+                                  {inInvoiceQty > 0 && (
+                                    <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-0.5 rounded-full">
+                                      {lang === 'fr' ? `Dans facture: ${inInvoiceQty}` : `في الفاتورة: ${inInvoiceQty}`}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-slate-500">
+                                  <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold">{p.category}</span>
+                                  {p.barcode && (
+                                    <span className="font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                                      #{p.barcode}
+                                    </span>
+                                  )}
+                                  <span className="font-black text-brand-dark text-xs">{formatPrice(effectivePrice)}</span>
+                                  {hasDiscount && (
+                                    <span className="text-slate-400 line-through text-[10px]">{formatPrice(p.price)}</span>
+                                  )}
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
+                                      inStock ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'
+                                    }`}
+                                  >
+                                    {inStock
+                                      ? `${lang === 'fr' ? 'Disponible:' : 'المخزون:'} ${p.stock}`
+                                      : (lang === 'fr' ? 'Rupture de stock' : 'نفذت الكمية')}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Action Controls */}
+                              <div className="shrink-0 flex items-center gap-1.5">
+                                {p.isVariable && p.variants && p.variants.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNewOrderSelectedProduct(p);
+                                      setNewOrderProductSearch('');
+                                      setShowNewOrderProductDropdown(false);
+                                    }}
+                                    className="px-3 py-1.5 rounded-xl text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer bg-purple-100 text-purple-800 hover:bg-purple-200"
+                                  >
+                                    <Layers size={12} />
+                                    <span>
+                                      {lang === 'fr' ? 'Variantes' : 'الخيارات والمقاسات'} ({p.variants.length})
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAddProductToNewOrder(p, undefined, 1);
+                                    }}
+                                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1 cursor-pointer shadow-2xs ${
+                                      isJustAdded
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-brand-cyan text-white hover:bg-brand-cyan/90'
+                                    }`}
+                                  >
+                                    {isJustAdded ? <Check size={13} /> : <Plus size={13} />}
+                                    <span>
+                                      {isJustAdded
+                                        ? (lang === 'fr' ? 'Ajouté' : 'تمت الإضافة')
+                                        : (lang === 'fr' ? 'Choisir' : 'اختيار المنتج')}
+                                    </span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* If variable product selected, show its variants with images & steppers */}
                 {newOrderSelectedProduct && newOrderSelectedProduct.variants && (
-                  <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 space-y-2">
-                    <p className="text-[11px] font-black text-purple-900">
-                      {lang === 'fr' ? `Choisir une variante pour ${newOrderSelectedProduct.name} :` : `اختر النوع / المقاس المطلوب لـ ${newOrderSelectedProduct.name}:`}
-                    </p>
+                  <div className="p-3.5 bg-purple-50 rounded-2xl border border-purple-200 space-y-2.5 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {newOrderSelectedProduct.image && (
+                          <img
+                            src={newOrderSelectedProduct.image}
+                            alt={newOrderSelectedProduct.name}
+                            className="w-8 h-8 rounded-lg object-cover border border-purple-200 bg-white"
+                          />
+                        )}
+                        <p className="text-xs font-black text-purple-950">
+                          {lang === 'fr'
+                            ? `Choisir une variante pour "${newOrderSelectedProduct.name}" :`
+                            : `اختر النوع أو المقاس المطلوب للمنتج "${newOrderSelectedProduct.name}":`}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setNewOrderSelectedProduct(null)}
+                        className="p-1 text-purple-600 hover:bg-purple-100 rounded-lg cursor-pointer"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {newOrderSelectedProduct.variants.map((v) => (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => handleAddProductToNewOrder(newOrderSelectedProduct, v)}
-                          className="p-2 bg-white rounded-lg border border-purple-200 hover:border-purple-400 text-left flex items-center justify-between text-xs font-bold transition-all cursor-pointer hover:shadow-xs"
-                        >
-                          <div>
-                            <span className="block text-slate-800">{v.name}</span>
-                            <span className="text-[10px] text-slate-500">{formatPrice(v.price)}</span>
-                          </div>
-                          <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black">
-                            + {lang === 'fr' ? 'Ajouter' : 'إضافة'}
-                          </span>
-                        </button>
-                      ))}
+                      {newOrderSelectedProduct.variants.map((v) => {
+                        const vImage = v.image || newOrderSelectedProduct.image;
+                        const vInInvoiceQty = newOrderItems
+                          .filter((it) => it.productId === newOrderSelectedProduct.id && it.variantId === v.id)
+                          .reduce((sum, it) => sum + it.quantity, 0);
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => handleAddProductToNewOrder(newOrderSelectedProduct, v, 1)}
+                            className={`p-2 bg-white rounded-xl border text-right flex items-center justify-between gap-2 text-xs font-bold transition-all cursor-pointer hover:shadow-xs ${
+                              vInInvoiceQty > 0 ? 'border-emerald-400 bg-emerald-50/20' : 'border-purple-200 hover:border-purple-400'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                                {vImage ? (
+                                  <img
+                                    src={vImage}
+                                    alt={v.name}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNewOrderPreviewImage({ url: vImage, title: `${newOrderSelectedProduct.name} - ${v.name}` });
+                                    }}
+                                    className="w-full h-full object-cover cursor-zoom-in"
+                                  />
+                                ) : (
+                                  <Layers size={14} className="text-purple-400" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <span className="block text-slate-800 font-extrabold truncate">{v.name}</span>
+                                <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                  <span className="font-black text-purple-900">{formatPrice(v.price)}</span>
+                                  <span className={v.stock > 0 ? 'text-emerald-600' : 'text-rose-500'}>
+                                    ({lang === 'fr' ? 'Stock:' : 'المخزون:'} {v.stock})
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <span className="text-[10px] bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-1.5 rounded-lg font-black shrink-0 transition-colors">
+                              + {lang === 'fr' ? 'Choisir' : 'اختيار'}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
               </div>
 
               {/* Items in New Invoice */}
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="font-extrabold text-slate-700 text-xs uppercase block">
-                    {lang === 'fr' ? 'Articles de la facture' : 'منتجات الفاتورة'} ({newOrderItems.length})
+                  <label className="font-extrabold text-slate-700 text-xs uppercase flex items-center gap-2">
+                    <ShoppingCart size={14} className="text-brand-cyan" />
+                    <span>
+                      {lang === 'fr' ? 'Articles de la facture' : 'منتجات الفاتورة المختارة'} ({newOrderItems.length})
+                    </span>
+                    {newOrderItems.length > 0 && (
+                      <span className="bg-brand-cyan/10 text-brand-cyan px-2 py-0.5 rounded-full text-[10px] font-black">
+                        {lang === 'fr'
+                          ? `${newOrderItems.reduce((acc, it) => acc + it.quantity, 0)} unités au total`
+                          : `إجمالي القطع: ${newOrderItems.reduce((acc, it) => acc + it.quantity, 0)}`}
+                      </span>
+                    )}
                   </label>
+                  {newOrderItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setNewOrderItems([])}
+                      className="text-[10px] text-rose-500 hover:text-rose-700 font-extrabold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 size={12} />
+                      <span>{lang === 'fr' ? 'Vider la liste' : 'إفراغ القائمة'}</span>
+                    </button>
+                  )}
                 </div>
                 {newOrderItems.length === 0 ? (
                   <div className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-center text-slate-400 font-bold text-xs">
-                    {lang === 'fr' ? 'Aucun produit ajouté. Recherchez ci-dessus pour ajouter des articles.' : 'لم تتم إضافة أي منتج بعد. ابحث في الحقل أعلاه لإضافة المنتجات.'}
+                    {lang === 'fr'
+                      ? 'Aucun produit ajouté. Recherchez ou parcourez le catalogue visuel ci-dessus pour ajouter des articles.'
+                      : 'لم تتم إضافة أي منتج بعد. ابحث في المحرك أعلاه أو اضغط على "تصفح الكتالوج المصور" لاختيار المنتجات بالصور.'}
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {newOrderItems.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                        <div className="flex-1">
-                          <p className="font-bold text-slate-800">{item.name}</p>
-                          <p className="text-[10px] text-slate-400">{item.category} {item.variantName ? `• ${item.variantName}` : ''}</p>
-                        </div>
-                        <div className="w-24">
-                          <label className="text-[9px] font-bold text-slate-400 block">{lang === 'fr' ? 'Prix (DA)' : 'السعر (دج)'}</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={item.price}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setNewOrderItems((prev) => {
-                                const up = [...prev];
-                                up[idx] = { ...up[idx], price: Math.max(0, val) };
-                                return up;
-                              });
-                            }}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs"
-                          />
-                        </div>
-                        <div className="w-16">
-                          <label className="text-[9px] font-bold text-slate-400 block">{lang === 'fr' ? 'Qté' : 'الكمية'}</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setNewOrderItems((prev) => {
-                                const up = [...prev];
-                                up[idx] = { ...up[idx], quantity: Math.max(1, val) };
-                                return up;
-                              });
-                            }}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs text-center"
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setNewOrderItems((prev) => prev.filter((_, i) => i !== idx))}
-                          className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg mt-3"
+                    {newOrderItems.map((item, idx) => {
+                      const matchedProd = productsList.find((p) => p.id === item.productId);
+                      const matchedVar = matchedProd?.variants?.find((v) => v.id === item.variantId);
+                      const itemImage = matchedVar?.image || matchedProd?.image;
+
+                      return (
+                        <div
+                          key={idx}
+                          className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 hover:border-slate-300 transition-colors"
                         >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
+                          {/* Product Thumbnail in Invoice List */}
+                          <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                            {itemImage ? (
+                              <img
+                                src={itemImage}
+                                alt={item.name}
+                                onClick={() => setNewOrderPreviewImage({ url: itemImage, title: item.name })}
+                                className="w-full h-full object-contain cursor-zoom-in"
+                              />
+                            ) : (
+                              <Package size={18} className="text-slate-300" />
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-[140px]">
+                            <p className="font-extrabold text-slate-800 text-xs">{item.name}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-500">
+                              <span className="bg-white border border-slate-200 px-1.5 py-0.2 rounded font-bold">{item.category}</span>
+                              {item.variantName && (
+                                <span className="bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded font-extrabold">
+                                  {item.variantName}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Editable Unit Price */}
+                          <div className="w-28">
+                            <label className="text-[9px] font-bold text-slate-400 block mb-0.5">
+                              {lang === 'fr' ? 'Prix unitaire (DA)' : 'سعر الوحدة (دج)'}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.price}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setNewOrderItems((prev) => {
+                                  const up = [...prev];
+                                  up[idx] = { ...up[idx], price: Math.max(0, val) };
+                                  return up;
+                                });
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs"
+                            />
+                          </div>
+
+                          {/* Quantity Stepper */}
+                          <div className="w-28">
+                            <label className="text-[9px] font-bold text-slate-400 block mb-0.5 text-center">
+                              {lang === 'fr' ? 'Quantité' : 'الكمية'}
+                            </label>
+                            <div className="flex items-center bg-white border border-slate-200 rounded-lg overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewOrderItems((prev) => {
+                                    const up = [...prev];
+                                    if (up[idx].quantity <= 1) return prev.filter((_, i) => i !== idx);
+                                    up[idx] = { ...up[idx], quantity: up[idx].quantity - 1 };
+                                    return up;
+                                  });
+                                }}
+                                className="px-2 py-1 text-slate-600 hover:bg-slate-100 font-black text-xs cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setNewOrderItems((prev) => {
+                                    const up = [...prev];
+                                    up[idx] = { ...up[idx], quantity: Math.max(1, val) };
+                                    return up;
+                                  });
+                                }}
+                                className="w-full py-1 font-extrabold text-slate-800 text-xs text-center focus:outline-hidden"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewOrderItems((prev) => {
+                                    const up = [...prev];
+                                    up[idx] = { ...up[idx], quantity: up[idx].quantity + 1 };
+                                    return up;
+                                  });
+                                }}
+                                className="px-2 py-1 text-slate-600 hover:bg-slate-100 font-black text-xs cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Line Subtotal */}
+                          <div className="w-24 text-left sm:text-right">
+                            <span className="text-[9px] font-bold text-slate-400 block">
+                              {lang === 'fr' ? 'Total ligne' : 'المجموع الجزئي'}
+                            </span>
+                            <span className="font-black text-xs text-brand-dark">
+                              {formatPrice(item.price * item.quantity)}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setNewOrderItems((prev) => prev.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg mt-2 sm:mt-0 cursor-pointer"
+                            title={lang === 'fr' ? 'Supprimer' : 'حذف من الفاتورة'}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
+
+              {/* Quick Image Zoom Lightbox inside Create Order Modal */}
+              {newOrderPreviewImage && (
+                <div
+                  onClick={() => setNewOrderPreviewImage(null)}
+                  className="fixed inset-0 z-60 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+                >
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-white rounded-3xl max-w-md w-full p-4 shadow-2xl border border-slate-100 space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-extrabold text-slate-800 text-xs truncate">{newOrderPreviewImage.title}</h4>
+                      <button
+                        type="button"
+                        onClick={() => setNewOrderPreviewImage(null)}
+                        className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <div className="w-full h-72 bg-slate-50 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-100">
+                      <img
+                        src={newOrderPreviewImage.url}
+                        alt={newOrderPreviewImage.title}
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Delivery cost & Payment Method & Paid Amount */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">

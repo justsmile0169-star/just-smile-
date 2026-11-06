@@ -189,5 +189,12 @@ service cloud.firestore {
       allow update: if isStaff();
       allow delete: if isStaff() || (isAuthenticated() && resource.data.doctorId == request.auth.uid && resource.data.status == 'pending');
     }
+
+    // Visitor Sessions & Engagement Analytics
+    match /visitor_sessions/{sessionId} {
+      allow read: if isStaff();
+      allow create, update: if true;
+      allow delete: if isAdmin();
+    }
   }
 }

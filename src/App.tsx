@@ -13,6 +13,7 @@ import { canAccessAdmin } from './utils/permissions';
 import { getStaffSession, saveStaffSession, clearStaffSession } from './utils/staffAuth';
 import { Language, getTranslation } from './translations';
 import { getStoredProducts, setStoredProducts } from './utils/localProductStorage';
+import { trackVisitorHeartbeat, trackVisitorProductView } from './utils/visitorAnalytics';
 
 // Sub components — eagerly loaded (always needed)
 import Header from './components/Header';
@@ -267,7 +268,24 @@ export default function App() {
   const saveCart = (newCart: CartItem[]) => {
     setCart(newCart);
     localStorage.setItem('just_smile_cart', JSON.stringify(newCart));
+    const totalCount = newCart.reduce((acc, it) => acc + it.quantity, 0);
+    trackVisitorHeartbeat(currentUser, { cartItemsCount: totalCount, forceSync: true });
   };
+
+  // --- 1b. Visitor & Engagement Heartbeat ---
+  useEffect(() => {
+    const cartCount = cart.reduce((acc, it) => acc + it.quantity, 0);
+    trackVisitorHeartbeat(currentUser, { incrementPageView: true, cartItemsCount: cartCount });
+
+    const interval = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        const currentCartCount = cart.reduce((acc, it) => acc + it.quantity, 0);
+        trackVisitorHeartbeat(currentUser, { cartItemsCount: currentCartCount, forceSync: true });
+      }
+    }, 150_000); // every 2.5 minutes
+
+    return () => clearInterval(interval);
+  }, [activeTab, currentUser?.uid]);
 
   // --- 2. Initialize Firebase authentication state listener ---
   useEffect(() => {
@@ -1257,6 +1275,10 @@ export default function App() {
     let updated = [product.id, ...recentlyViewed.filter((id) => id !== product.id)].slice(0, 8);
     setRecentlyViewed(updated);
     localStorage.setItem('just_smile_recent_viewed', JSON.stringify(updated));
+
+    // Track product view in visitor analytics
+    const currentCartCount = cart.reduce((acc, it) => acc + it.quantity, 0);
+    trackVisitorProductView(product, currentUser, currentCartCount);
   };
 
   const handleCloseProductDetails = () => {
