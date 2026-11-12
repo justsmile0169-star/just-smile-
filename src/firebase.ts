@@ -27,7 +27,7 @@ const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true
 });
 
-// Silence verbose internal Firebase SDK connection logs in browser console
+// Silence verbose internal Firebase SDK connection logs in br1owser console
 setLogLevel('silent');
 
 // Initialize Firebase Authentication

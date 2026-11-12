@@ -9,7 +9,10 @@ import { cleanFirestoreData } from '../utils/firestoreHelpers';
 import { hasPermission } from '../utils/permissions';
 import { ensureStaffFirebaseAuth, syncStaffDirectory } from '../utils/staffAuth';
 import { logActivity } from '../utils/activityLogger';
-import { deleteProductFully } from '../utils/productFirestore';
+import { deleteProductFully, findProductByCode } from '../utils/productFirestore';
+import { playScanBeep } from '../utils/barcodeGenerator';
+import { LinearBarcodeSvg } from './BarcodePrintView';
+import BarcodeScanner from './BarcodeScanner';
 import { getYalidineConfig, saveYalidineConfig, createYalidineParcel } from '../utils/yalidineService';
 import { compressImage } from '../utils/localProductStorage';
 import { uploadImageToCloud, migrateAllProductsToCloud, MigrationProgress } from '../utils/cloudImageStorage';
@@ -20,7 +23,8 @@ import {
   Trash2, Plus, Edit3, Check, X, FileSpreadsheet, Percent, Heart, ShieldAlert,
   Settings, Save, FileText, Stethoscope, ClipboardList, BarChart3, Wallet,
   History, Shield, Cloud, ImageIcon, Search, MessageSquare, Truck, Megaphone, Printer, Loader2, MapPin,
-  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload, Pencil, Clock, CheckCircle2, XCircle, User
+  ShoppingBag, ShoppingCart, Layers, Sliders, Eye, RefreshCw, Upload, Pencil, Clock, CheckCircle2, XCircle, User,
+  ScanBarcode, Camera
 } from 'lucide-react';
 
 // Lazy load heavy admin sub-components
@@ -460,6 +464,8 @@ export default function AdminDashboard({
   const [newOrderViewMode, setNewOrderViewMode] = useState<'list' | 'grid'>('list');
   const [newOrderPreviewImage, setNewOrderPreviewImage] = useState<{ url: string; title: string } | null>(null);
   const [recentlyAddedToNewOrderProductId, setRecentlyAddedToNewOrderProductId] = useState<string | null>(null);
+  const [showInvoiceCameraScanner, setShowInvoiceCameraScanner] = useState(false);
+  const [invoiceScanBanner, setInvoiceScanBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const newOrderCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -535,6 +541,112 @@ export default function AdminDashboard({
     setNewOrderCategoryFilter('all');
     setNewOrderStockFilter('all');
   };
+
+  // Scan a barcode directly into "Create New Invoice" (supports both main product barcode and variant barcode)
+  const handleScanBarcodeIntoNewOrder = (rawCode: string, qtyToAdd: number = 1): boolean => {
+    const clean = (rawCode || '').trim();
+    if (!clean) return false;
+
+    const activeProducts = (productsList || []).filter((p) => !p.isDeleted);
+
+    // 1. Check variant barcode match first
+    for (const prod of activeProducts) {
+      if (prod.isVariable && prod.variants && prod.variants.length > 0) {
+        const matchedVariant = prod.variants.find(
+          (v) => v.barcode && v.barcode.trim().toLowerCase() === clean.toLowerCase()
+        );
+        if (matchedVariant) {
+          playScanBeep('success');
+          handleAddProductToNewOrder(prod, matchedVariant, qtyToAdd);
+          setInvoiceScanBanner({
+            type: 'success',
+            message:
+              lang === 'fr'
+                ? `✓ Scanné et ajouté : ${prod.name} (${matchedVariant.name})`
+                : `✓ تم مسح وإضافة: ${prod.name} (${matchedVariant.name})`
+          });
+          setTimeout(() => setInvoiceScanBanner(null), 3200);
+          return true;
+        }
+      }
+    }
+
+    // 2. Check main product barcode / ID via findProductByCode
+    const matchedProd = findProductByCode(activeProducts, clean);
+    if (matchedProd) {
+      playScanBeep('success');
+      if (matchedProd.isVariable && matchedProd.variants && matchedProd.variants.length > 0) {
+        setNewOrderSelectedProduct(matchedProd);
+        setNewOrderProductSearch('');
+        setShowNewOrderProductDropdown(false);
+        setInvoiceScanBanner({
+          type: 'success',
+          message:
+            lang === 'fr'
+              ? `✓ Produit détecté : ${matchedProd.name} — choisissez la variante`
+              : `✓ تم التعرف على: ${matchedProd.name} — اختر المقاس/النوع المطلوب`
+        });
+      } else {
+        handleAddProductToNewOrder(matchedProd, undefined, qtyToAdd);
+        setInvoiceScanBanner({
+          type: 'success',
+          message:
+            lang === 'fr'
+              ? `✓ Code-barres scanné et ajouté : ${matchedProd.name} (+${qtyToAdd})`
+              : `✓ تم مسح الباركود وإضافة: ${matchedProd.name} (+${qtyToAdd})`
+        });
+      }
+      setTimeout(() => setInvoiceScanBanner(null), 3200);
+      return true;
+    }
+
+    playScanBeep('error');
+    setInvoiceScanBanner({
+      type: 'error',
+      message:
+        lang === 'fr'
+          ? `⚠️ Le code-barres (${clean}) n'est associé à aucun produit en stock`
+          : `⚠️ الباركود (${clean}) غير مسجل لأي منتج في المخزون`
+    });
+    setTimeout(() => setInvoiceScanBanner(null), 3800);
+    return false;
+  };
+
+  // Automatic Hardware USB Laser Scanner Listener inside "Create New Invoice"
+  useEffect(() => {
+    if (!showCreateOrderModal || showInvoiceCameraScanner) return;
+
+    let buffer = '';
+    let lastKeyTime = 0;
+
+    const handleGlobalUsbScan = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // If user is typing inside an input/textarea other than the product search input, ignore
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastKeyTime > 85) {
+        buffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length >= 3) {
+          e.preventDefault();
+          const code = buffer.trim();
+          buffer = '';
+          handleScanBarcodeIntoNewOrder(code, 1);
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalUsbScan);
+    return () => window.removeEventListener('keydown', handleGlobalUsbScan);
+  }, [showCreateOrderModal, showInvoiceCameraScanner, productsList, newOrderItems]);
 
   const handleDecrementNewOrderProduct = (product: Product, variant?: ProductVariant) => {
     const existingIndex = newOrderItems.findIndex(
@@ -1283,6 +1395,45 @@ export default function AdminDashboard({
     setPVariants(prev => prev.filter(v => v.id !== variantId));
   };
 
+  const [showProductFormCameraScanner, setShowProductFormCameraScanner] = useState(false);
+
+  // Automatic USB Laser Scanner Listener inside "Add / Edit Product" modal
+  // Allows scanning an existing factory barcode directly onto the product without generating a new one
+  useEffect(() => {
+    if (!showProductForm || showProductFormCameraScanner) return;
+
+    let buffer = '';
+    let lastKeyTime = 0;
+
+    const handleProductFormUsbScan = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastKeyTime > 85) {
+        buffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length >= 3) {
+          e.preventDefault();
+          const scannedFactoryCode = buffer.trim();
+          buffer = '';
+          playScanBeep('success');
+          setPBarcode(scannedFactoryCode);
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleProductFormUsbScan);
+    return () => window.removeEventListener('keydown', handleProductFormUsbScan);
+  }, [showProductForm, showProductFormCameraScanner]);
+
   // Generate a random EAN-13 style barcode
   const generateBarcode = () => {
     const base = '613' + String(Date.now()).slice(-9);
@@ -1293,6 +1444,7 @@ export default function AdminDashboard({
     }
     const checkDigit = (10 - (sum % 10)) % 10;
     setPBarcode(base + checkDigit);
+    playScanBeep('success');
   };
 
   const handleQuickStockUpdate = async (product: Product, delta: number) => {
@@ -4883,11 +5035,11 @@ export default function AdminDashboard({
                     <Search size={15} className="text-brand-cyan" />
                     <span>
                       {lang === 'fr'
-                        ? 'Moteur de Recherche Visuel & Catalogue Produits'
-                        : 'محرك البحث الذكي والكتالوج المصور للمنتجات'}
+                        ? 'Moteur de Recherche Visuel & Scanner POS'
+                        : 'محرك البحث الذكي والمسح المباشر بالباركود (USB / كاميرا)'}
                     </span>
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[10px] bg-white border border-slate-200 px-2.5 py-1 rounded-full text-slate-500 font-bold">
                       {lang === 'fr'
                         ? `${matchedNewOrderProducts.length} / ${productsList.filter((p) => !p.isDeleted).length} produits`
@@ -4895,8 +5047,18 @@ export default function AdminDashboard({
                     </span>
                     <button
                       type="button"
+                      onClick={() => setShowInvoiceCameraScanner(true)}
+                      className="px-3 py-1.5 rounded-xl text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-700 hover:to-teal-700 shadow-sm shadow-emerald-600/20"
+                    >
+                      <ScanBarcode size={14} />
+                      <span>
+                        {lang === 'fr' ? 'Scanner (Caméra / USB)' : 'مسح الباركود (كاميرا / USB)'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setShowNewOrderProductDropdown((prev) => !prev)}
-                      className={`px-3 py-1 rounded-xl text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-xl text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer ${
                         showNewOrderProductDropdown
                           ? 'bg-slate-800 text-white'
                           : 'bg-brand-cyan/10 text-brand-cyan hover:bg-brand-cyan/20'
@@ -4911,6 +5073,26 @@ export default function AdminDashboard({
                     </button>
                   </div>
                 </div>
+
+                {/* Live Barcode Scan Confirmation / Warning Banner */}
+                {invoiceScanBanner && (
+                  <div
+                    className={`flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-black border animate-in fade-in duration-150 ${
+                      invoiceScanBanner.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : 'bg-rose-50 border-rose-300 text-rose-700'
+                    }`}
+                  >
+                    <span>{invoiceScanBanner.message}</span>
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceScanBanner(null)}
+                      className="text-current opacity-60 hover:opacity-100"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
 
                 {/* Search Input + Quick Controls */}
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -4931,19 +5113,21 @@ export default function AdminDashboard({
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          const q = newOrderProductSearch.trim().toLowerCase();
-                          if (!q) return;
-                          // Exact barcode match first
-                          const exactBarcode = productsList.find(
-                            (p) => !p.isDeleted && p.barcode && p.barcode.trim().toLowerCase() === q
-                          );
-                          const targetProd = exactBarcode || (matchedNewOrderProducts.length === 1 ? matchedNewOrderProducts[0] : null);
-                          if (targetProd) {
+                          const raw = newOrderProductSearch.trim();
+                          if (!raw) return;
+                          // Try barcode lookup (main product or variant barcode) first
+                          const matchedByScan = handleScanBarcodeIntoNewOrder(raw, 1);
+                          if (matchedByScan) return;
+
+                          // Otherwise fallback to single search match
+                          if (matchedNewOrderProducts.length === 1) {
+                            const targetProd = matchedNewOrderProducts[0];
                             if (targetProd.isVariable && targetProd.variants && targetProd.variants.length > 0) {
                               setNewOrderSelectedProduct(targetProd);
                               setNewOrderProductSearch('');
                               setShowNewOrderProductDropdown(false);
                             } else {
+                              playScanBeep('success');
                               handleAddProductToNewOrder(targetProd, undefined, 1);
                             }
                           }
@@ -4951,8 +5135,8 @@ export default function AdminDashboard({
                       }}
                       placeholder={
                         lang === 'fr'
-                          ? 'Rechercher par nom, catégorie, code-barres, variante (Entrée = ajout rapide)...'
-                          : 'ابحث بالاسم، الفئة، الباركود، أو المقاس (اضغط Enter للإضافة السريعة بالباركود)...'
+                          ? 'Scannez au lecteur USB ou recherchez par nom, code-barres, catégorie...'
+                          : 'امسح مباشرة بقارئ الباركود (USB) أو ابحث بالاسم، الباركود، الفئة...'
                       }
                       className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pr-9 pl-8 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-brand-cyan shadow-2xs"
                     />
@@ -6436,50 +6620,96 @@ export default function AdminDashboard({
                 />
               </div>
 
-              {/* Barcode Generator */}
-              <div className="space-y-1">
-                <label className="text-slate-500 font-bold text-xs">{lang === 'fr' ? 'Code-barres (EAN)' : 'الباركود (EAN)'}</label>
-                <div className="flex gap-2">
+              {/* Barcode Generator + Factory Barcode Scanner + Live 1D Preview */}
+              <div className="space-y-2.5 bg-slate-50/90 p-3.5 rounded-2xl border border-slate-200/80">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-slate-700 font-extrabold text-xs flex items-center gap-1.5">
+                    <ScanBarcode size={15} className="text-brand-cyan" />
+                    <span>{lang === 'fr' ? 'Code-barres 1D (EAN-13 / Code-128 • Étiquette 40×20mm)' : 'الباركود الخطي للمنتج (1D Barcode • ملصق 40×20 ملم)'}</span>
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
+                    {lang === 'fr' ? 'Compatible lecteur USB & Caméra' : 'متوافق مع الماسح الضوئي وكاميرا الهاتف'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
                   <input
                     type="text"
                     value={pBarcode}
                     onChange={(e) => setPBarcode(e.target.value)}
-                    placeholder="6130987654321"
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:outline-hidden focus:border-brand-cyan font-mono text-sm"
+                    placeholder={lang === 'fr' ? 'Scannez le code usine ou générez un EAN-13...' : 'امسح باركود العلبة الأصلي بالـ USB أو اضغط توليد...'}
+                    dir="ltr"
+                    className="flex-1 min-w-[180px] bg-white border border-slate-200 rounded-xl py-2.5 px-3.5 focus:outline-hidden focus:border-brand-cyan font-mono font-bold text-sm text-slate-900"
                   />
                   <button
                     type="button"
-                    onClick={generateBarcode}
-                    title={lang === 'fr' ? 'Générer un code-barres automatique' : 'توليد باركود تلقائي'}
-                    className="shrink-0 flex items-center gap-1.5 bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30 font-bold text-xs px-3 py-2 rounded-xl transition-all"
+                    onClick={() => setShowProductFormCameraScanner(true)}
+                    title={lang === 'fr' ? 'Scanner le code-barres original du produit' : 'مسح الباركود الأصلي المطبوع على علبة المنتج بالكاميرا أو الماسح'}
+                    className="shrink-0 flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-3.5 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14" /><path d="M8 5v14" /><path d="M12 5v14" /><path d="M17 5v14" /><path d="M21 5v14" /></svg>
-                    {lang === 'fr' ? 'Générer' : 'توليد'}
+                    <Camera size={14} />
+                    <span>{lang === 'fr' ? 'Scanner Original 📷' : 'مسح باركود العلبة 📷'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={generateBarcode}
+                    title={lang === 'fr' ? 'Générer un nouveau code-barres EAN-13' : 'توليد باركود EAN-13 جديد للمنتجات التي ليس لها باركود'}
+                    className="shrink-0 flex items-center gap-1.5 bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30 font-black text-xs px-3 py-2.5 rounded-xl transition-all cursor-pointer"
+                  >
+                    <ScanBarcode size={14} />
+                    <span>{lang === 'fr' ? 'Générer' : 'توليد جديد'}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
+                      const codeToPrint = pBarcode.trim() || '613' + String(Date.now()).slice(-10);
+                      if (!pBarcode.trim()) setPBarcode(codeToPrint);
                       onPrintBarcode?.({
                         id: editingProduct?.id || 'temp',
                         name: pName || (lang === 'fr' ? 'Nouveau produit' : 'منتج جديد'),
-                        barcode: pBarcode.trim() || editingProduct?.id || 'temp',
+                        barcode: codeToPrint,
                         price: pPrice,
                         stock: pStock,
                         category: pCategory,
+                        expiryDate: pExpiry || undefined,
                         description: pDesc,
                         isDeleted: false,
                         isRoutineClinic: pIsRoutineClinic
                       });
                     }}
-                    title={lang === 'fr' ? 'Imprimer le code-barres' : 'طباعة الباركود'}
-                    className="shrink-0 flex items-center gap-1.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 border border-emerald-600/30 font-bold text-xs px-3 py-2 rounded-xl transition-all"
+                    title={lang === 'fr' ? 'Imprimer étiquette thermique 40x20mm' : 'معاينة وطباعة ملصق حراري 40×20 ملم'}
+                    className="shrink-0 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-3.5 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
                   >
                     <Printer size={14} />
-                    {lang === 'fr' ? 'Imprimer' : 'طباعة'}
+                    <span>{lang === 'fr' ? 'Étiquette 40×20' : 'طباعة ملصق 40×20'}</span>
                   </button>
                 </div>
-                <p className="text-[10px] text-slate-400">
-                  {lang === 'fr' ? 'Saisissez manuellement ou cliquez sur «Générer» pour un EAN-13 automatique.' : 'أدخل يدوياً أو اضغط «توليد» لإنشاء باركود EAN-13 تلقائي.'}
+
+                {/* Live 1D Barcode Vector Preview */}
+                {pBarcode.trim() && (
+                  <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="w-44 h-12 shrink-0 border border-slate-200 rounded-lg p-1 bg-white">
+                      <LinearBarcodeSvg code={pBarcode.trim()} height={26} showText={true} />
+                    </div>
+                    <div className={`text-[11px] text-slate-600 font-medium leading-relaxed flex-1 ${lang === 'fr' ? 'text-left' : 'text-right'}`}>
+                      <p className="font-extrabold text-slate-800">
+                        {lang === 'fr'
+                          ? '✓ Code-barres linéaire (1D) prêt pour le scan et l’impression'
+                          : '✓ باركود خطي (1D Barcode) جاهز للمسح والطباعة'}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {lang === 'fr'
+                          ? "S'il s'agit du code d'origine de la boîte, aucune impression n'est requise, ou cliquez sur « Étiquette 40×20 » pour imprimer sur rouleau thermique."
+                          : 'إذا كان هذا باركود المصنع الأصلي فلا حاجة لطباعة ملصق جديد، أو اضغط «طباعة ملصق 40×20» للورق الحراري.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[10px] text-slate-500 font-medium">
+                  {lang === 'fr'
+                    ? 'Astuce : Scannez directement le code-barres original du produit avec votre lecteur USB ou la caméra sans en générer un nouveau.'
+                    : '💡 ملاحظة: للمنتجات التي تحتوي على باركود أصلي في العلبة، امسحه مباشرة بالماسح الضوئي (USB) أو اضغط «مسح باركود العلبة 📷» دون توليد باركود جديد.'}
                 </p>
               </div>
 
@@ -6791,6 +7021,64 @@ export default function AdminDashboard({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Camera / USB Barcode Scanner Modal for "Create New Invoice" (POS Mode) */}
+      {showInvoiceCameraScanner && (
+        <BarcodeScanner
+          lang={lang}
+          products={productsList}
+          user={currentUser}
+          mode="invoice_pos"
+          onAddToCart={(product, qty) => handleAddProductToNewOrder(product, undefined, qty)}
+          onInvoiceScanProduct={(product, qty) => {
+            if (product.isVariable && product.variants && product.variants.length > 0) {
+              setNewOrderSelectedProduct(product);
+              setShowInvoiceCameraScanner(false);
+            } else {
+              handleAddProductToNewOrder(product, undefined, qty);
+              setInvoiceScanBanner({
+                type: 'success',
+                message:
+                  lang === 'fr'
+                    ? `✓ Code-barres scanné et ajouté : ${product.name} (+${qty})`
+                    : `✓ تم مسح الباركود وإضافة: ${product.name} (+${qty})`
+              });
+              setTimeout(() => setInvoiceScanBanner(null), 3200);
+            }
+          }}
+          onPrintBarcode={(product) => {
+            setShowInvoiceCameraScanner(false);
+            onPrintBarcode?.(product);
+          }}
+          onCreateProduct={(barcode) => {
+            setShowInvoiceCameraScanner(false);
+            localStorage.setItem('justsmile_new_product_barcode', barcode);
+            handleOpenProductForm();
+          }}
+          onClose={() => setShowInvoiceCameraScanner(false)}
+        />
+      )}
+
+      {/* Camera / USB Barcode Scanner Modal for "Add / Edit Product" (Scan Existing Factory Barcode) */}
+      {showProductFormCameraScanner && (
+        <BarcodeScanner
+          lang={lang}
+          products={productsList}
+          user={currentUser}
+          mode="pick_raw_code"
+          onPickRawCode={(scannedFactoryCode) => {
+            setPBarcode(scannedFactoryCode);
+            setShowProductFormCameraScanner(false);
+          }}
+          onAddToCart={() => {}}
+          onPrintBarcode={() => {}}
+          onCreateProduct={(barcode) => {
+            setPBarcode(barcode);
+            setShowProductFormCameraScanner(false);
+          }}
+          onClose={() => setShowProductFormCameraScanner(false)}
+        />
       )}
 
     </div>
